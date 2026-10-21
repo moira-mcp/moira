@@ -43,14 +43,14 @@ describe("codespaceErrorMessage", () => {
   test.each([
     [
       "en",
-      "Environment preparation did not finish. Delete this codespace; after deletion is confirmed, you can create a new one.",
+      "Environment preparation did not finish. Repair the reported prerequisite, then resume setup of this same codespace. Its files and original creation result are preserved.",
     ],
     [
       "ru",
-      "Подготовка среды не завершена. Удалите этот кодспейс; после подтверждения удаления можно создать новый.",
+      "Подготовка среды не завершена. Исправьте указанную причину и продолжите подготовку этого же кодспейса. Его файлы и исходный результат создания сохраняются.",
     ],
   ])(
-    "incomplete local preparation directs %s readers to confirmed deletion before replacement",
+    "incomplete local preparation directs %s readers to same-environment recovery",
     async (language, expected) => {
       await i18n.changeLanguage(language);
       const error = serverError(

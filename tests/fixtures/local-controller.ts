@@ -6,7 +6,10 @@ import { policyForSpace } from "../../packages/local/src/space-record.js";
 import { requireLocalGrant, GiB, publicPolicy } from "../../packages/local/src/policy.js";
 import type { ControllerIdentity } from "../../packages/shared/src/codespaces/local-controller-protocol.js";
 import { createWorkspaceClient } from "../../packages/web-backend/src/services/workspace-client.js";
-import { jsonResponse } from "../../packages/web-backend/src/services/workspace-router.js";
+import {
+  jsonResponse,
+  type WorkspaceClient,
+} from "../../packages/web-backend/src/services/workspace-router.js";
 import { localFixture } from "../integration/local/fixtures.js";
 import { randomUUID } from "node:crypto";
 
@@ -15,8 +18,16 @@ export async function controllerFixture(directory: string, identity: ControllerI
   const state = await PrivateState.open(directory),
     local = await localFixture(state);
   local.policy.deviceId = identity.deviceId;
-  local.policy.leaseUntil = Date.now() + 3600000;
   await state.write("policy.json", local.policy);
+  // Physical admission is controlled below; retain the original machine facts
+  // that the real runner establishes before serving live settings changes.
+  local.space.admittedMachine = {
+    cpuCores: local.policy.runtime.cpuCores,
+    memoryBytes: local.policy.runtime.memoryBytes,
+    dockerBytes: local.policy.runtime.dockerBytes,
+  };
+  local.space.admittedRepositoryFullName = local.policy.repositories[0].fullName;
+  await local.records.put(local.space);
   await state.write("connection.json", { ...identity, origin: "https://moira.example" });
   const manager = new LocalManager(local.records);
   manager.open = async () => undefined;
@@ -38,6 +49,8 @@ export async function controllerFixture(directory: string, identity: ControllerI
           generation: space.generation,
           phase: space.phase,
           failure: space.failure,
+          ...(space.remote ? { remote: space.remote } : {}),
+          ...(space.setupFailure ? { setupFailure: space.setupFailure } : {}),
           desiredState: space.desiredState,
           state:
             space.phase === "deleted"
@@ -66,7 +79,7 @@ export async function controllerFixture(directory: string, identity: ControllerI
   manager.start = async (id, onAdmitted) => {
     const space = await local.records.get(id);
     if (!space) throw new Error("Controlled native space is absent");
-    requireLocalGrant(await local.records.policy(), space.repositoryId, Date.now());
+    requireLocalGrant(await local.records.policy(), space.repositoryId);
     space.desiredState = "running";
     space.phase = "stopped";
     space.generation++;
@@ -87,7 +100,7 @@ export async function controllerFixture(directory: string, identity: ControllerI
   };
   manager.create = async (repositoryId, ref, operationMarker, onAdmitted) => {
     const policy = await local.records.policy();
-    requireLocalGrant(policy, repositoryId, Date.now());
+    requireLocalGrant(policy, repositoryId);
     const id = randomUUID(),
       space = {
         ...local.space,
@@ -128,7 +141,6 @@ export async function controllerFixture(directory: string, identity: ControllerI
       memoryBytes: 8 * GiB,
       storageBytes: 64 * GiB,
       dockerBytes: 8 * GiB,
-      maxLeaseMs: 3600000,
     },
     true,
   );
@@ -136,6 +148,21 @@ export async function controllerFixture(directory: string, identity: ControllerI
     endpoint = await startLocalController(controller);
   const wire = createWorkspaceClient(endpoint.socketPath);
   const client = {
+    request: ((userId, deviceId, input, signal) =>
+      wire.request(
+        userId,
+        deviceId,
+        {
+          ...input,
+          headers: {
+            ...input.headers,
+            "x-moira-device-id": deviceId,
+            "x-moira-device-generation": String(identity.deviceGeneration),
+            "x-moira-connection-id": identity.connectionId,
+          },
+        },
+        signal,
+      )) satisfies WorkspaceClient["request"],
     async json(
       userId: string,
       deviceId: string,

@@ -10,6 +10,7 @@ export type WorkspaceRepositoryBinding = {
 };
 
 export type WorkspaceOwnerOptions = {
+  ownerSelector?: import("../../shared/src/codespaces/workspace-references.mjs").OwnerSelector;
   stateRoot: string;
   binding: WorkspaceRepositoryBinding;
   releaseIdentity?: string;
@@ -55,6 +56,15 @@ type Consume<T> = (range: {
   size: number;
 }) => Promise<T>;
 export interface WorkspaceOwner {
+  semantic(
+    action: string,
+    request: Value,
+    options?: { requestId?: string; signal?: AbortSignal; source?: AsyncIterable<Uint8Array> },
+  ): Promise<Value>;
+  operation_find(request?: Value): Promise<Value>;
+  configureRemote(
+    configuration?: Pick<WorkspaceOwnerOptions, "publicationScope" | "communicationTransport">,
+  ): Promise<void>;
   execute(body: Value): Promise<Value>;
   nativeUpload(body: Value): Promise<Value>;
   write(input: {

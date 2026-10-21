@@ -2,6 +2,7 @@ import {
   canonicalJson,
   getSqliteInstance,
   WorkspaceAuthRepository,
+  CodespaceResourceError,
   type CommunicationOwnerScope,
 } from "@mcp-moira/shared";
 import { getLocalDeviceService } from "./codespace-services.js";
@@ -12,7 +13,12 @@ export async function authenticateCommunicationOwner(bearer: string): Promise<vo
   let workspace;
   try {
     workspace = new WorkspaceAuthRepository(getSqliteInstance()).authenticate(bearer);
-  } catch {
+  } catch (error) {
+    if (
+      !(error instanceof CodespaceResourceError) ||
+      error.code !== "CODESPACE_AUTHORIZATION_REQUIRED"
+    )
+      throw error;
     // Device and workspace credentials have separate existing stores, never an MCP fallback.
   }
   if (workspace) {

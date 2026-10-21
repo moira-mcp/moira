@@ -548,7 +548,9 @@ export const Settings: React.FC = () => {
                       className="space-y-4"
                     >
                       <GitHubCodespaceSettings onConsumeOutcome={consumeGitHubOutcome} />
-                      <CodespaceBillingFromData />
+                      <CodespaceBillingFromData
+                        active={tab === "development" && development === "github"}
+                      />
                     </div>
                   </TabsContent>
                   <TabsContent

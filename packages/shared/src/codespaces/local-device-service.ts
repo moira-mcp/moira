@@ -6,6 +6,7 @@ import {
   localControlRequestSchema,
   localDeviceControlViewSchema,
   assertAgentRepositoryAdmission,
+  repositoryAdmissionProof,
   type LocalRepositoryAdmissionReceipt,
 } from "./local-management-types.js";
 import {
@@ -97,6 +98,13 @@ export type LocalControllerSnapshot = Extract<
   { state?: "configured" }
 > &
   Omit<ControllerSnapshot, "local" | "github">;
+/** Read-only owner evidence shared only by projections of one caller request. */
+export interface LocalDeviceObservation {
+  readonly userId: string;
+  snapshot(deviceId: string): Promise<ControllerSnapshot>;
+  localSnapshot(deviceId: string): Promise<LocalControllerSnapshot>;
+  listOwned(): Promise<ReturnType<LocalDeviceService["listRegistered"]>>;
+}
 type ActiveDevice = LocalDeviceView & {
   owner: Extract<LocalDeviceView["owner"], { state: "available" }> & {
     local: Extract<
@@ -107,7 +115,7 @@ type ActiveDevice = LocalDeviceView & {
 };
 export type LocalCredentialRetirement =
   | { kind: "device" }
-  | { kind: "settings"; throughRevision: number }
+  | { kind: "settings" }
   | { kind: "resource"; resourceId: string; throughGeneration: number };
 
 /** One current owner observation used throughout a single Git authorization decision. */
@@ -117,7 +125,7 @@ export interface LocalGitAuthorization {
   resourceGeneration: number;
   ownerResourceGeneration: number;
   appliedRevision: number;
-  useUntil: number;
+  useUntil: null;
   repository: LocalPublicPolicy["repositories"][number];
 }
 
@@ -140,11 +148,34 @@ export class LocalDeviceService {
     return this.repository.listOwned(userId, this.now());
   }
   async listOwned(userId: string) {
-    const registered = this.listRegistered(userId);
-    return {
-      ...registered,
-      devices: await Promise.all(registered.devices.map((device) => this.project(device))),
+    return this.createObservation(userId).listOwned();
+  }
+  createObservation(userId: string): LocalDeviceObservation {
+    const snapshots = new Map<string, Promise<ControllerSnapshot>>();
+    const observation: LocalDeviceObservation = {
+      userId,
+      snapshot: async (deviceId) => {
+        let pending = snapshots.get(deviceId);
+        if (!pending) {
+          pending = this.snapshot(userId, deviceId);
+          snapshots.set(deviceId, pending);
+        }
+        // A previously validated response is not authority for a new registration.
+        return this.validateSnapshot(userId, deviceId, await pending);
+      },
+      localSnapshot: async (deviceId) =>
+        this.projectLocalSnapshot(await observation.snapshot(deviceId)),
+      listOwned: async () => {
+        const registered = this.listRegistered(userId);
+        return {
+          ...registered,
+          devices: await Promise.all(
+            registered.devices.map((device) => this.project(device, observation)),
+          ),
+        };
+      },
     };
+    return observation;
   }
   beginEnrollment(userId: string) {
     const pairingToken = randomBytes(32).toString("base64url");
@@ -236,7 +267,9 @@ export class LocalDeviceService {
     return snapshot;
   }
   async localSnapshot(userId: string, deviceId: string): Promise<LocalControllerSnapshot> {
-    const snapshot = await this.snapshot(userId, deviceId);
+    return this.projectLocalSnapshot(await this.snapshot(userId, deviceId));
+  }
+  private projectLocalSnapshot(snapshot: ControllerSnapshot): LocalControllerSnapshot {
     if (snapshot.local.state !== "configured")
       throw new LocalDeviceError(
         "LOCAL_UNAVAILABLE",
@@ -253,10 +286,15 @@ export class LocalDeviceService {
       observedAt: snapshot.observedAt,
     };
   }
-  private async project(device: LocalDeviceView): Promise<LocalDeviceView> {
+  private async project(
+    device: LocalDeviceView,
+    observation?: LocalDeviceObservation,
+  ): Promise<LocalDeviceView> {
     if (device.status !== "active") return device;
     try {
-      const snapshot = await this.snapshot(device.userId, device.deviceId);
+      const snapshot = observation
+        ? await observation.snapshot(device.deviceId)
+        : await this.snapshot(device.userId, device.deviceId);
       return this.projectSnapshot(device, snapshot);
     } catch (error) {
       if (!(error instanceof LocalDeviceError) || error.code !== "LOCAL_UNAVAILABLE") throw error;
@@ -369,6 +407,8 @@ export class LocalDeviceService {
           "WORKSPACE_OUTCOME_UNCONFIRMED",
           "WORKSPACE_OUTCOME_UNKNOWN",
           "LOCAL_CUSTODY_UNCONFIRMED",
+          "LOCAL_CREATE_UNKNOWN",
+          "LOCAL_GUEST_SETTLEMENT_UNKNOWN",
         ].includes(code) ||
           scopedCredentialFailureOutcome(code) === "unconfirmed")
       )
@@ -381,6 +421,11 @@ export class LocalDeviceService {
         throw new CodespaceResourceError(
           "CODESPACE_GENERATION_CONFLICT",
           operation.outcome.error.message,
+        );
+      if (lifecycle && code === "LOCAL_SETUP_INCOMPLETE")
+        throw new CodespaceResourceError(
+          "CODESPACE_LOCAL_SETUP_INCOMPLETE",
+          "The known environment's preparation is incomplete; repair its prerequisite and resume setup.",
         );
       throw new LocalDeviceError(
         code === "LOCAL_UNAUTHORIZED" ||
@@ -412,7 +457,6 @@ export class LocalDeviceService {
     );
     await this.retireDeviceCredentials?.(userId, deviceId, {
       kind: "settings",
-      throughRevision: input.expectedRevision,
     });
     return this.projectResult(userId, deviceId, result);
   }
@@ -424,7 +468,11 @@ export class LocalDeviceService {
       { method: "GET", path: "/v1/controller/operations/" + requestId },
       requestId,
     );
-    return operation.state === "completed" && operation.outcome?.ok
+    // Journal results are original evidence, not a source of current policy. A historical
+    // successful result remains collectable even when its policy shape is no longer current.
+    return operation.state === "completed" &&
+      operation.outcome?.ok &&
+      snapshotSchema.safeParse(operation.outcome.result).success
       ? { ...operation, result: this.projectResult(userId, deviceId, operation.outcome.result) }
       : operation;
   }
@@ -471,11 +519,25 @@ export class LocalDeviceService {
         throw new LocalDeviceError("LOCAL_CONFLICT", "Repository request identity changed.");
       // Admission metadata can precede the physical policy write. Its presence is
       // not a certificate that this original owner operation completed successfully.
-      const original = this.projectResult(
-        userId,
-        deviceId,
+      // Read only the admission proof from the immutable original result. Its old policy
+      // fields are not accepted as current settings or rewritten during collection.
+      const original = repositoryAdmissionProof(
         this.completed(await this.getOperation(userId, deviceId, "ws1-" + input.requestId)),
+        {
+          userId,
+          deviceId,
+          deviceGeneration: device.deviceGeneration,
+          connectionId: device.connectionId,
+          requestId: input.requestId,
+          creationRequestId: input.creationRequestId,
+          githubRepositoryId: input.githubRepositoryId,
+        },
       );
+      if (canonicalJson(original.receipt) !== canonicalJson(previous))
+        throw new LocalDeviceError(
+          "LOCAL_CONFLICT",
+          "The original repository admission is not confirmed.",
+        );
       const applied = device.owner.local.policy.repositories.find(
         (repository) => repository.id === previous.localRepositoryId,
       );
@@ -489,7 +551,7 @@ export class LocalDeviceService {
           "The original repository grant is not currently applied on its owner.",
         );
       if (input.creationRequestId) {
-        this.repository.validateRepositoryCreation(userId, original, {
+        this.repository.validateRepositoryCreation(userId, original.identity, {
           creationRequestId: input.creationRequestId,
           requestId: input.requestId,
           githubRepositoryId: input.githubRepositoryId,
@@ -637,7 +699,6 @@ export class LocalDeviceService {
       resource.repositoryId !== binding.repositoryId ||
       !grant ||
       !snapshot.policy.enabled ||
-      snapshot.policy.leaseUntil <= this.now() ||
       (action === "push" && !grant.allowPush) ||
       (action === "pull_request" && grant.allowPullRequests !== true)
     )
@@ -656,7 +717,7 @@ export class LocalDeviceService {
       resourceGeneration: resource.routeGeneration,
       ownerResourceGeneration: resource.resourceGeneration,
       appliedRevision: snapshot.control.appliedRevision,
-      useUntil: snapshot.policy.leaseUntil,
+      useUntil: null,
       repository: grant,
     };
   }

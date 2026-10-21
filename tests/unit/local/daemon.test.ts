@@ -17,6 +17,7 @@ function fixture() {
   };
   const manager = {
     close: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    release: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
     stopWork: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
     records: {
       state: {
@@ -26,9 +27,8 @@ function fixture() {
       policy: async () => ({
         deviceId: connection.deviceId,
         enabled: true,
-        leaseUntil: Date.now() + 60_000,
       }),
-      policyOrNull: async () => ({ enabled: true, leaseUntil: Date.now() + 60_000 }),
+      policyOrNull: async () => ({ enabled: true }),
       deviceIdentity: async () => ({ deviceId: connection.deviceId, label: "controller" }),
     },
   } as unknown as LocalManager;
@@ -39,6 +39,7 @@ function fixture() {
       error instanceof LocalRefusal && error.code === "LOCAL_RELAY_UNAVAILABLE",
   } as unknown as LocalRelay;
   const controllerClose = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+  const controllerDetach = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
   const controllerRetire = jest.fn<() => Promise<void>>().mockImplementation(async () => {
     await manager.stopWork();
   });
@@ -50,6 +51,7 @@ function fixture() {
       connectionId: connection.connectionId,
       incarnation: "b".repeat(64),
       close: controllerClose,
+      detach: controllerDetach,
       retire: controllerRetire,
     }),
     startRemote: () => ({ close: remoteClose, whenConnected: async () => undefined }),
@@ -67,6 +69,35 @@ function fixture() {
 }
 
 describe("Local controller survives observation loss without native replay", () => {
+  test("service observation loss releases attachments before draining original controller work", async () => {
+    const f = fixture(),
+      abort = new AbortController();
+    f.confirmed.mockResolvedValue(f.connection);
+    let settle!: () => void;
+    const attachment = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    (f.manager.release as ReturnType<typeof jest.fn<() => Promise<void>>>).mockImplementation(
+      async () => {
+        settle();
+      },
+    );
+    let drained = false;
+    f.controllerClose.mockImplementation(async () => {
+      await attachment;
+      drained = true;
+    });
+    await new LocalDaemon(f.manager, f.relay, {
+      ...f.options,
+      wait: async () => {
+        abort.abort();
+      },
+    }).run(abort.signal, () => false);
+    expect(drained).toBe(true);
+    expect(f.controllerRetire).not.toHaveBeenCalled();
+    expect(f.manager.stopWork).not.toHaveBeenCalled();
+    expect(f.manager.close).not.toHaveBeenCalled();
+  });
   test("a paired controller without Local capability remains connected without opening or stopping an SDK", async () => {
     const f = fixture();
     f.manager.records.policyOrNull = async () => null;
@@ -90,15 +121,15 @@ describe("Local controller survives observation loss without native replay", () 
     expect(f.controllerClose).not.toHaveBeenCalled();
     expect(f.remoteClose).not.toHaveBeenCalled();
   });
-  test("confirmed revocation fences owned work and retires the authenticated controller", async () => {
+  test("confirmed revocation closes remote authority without manufacturing a physical stop", async () => {
     const f = fixture();
     f.confirmed.mockRejectedValueOnce(new LocalDeviceAuthorityFailure("LOCAL_UNAUTHORIZED"));
     const daemon = new LocalDaemon(f.manager, f.relay, f.options);
     expect(await daemon.cycle()).toBe(false);
     expect(daemon.status).toEqual({ controlPlane: "disabled", code: "LOCAL_UNAUTHORIZED" });
-    expect(f.manager.stopWork).toHaveBeenCalledTimes(1);
+    expect(f.manager.stopWork).not.toHaveBeenCalled();
     expect(f.controllerClose).toHaveBeenCalledTimes(1);
-    expect(f.controllerRetire).toHaveBeenCalledTimes(1);
+    expect(f.controllerRetire).not.toHaveBeenCalled();
     expect(f.remoteClose).toHaveBeenCalledTimes(1);
     f.confirmed.mockRejectedValueOnce(
       new LocalRefusal("LOCAL_RELAY_UNAVAILABLE", "offline after revocation"),

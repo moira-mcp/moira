@@ -7,7 +7,7 @@ import { ControllerState } from "./controller-state.js";
 import {
   controllerIdentitySchema,
   controllerResourceRegistrationSchema,
-  githubControllerResourceSchema,
+  githubAssignmentSchema,
   githubProviderActionSchema,
   githubResourceAuthoritySchema,
   githubProvisionProofSchema,
@@ -310,7 +310,7 @@ export class LocalRelay {
         "LOCAL_IDENTITY_CHANGED",
         "Git requires its original locally admitted native space.",
       );
-    requireSpaceGrant(await this.records.policy(), space, Date.now());
+    requireSpaceGrant(await this.records.policy(), space);
     const state = new ControllerState(this.records);
     await state.importBindings(connection);
     const binding = await state.forSpace(space, connection);
@@ -338,7 +338,7 @@ export class LocalRelay {
   async githubAssignment(resourceId: string, signal?: AbortSignal, purpose?: "adopt" | "retire") {
     uuid.parse(resourceId);
     const connection = await this.confirmed(signal);
-    return githubControllerResourceSchema.parse(
+    return githubAssignmentSchema.parse(
       await this.json(
         connection,
         `/${resourceId}/assignment${purpose ? `?purpose=${purpose}` : ""}`,
@@ -405,15 +405,19 @@ export class LocalRelay {
       signal,
     );
   }
-  async enrollGitHubWorkspace(resourceId: string, proof: GitHubProvisionProof) {
+  async enrollGitHubWorkspace(
+    resourceId: string,
+    proof: GitHubProvisionProof,
+    signal?: AbortSignal,
+  ) {
     uuid.parse(resourceId);
-    const connection = await this.confirmed();
+    const connection = await this.confirmed(signal);
     const credential = workspaceBootstrapCredentialSchema.parse(
       await this.json(
         connection,
         `/${resourceId}/enroll`,
         githubProvisionProofSchema.parse(proof),
-        undefined,
+        signal,
         "github",
       ),
     );
@@ -679,7 +683,7 @@ export class LocalRelay {
             "The scoped Git credential authority changed.",
           );
       },
-      // Disposal uses its captured authenticated binding even after physical work/lease is stopped.
+      // Disposal uses its captured authenticated binding even after explicit local disable or stop.
       dispose: async () => {
         try {
           await this.disposeGitCredential(connection, input, child.credentialId);

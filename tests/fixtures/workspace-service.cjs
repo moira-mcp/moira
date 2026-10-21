@@ -76,7 +76,7 @@ async function start(value) {
     );
   });
   child.stdin.end(`import {startWorkspaceService} from ${JSON.stringify(serviceUrl)};
-    const options=${JSON.stringify({ socketPath: value.socketPath, stateRoot: value.stateRoot, binding: value.binding, searchExecutable: value.searchExecutable, publicationScope: value.publicationScope })};
+    const options=${JSON.stringify({ socketPath: value.socketPath, stateRoot: value.stateRoot, binding: value.binding, searchExecutable: value.searchExecutable, publicationScope: value.publicationScope, ownerSelector: value.ownerSelector })};
     const remoteOptions=${JSON.stringify(value.remote ?? null)};
     if(remoteOptions){const {createOwnerCommunicationTransport}=await import(${JSON.stringify(pathToFileURL(resolve("packages/workspace-service/src/communication-transport.mjs")).href)});options.communicationTransport=createOwnerCommunicationTransport(remoteOptions);}
     const sourceFixture=${JSON.stringify(value.sourceFixture ?? null)};

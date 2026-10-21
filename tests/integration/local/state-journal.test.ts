@@ -18,7 +18,7 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import { PrivateState } from "../../../packages/local/src/private-state.js";
+import { PrivateState, hostBootIdentity } from "../../../packages/local/src/private-state.js";
 import { LocalRecords } from "../../../packages/local/src/space-record.js";
 import { localFixture } from "./fixtures.js";
 
@@ -152,7 +152,10 @@ describe("private local state", () => {
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
     const gate = await lstat(join(root, "runner-gate.lock"));
-    expect(await readFile(join(root, "runner.lock"), "utf8")).toBe(String(process.pid));
+    expect(JSON.parse(await readFile(join(root, "runner.lock"), "utf8"))).toEqual({
+      pid: process.pid,
+      boot: await hostBootIdentity(),
+    });
     for (const result of results) if (result.status === "fulfilled") await result.value();
     const release = await state.lock();
     const nextGate = await lstat(join(root, "runner-gate.lock"));
@@ -201,7 +204,10 @@ describe("private local state", () => {
       await expect(state.lock()).rejects.toThrow("Another companion owns");
       const release = await state.lock({ recoverStale: true });
       try {
-        expect(await readFile(join(root, "runner.lock"), "utf8")).toBe(String(process.pid));
+        expect(JSON.parse(await readFile(join(root, "runner.lock"), "utf8"))).toEqual({
+          pid: process.pid,
+          boot: await hostBootIdentity(),
+        });
         expect(await state.read("job-unknown.json", (value) => value)).toEqual(job);
         await expect(state.lock()).rejects.toThrow("Another companion owns");
       } finally {
@@ -229,6 +235,35 @@ describe("private local state", () => {
     await expect(state.write("link.json", {})).rejects.toThrow("Unsafe local state replacement");
     expect(await readFile(join(root, "outside"), "utf8")).toBe("host-data");
     await expect(state.write("../outside.json", {})).rejects.toThrow("Invalid local state key");
+  });
+  test("a retained previous-boot PID is not adopted or mistaken for an unrelated current process", async () => {
+    const currentBoot = await hostBootIdentity();
+    await writeFile(
+      join(root, "runner.lock"),
+      JSON.stringify({ pid: process.pid, boot: currentBoot }),
+      { mode: 0o600 },
+    );
+    await expect(state.lock({ recoverStale: true })).rejects.toThrow("Another companion owns");
+    const priorBoot = randomUUID();
+    expect(priorBoot).not.toBe(currentBoot);
+    const original = { unknown: true, identity: "retained-original" };
+    await state.write("job-prior-boot.json", original);
+    await writeFile(
+      join(root, "runner.lock"),
+      JSON.stringify({ pid: process.pid, boot: priorBoot }),
+      { mode: 0o600 },
+    );
+    const release = await state.lock({ recoverStale: true });
+    try {
+      expect(JSON.parse(await readFile(join(root, "runner.lock"), "utf8"))).toEqual({
+        pid: process.pid,
+        boot: currentBoot,
+      });
+      expect(await state.read("job-prior-boot.json", (value) => value)).toEqual(original);
+      expect(process.kill(process.pid, 0)).toBe(true);
+    } finally {
+      await release();
+    }
   });
   test.each([
     ["same instance", "write"],

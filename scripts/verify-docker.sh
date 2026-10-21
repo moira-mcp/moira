@@ -56,15 +56,10 @@ npm run test:api:ci-saas
 npm run test:mcp-tools:ci-saas
 
 echo "🏠 Self-host container on port $SELF_HOST_PORT for the two self-host-only API files"
-# Start from an empty database every time. CI always has one; a contributor's machine keeps this
-# directory between runs, and a database left by an earlier checkout carries that checkout's applied
-# migrations — so a renumbered or amended migration is re-applied against a schema that already has
-# it, the container starts degraded, and the suite fails with errors that have nothing to do with
-# the change under test.
-rm -rf data-self-host
-mkdir -p data-self-host
-docker run --name "$SELF_HOST" -p "$SELF_HOST_PORT:80" --env-file "$CI_ENV_FILE" \
-  -v "$(pwd)/workflows:/app/workflows" -v "$(pwd)/data-self-host:/app/data" \
+# A fresh container owns this authentication fixture's empty database. No host data directory is
+# reused or deleted; persistent recovery is exercised separately by the reconciliation lifecycle.
+docker run --name "$SELF_HOST" -p "127.0.0.1:$SELF_HOST_PORT:80" --env-file "$CI_ENV_FILE" \
+  -v "$(pwd)/workflows:/app/workflows" \
   -e DEPLOYMENT_MODE=self-host -e MOIRA_HOST="localhost:$SELF_HOST_PORT" \
   -e STATIC_ARTIFACTS_DOMAIN="static.localhost:$SELF_HOST_PORT" \
   -e MCP_PORT=3000 -e WEB_BACKEND_PORT=3001 -e WEB_FRONTEND_PORT=3002 \

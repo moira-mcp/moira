@@ -342,69 +342,70 @@ int main(int argc, char **argv) {
     const char *path = argv[i + (vm ? 4 : 3)];
     int result = capture(&owners[i], root, exe, path, vm);
     if (result) {
-      for (int known = 0; known < i; known++) if (send_signal(&owners[known], SIGTERM)) return 3;
-      if (await_exit(owners, i, 3000)) {
-        for (int known = 0; known < i; known++) if (send_signal(&owners[known], SIGKILL)) return 3;
-        if (await_exit(owners, i, 3000)) return 3;
-      }
+      /* Observation refusal releases this process's handles, never the observed peers. */
       return result == -2 ? 4 : 2;
     }
   }
   char container[65] = {0};
 #ifdef __APPLE__
   if (vm && (count != 1 || container_id(&owners[0], exe, container))) {
-    if (send_signal(&owners[0], SIGTERM) || await_exit(owners, count, 3000)) {
-      if (send_signal(&owners[0], SIGKILL) || await_exit(owners, count, 3000)) return 3;
-    }
     return 2;
   }
 #endif
   if (vm) printf("{\"ready\":true,\"containerId\":\"%s\"}\n", container);
   else puts("{\"ready\":true}");
   fflush(stdout);
-  /* A dead parent closes this pipe. Only fixed check/stop words are admitted. */
-  char command[6] = {0};
+  /* Losing an observer releases handles. Only an explicit stop signals peers. */
+  char command[8] = {0};
   size_t n = 0;
+  int stopping = 0, valid = 1, retired = 0;
   for (;;) {
-    int retired = 0;
-    for (int i = 0; i < count; i++) retired |= !held(&owners[i], exe);
-    if (retired) {
-      puts("{\"retired\":true}");
-      fflush(stdout);
-      n = 0;
-      break;
+    if (!retired) {
+      for (int i = 0; i < count; i++) retired |= !held(&owners[i], exe);
+      if (retired) {
+        /* Keep the original handles: only explicit stop may establish settlement. */
+        puts("{\"retired\":true}");
+        fflush(stdout);
+      }
     }
     struct pollfd input = { .fd = STDIN_FILENO, .events = POLLIN };
     int available = poll(&input, 1, 100);
     if (available < 0 && errno == EINTR) continue;
-    if (available < 0) return 3;
+    if (available < 0) { valid = 0; break; }
     if (!available) continue;
     ssize_t bytes = read(STDIN_FILENO, command + n, 1);
     if (bytes < 0 && errno == EINTR) continue;
-    if (bytes <= 0) break;
+    if (bytes <= 0) { valid = bytes == 0 && n == 0; break; }
     n += (size_t)bytes;
     if (command[n - 1] == '\n') {
       if (n == 6 && !memcmp(command, "check\n", 6)) {
-        int valid = 1;
-        for (int i = 0; i < count; i++) valid &= held(&owners[i], exe);
+        int valid = !retired;
+        for (int i = 0; valid && i < count; i++) valid &= held(&owners[i], exe);
 #ifdef __APPLE__
         if (vm) { char current[65]; valid &= !container_id(&owners[0], exe, current) && !strcmp(current, container); }
 #endif
-        if (!valid) { puts("{\"retired\":true}"); fflush(stdout); n = 0; break; }
-        puts("{\"held\":true}"); fflush(stdout);
+        if (!valid && !retired) {
+          retired = 1;
+          puts("{\"retired\":true}"); fflush(stdout);
+        } else if (valid) { puts("{\"held\":true}"); fflush(stdout); }
         n = 0;
         continue;
       }
+      if (n == 5 && !memcmp(command, "stop\n", 5)) stopping = 1;
+      else if (n != 8 || memcmp(command, "release\n", 8)) valid = 0;
       break;
     }
-    if (n == sizeof(command)) break;
+    if (n == sizeof(command)) { valid = 0; break; }
   }
-  int valid = !n || (n == 5 && !memcmp(command, "stop\n", 5));
+  if (!stopping) {
+    puts("{\"released\":true}");
+    return valid ? 0 : 2;
+  }
   for (int i = 0; i < count; i++) if (send_signal(&owners[i], SIGTERM)) return 3;
   if (await_exit(owners, count, 3000)) {
     for (int i = 0; i < count; i++) if (send_signal(&owners[i], SIGKILL)) return 3;
     if (await_exit(owners, count, 3000)) return 3;
   }
-  if (valid) puts("{\"settled\":true}");
-  return valid ? 0 : 2;
+  puts("{\"settled\":true}");
+  return 0;
 }

@@ -1,16 +1,16 @@
 import { isAbsolute } from "node:path";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { gitFetchRefSchema } from "../../shared/src/codespaces/git-ref.js";
 import type { LocalManagementOutcome } from "../../shared/src/codespaces/local-protocol.js";
 import {
-  MAX_LOCAL_WORK_LEASE_MS,
   localGitAuthorSchema,
+  agentRepositoryManagementSchema,
 } from "../../shared/src/codespaces/local-management-types.js";
 
 export const LOCAL_PROTOCOL_VERSION = 1 as const;
 export const LOCAL_PROVIDER = "local-sandboxes" as const;
 export const SUPPORTED_SBX_VERSION = "0.46.0";
-export const MAX_LEASE_MS = MAX_LOCAL_WORK_LEASE_MS;
 export const GiB = 1024 ** 3;
 
 const hasControl = (value: string): boolean =>
@@ -48,9 +48,9 @@ export const localRepositorySchema = z
   .strict();
 export type LocalRepository = z.infer<typeof localRepositorySchema>;
 
-export const localPolicySchema = z
+const policyFields = z
   .object({
-    version: z.literal(1),
+    version: z.literal(2),
     deviceId: z.string().uuid(),
     label: z
       .string()
@@ -58,7 +58,8 @@ export const localPolicySchema = z
       .max(80)
       .refine((value) => !hasControl(value)),
     enabled: z.boolean(),
-    leaseUntil: z.number().int().safe().nonnegative(),
+    appliedRevision: z.number().int().safe().nonnegative().default(0),
+    agentRepositoryManagement: agentRepositoryManagementSchema.nullable().default(null),
     gitAuthor: localGitAuthorSchema.nullable().optional(),
     runtime: z
       .object({
@@ -76,23 +77,44 @@ export const localPolicySchema = z
       .strict(),
     repositories: z.array(localRepositorySchema),
   })
-  .strict()
-  .superRefine((value, context) => {
-    const ids = new Set(value.repositories.map((repository) => repository.id));
-    const names = new Set(
-      value.repositories.map((repository) => repository.fullName.toLowerCase()),
-    );
-    if (ids.size !== value.repositories.length || names.size !== value.repositories.length) {
-      context.addIssue({ code: "custom", message: "Duplicate local repository grants" });
-    }
-    if (value.runtime.dockerBytes >= value.runtime.maxStorageBytes) {
-      context.addIssue({
-        code: "custom",
-        message: "Storage must also hold the guest root filesystem",
-      });
-    }
-  });
+  .strict();
+function validatePolicy(value: z.infer<typeof policyFields>, context: z.RefinementCtx): void {
+  const ids = new Set(value.repositories.map((repository) => repository.id));
+  const names = new Set(value.repositories.map((repository) => repository.fullName.toLowerCase()));
+  if (ids.size !== value.repositories.length || names.size !== value.repositories.length) {
+    context.addIssue({ code: "custom", message: "Duplicate local repository grants" });
+  }
+  if (value.runtime.dockerBytes >= value.runtime.maxStorageBytes) {
+    context.addIssue({
+      code: "custom",
+      message: "Storage must also hold the guest root filesystem",
+    });
+  }
+}
+export const localPolicySchema = policyFields.superRefine(validatePolicy);
+/** Exact former private storage shape; never accepted as a current wire request. */
+export const legacyLocalPolicySchema = policyFields
+  .omit({ appliedRevision: true, agentRepositoryManagement: true })
+  .extend({ version: z.literal(1), leaseUntil: z.number().int().safe().nonnegative() })
+  .superRefine((value, context) =>
+    validatePolicy(
+      { ...value, version: 2, appliedRevision: 0, agentRepositoryManagement: null },
+      context,
+    ),
+  );
 export type LocalPolicy = z.infer<typeof localPolicySchema>;
+
+/** Machine defaults are not physical custody; admitted VMs retain their own machine. */
+export function physicalRuntimeProfile(policy: Pick<LocalPolicy, "deviceId" | "runtime">) {
+  const { binary, template, storageRoot, maxStorageBytes } = policy.runtime;
+  return { deviceId: policy.deviceId, runtime: { binary, template, storageRoot, maxStorageBytes } };
+}
+
+export function localRuntimeProfileHash(policy: Pick<LocalPolicy, "deviceId" | "runtime">): string {
+  return createHash("sha256")
+    .update(JSON.stringify(physicalRuntimeProfile(policy)))
+    .digest("hex");
+}
 
 export class LocalRefusal extends Error {
   constructor(
@@ -105,16 +127,9 @@ export class LocalRefusal extends Error {
   }
 }
 
-export function requireLocalGrant(
-  policy: LocalPolicy,
-  repositoryId: string,
-  now: number,
-): LocalRepository {
+export function requireLocalGrant(policy: LocalPolicy, repositoryId: string): LocalRepository {
   if (!policy.enabled)
     throw new LocalRefusal("LOCAL_DISABLED", "Enable work on this computer locally.");
-  if (policy.leaseUntil <= now || policy.leaseUntil > now + MAX_LEASE_MS) {
-    throw new LocalRefusal("LOCAL_LEASE_EXPIRED", "Renew the work lease on this computer.");
-  }
   const repository = policy.repositories.find((item) => item.id === repositoryId);
   if (!repository)
     throw new LocalRefusal("LOCAL_REPOSITORY_DENIED", "Approve this repository locally.");
@@ -135,7 +150,6 @@ export function publicPolicy(policy: LocalPolicy) {
     deviceId: policy.deviceId,
     label: policy.label,
     enabled: policy.enabled,
-    leaseUntil: policy.leaseUntil,
     repositories: policy.repositories,
     machine: {
       name: "local-approved",

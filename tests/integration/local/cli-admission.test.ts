@@ -43,7 +43,7 @@ test.each([
   },
 );
 
-test.each(["create", "start"] as const)(
+test.each(["create", "start", "resume-setup"] as const)(
   "packaged supported %s refuses before dispatch when the initialized owner has no paired controller",
   async (command) => {
     const root = await realpath(await mkdtemp(join(tmpdir(), "moira-cli-owner-")));

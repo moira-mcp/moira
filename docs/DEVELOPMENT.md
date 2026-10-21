@@ -43,20 +43,34 @@ npm run workspace:verify:guest
 `local:build` emits the CLI, independent guard, fixed runtime API, configuration bundle,
 native ownership/credential helpers and verified workspace payload under `packages/local/dist`.
 Do not copy a single JavaScript entry without its companion assets.
+The guest payload includes `request-retirement.mjs`, shared by the owner and detached collector;
+keep it with the complete built release so terminal input cleanup works after an observer exits.
 `workspace:verify:guest` packages the common Linux service and exercises actual installation,
 startup acknowledgment, Unix health/CLI, binary files, repository ownership and shutdown in an
 offline container. It is not proof of microVM isolation or physical SDK lifecycle.
-Building mutable checkout assets does not replace a running host owner. Install a complete immutable
-executable release before selecting its `cli.js` in the launcher; an asset directory outside the
-checkout is supported. Keep initialized companion state, SDK HOME/storage/profile, credentials,
+Building mutable checkout assets does not replace a running host owner. `npm run local -- install`
+stages the complete immutable closure, including its copied Node executable, under the selected
+state's `service-releases/`. The macOS login registration starts the active release in a dedicated
+security session; ordinary staging does not reload that registration or replace an active owner.
+`npm run local -- run` starts or connects and returns. `service-status` reports the actual running
+release and staged selection, readiness and failure independently of client lifetime.
+Keep initialized companion state, SDK HOME/storage/profile, credentials,
 grants and VM disks at their existing paths. Do not copy stale ignored worker outputs as release assets.
 Host runtime validation requires the supported macOS SDK and locally approved
 state. Linux VM execution fails closed before creation.
 
+Keep runtime/configuration in the existing ignored local layout. Do not clear controller or guest
+active indexes, original receipts or unknown archives to recover a fixture or installed owner.
+Terminal cleanup removes only proved temporary input bulk; immutable comparison evidence,
+original results and full command output remain. Guest daemon diagnostic rotation is separate;
+its locations and bounds are documented in [LOGGING.md](LOGGING.md#guest-workspace-daemon-diagnostics).
+
 The common workspace service owns ordinary command/file/session execution in both providers.
 The Local controller owns physical lifecycle/settings through private Unix HTTP and live routing;
-The selected paired controller performs GitHub fixed trusted bootstrap and provider management;
-cloud services do not run an SSH connector.
+The selected paired controller saves GitHub machine and idle/retention choices before provider
+submission and performs fixed trusted bootstrap and provider management. Cloud services broker
+fixed provider calls, recheck current account authority and billing ownership before an effect,
+and retain unresolved billable outcomes; they do not run an SSH connector or choose the machine.
 Neither is a command transport. Changes to lifecycle or guest behavior must preserve
 durable replay receipts, independent kernel ownership and unknown-outcome fences;
 an injected test runtime does not establish physical SDK isolation. Use root
@@ -67,13 +81,19 @@ and controller owner programs with `build-workspace-service.js`. It does not dow
 guest archives or GitHub toolchains or package renderer dependencies. Complete payload
 packaging and the packaged guest verifier remain separate checks; this prerequisite
 does not run the SDK or validate a microVM.
-Host `create OWNER/REPO --ref BRANCH`, `start SPACE_ID`, `stop SPACE_ID` and
-`remove SPACE_ID --confirm` use the running owner controller. Raw `request` envelopes are
-unsupported. Supply `--request-id ws1-<lowercase UUID>` to choose a lifecycle identity;
-otherwise the CLI chooses one and prints it before observing the effect. After a lost reply,
-run `collect REQUEST_ID` with that original identity instead of repeating the mutation.
+Host `workspaces` returns captured workspace observations and the current controller reference.
+`observe WORKSPACE_REF` refreshes a selection; `start WORKSPACE_REF`, `resume-setup WORKSPACE_REF`,
+`stop WORKSPACE_REF`, `remove WORKSPACE_REF --confirm` and `adopt WORKSPACE_REF` retain the supplied
+observation. `create OWNER/REPO --ref BRANCH` selects an approved Local repository. Ordinary
+lifecycle calls mint their original identity once and return an operation reference; raw `request`
+envelopes and caller `--request-id` are unsupported for them. After uncertainty, use
+`collect OPERATION_REF` or `operations CONTROLLER_REF` with optional kind/query/cursor filters,
+then inspect the selected original rather than repeating the mutation. Guest operations remain
+with the guest CLI or cloud `operation_get`; the host does not substitute another owner.
+Discovery rows expose only operation reference, state, kind and safe intent descriptor; full results
+require explicit collection.
 Existing owner-admitted VMs and their `~/.local/bin/moira-workspace` CLI remain subject to
-local grants and leases while cloud transport is unavailable. Confirmed authority refusal
+local grants and enabled permission while cloud transport is unavailable. Confirmed authority refusal
 does not permit offline fallback. Fresh host create requires cloud route registration and
 initial Git credential authority; a verified Git identity cache is restricted to existing
 VMs. MCP requires a live authenticated owner and queues no offline lifecycle/settings work.
@@ -81,8 +101,52 @@ Current account/device/repository authority gates remote admission and routing. 
 management retains its own local approval guards; existing offline work retains its finite
 owner grants, while fresh creation requires cloud registration. Readiness is configuration
 observation, not an administrative stop/control surface.
-Use host `recover` for explicit local custody recovery. Active lifecycle/command/mutation IDs
-use ws1; repository-admission UUIDs are a different domain.
+Use `resume-setup WORKSPACE_REF` after repairing a known incomplete guest's prerequisite: it continues the same
+VM/disk and preserves the original create result and user files. Unknown creation is collected,
+not adopted or retried. Use host `recover` for separate explicit local custody recovery. Acknowledging
+an initial unknown guest outcome on the exact stopped VM retains incomplete setup; follow it with
+explicit `resume-setup`, not ordinary start.
+GitHub setup continuation also uses the original saved proof and generation. The measured root,
+guest life and release must still match; continuation neither loads a host payload nor installs
+or starts the provider environment. A never-enrolled guest whose life changed cannot mint a
+replacement proof. An enrolled guest instead renews from its installed authority in the existing
+remote connection loop before opening CONTROL; DATA uses that established credential epoch.
+A working guest Unix API does not await workspace credentials or cloud CONTROL. Optional enrollment
+acquisition runs outside both local work lanes; applying a response revalidates the original runtime,
+generation, repository, grant and controller connection. Warm author input comes from configured or
+exact retained local state; initial private checkout still needs current authorization. Later enrollment
+reloads the same owner without restarting accepted commands. Remote calls still require current
+authority and a live route.
+Private lifecycle/command/mutation journals use ws1 identities; repository-admission UUIDs are a
+different internal domain. Ordinary callers copy returned references rather than choosing either.
+
+The persistent service contains the daemon/controller, native guard and broker/tunnel. Client exit
+and native observation release do not authorize physical stop; `released` is not `settled`.
+Explicit physical-owner replacement uses `maintenance --confirm` only within an approved interruption.
+Collect its printed original identity with `collect REQUEST_ID`; never manufacture a fresh update
+after a lost reply. It preserves VM/disk identities and intended state, confirms exact old custody
+settlement, selects the staged release, then reports per-VM restored/unavailable outcomes without
+command replay. Unconfirmed settlement blocks replacement. Native setup/login/recovery can instead
+use `maintenance --pause --confirm` and, after the original receipt is `paused`, resume using
+`maintenance --resume --request-id ORIGINAL_REQUEST_ID --confirm`. Commands such as
+`login --new-store` still require disabled work; a pause does not enable work.
+Privileged collection also accepts original IDs from `status.credentialRequests`. It observes the
+original security request and retains the existing recovered-child cleanup rules, without minting
+another credential or replaying Git. A missing privileged record is locally absent, never a raw
+lifecycle lookup; issuer unavailability remains an error.
+
+Cold-owner startup observes surviving workers and recovers only verified known intended-running
+VMs. Login startup after a host reboot requires the original storage and available SDK credentials;
+it does not preserve guest boot identity or replay pre-reboot work. Runner markers and native receipts
+include kernel boot identity, with exact profile checks and the physical gate retained. A retained
+legacy owner/endpoint requires explicit backed-up initial cutover, never PID-only adoption or manual
+lock removal. See [owner updates and recovery](CODESPACES.md#owner-web-control-and-bundle-updates).
+
+The native machine-Keychain helper verifies the effective no-idle-timeout interval and sleep-lock
+policy only for the owned SDK store, including an existing store after successful saved-password
+unlock. Do not infer policy from the native `useLockInterval` boolean alone, change personal Keychain
+selection, print passwords, or rotate an unreadable store automatically. Dedicated-session startup
+does not replace a genuine vendor authentication requirement.
 
 The Local build bundles the common fixed Git/typed PR primitive into the trusted host
 broker. It uses private repository/action-scoped child credentials from the live issuer;
@@ -96,8 +160,10 @@ token bytes are not active authority and must not be erased during binding migra
 new issuance or Git/PR replay. Collection of a live stream is metadata-only; orphan
 retirement requires the existing runner-lock and confirmed owner-absence proof.
 Retain original identities across custody/outcome/disposal uncertainty and await actual
-upstream closure before disposal. Do not describe a local lease deadline as provider
-expiry or assume that parent revocation automatically revokes a derived child.
+upstream closure before disposal. Local permission has no work deadline; the child's actual
+provider and parent expiration still bound use. An unrelated settings revision preserves unchanged
+credential authority; device/resource/grant revocation still retires affected children.
+Do not assume that parent revocation automatically revokes a derived child.
 
 ### Common workspace payload
 
@@ -111,6 +177,12 @@ with its 256 KiB budget. Do not restore cloud Buffer files or archive quotas.
 The owner release also carries `owner-renderer.mjs`, the binary extension handler host and process-group supervisor. Renderer dependencies are private packaged Sharp/libvips and font assets, independent of project `node_modules` and cloud authentication/database configuration. `renderOwnerProgress` sets its packaged font configuration before loading the rasterizer. Local host assets use the `owner-runtime` directory; the guest uses its installed `service` assets. Preserve the complete release and asset manifest rather than copying a JavaScript entry alone.
 
 Binary-extension packaging uses the existing esbuild/registry path: installed handler code, canonical manifest and declared regular assets form one immutable artifact. The private owner installs only its checked digest and runs `binaryHandler` under the packaged supervisor. Native/platform or unresolved dynamic dependencies that cannot form the supported owner artifact are refused before delivery admission.
+
+Binary-handler runtime settings use one shared projection before both broker export and child
+invocation: secret aliases and every operation's recipient/base-URL setting are excluded, while
+declared nonsecret format settings remain. This does not rewrite the installed manifest or alter
+the ordinary text-extension runner. The owner chooses and validates the complete attachment/text
+plan before vendor staging; an explicitly unsupported kind or no eligible delivery is a refusal.
 
 ```bash
 npm run workspace:build
@@ -145,19 +217,32 @@ uses the existing same-UID trust boundary, not a sandbox against authorized comm
 The installed `moira-workspace` CLI supports:
 
 ```bash
-moira-workspace pull-request-create --request-id ws1-00000000-0000-4000-8000-000000000001 pr-input.json
-# Collect the original result without resubmitting the create input:
-moira-workspace pull-request-create --request-id ws1-00000000-0000-4000-8000-000000000001
-moira-workspace pull-request-get 1
-moira-workspace pull-request-find feature/example main
+moira-workspace pr-create feature/example main "Describe the change" --body description.md
+# Set OPERATION_REF to the returned reference and collect without resubmitting:
+moira-workspace get "$OPERATION_REF"
+moira-workspace find --kind pull-request --query "feature/example"
+moira-workspace pr-get 1
+moira-workspace pr-find feature/example main
 ```
 
-Choose a fresh original ID for each authorized create. `pr-input.json` contains
-`head`, `base`, `title`, optional `body` and `draft`; it contains no token, repository
-override or provider URL. An uncertain creation requires original receipt collection
-and exact head/base inspection, not automatic recreation. Security acquisition has its
-own original request identity; its uncertainty before vendor dispatch is not a PR
-mutation result. Direct CLI calls and MCP use the same owner operations and receipts.
+Each CLI effect is a new intent with an internally minted identity. `--body` reads a file or
+stdin (`-`); `--draft` is optional. An uncertain creation requires original collection and exact
+head/base inspection, not automatic recreation. If the first reply is lost, discovery returns safe
+intent labels for explicit candidate selection, without returning candidate outcome payloads;
+command text cannot prove which original ran.
+Security acquisition retains its separate `security_operation` reference. Discovery and exact
+collection use one pure owner-observation classifier: credential custody/disposal and vendor
+uncertainty remain unconfirmed, while a confirmed non-start remains a completed refusal.
+
+The guest CLI implicitly selects its fixed Unix owner. It exposes ordinary `exec`, `get`, `find`,
+`output`, `stop`, session and guarded file commands through the same `/v1/tools` semantic adapter
+used by MCP. It accepts no raw JSON dispatcher or caller mutation IDs. `read` and output windows
+preserve complete UTF-8 characters and returned cursors; stale file cursors/replacement references
+conflict without refreshing the observation. Text patches match one immutable original and reject
+ambiguous or overlapping edits. Binary upload and raw stdin retain framed streaming; native
+descriptors are read from stdin by `native-upload`, `exec --native-stdin` and `deliver --native`.
+`download` derives a basename/MIME default and retains native resource-link metadata. Internal
+byte-range endpoints remain available for their actual private consumers.
 
 See [System architecture](SYSTEM.md#local-codespace-composition-and-ownership),
 [API contracts](API.md#local-device-enrollment-and-controller-api) and
@@ -222,6 +307,11 @@ an ignore entry in the same change that proves its replacement passes the
 corresponding removal trigger above.
 
 ### Docker Build Configuration
+
+`scripts/docker-build-and-run.sh` publishes local development ports on `127.0.0.1` by default.
+Set `DOCKER_BIND_ADDRESS` explicitly when another binding is required; remote deployment keeps
+its public binding. `scripts/verify-docker.sh` creates fresh self-host container storage rather
+than deleting a shared host data directory for authentication fixtures.
 
 **Build IDs for cache isolation:**
 

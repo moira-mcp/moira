@@ -14,6 +14,7 @@ import { getLocalDeviceService } from "./codespace-services.js";
 import { getControllerClient, getWorkspaceClient } from "./workspace-client.js";
 import { authorizeWorkspacePublication } from "./workspace-services.js";
 import type { WorkspaceClient } from "./workspace-router.js";
+import { encodeReference } from "@mcp-moira/shared/workspace-references";
 
 function ownerFailure(
   error: unknown,
@@ -147,6 +148,7 @@ export class LiveCommunicationFileOwner implements CommunicationFileOwner {
     client: WorkspaceClient;
     id: string;
     owner: { device_id?: string; codespace_id?: string };
+    scope?: Extract<CommunicationOwnerScope, { kind: "controller" }>;
   }> {
     if (owner.resourceId) {
       if (
@@ -165,6 +167,7 @@ export class LiveCommunicationFileOwner implements CommunicationFileOwner {
       client: this.dependencies.controller(),
       id: selected.deviceId,
       owner: { device_id: selected.deviceId },
+      scope: selected,
     };
   }
   async submit(userId: string, value: CommunicationOwnerSubmit, deviceId?: string) {
@@ -179,17 +182,36 @@ export class LiveCommunicationFileOwner implements CommunicationFileOwner {
         reference.kind === "controller" ? { deviceId: reference.id } : { resourceId: reference.id },
       );
     } else actor = await this.actor(userId, { deviceId });
+    const selectedScope = input.expectedScope ?? actor.scope;
+    const operation =
+      input.action === "deliver" && selectedScope?.kind === "controller"
+        ? encodeReference("operation", {
+            owner: {
+              kind: "controller",
+              deviceId: selectedScope.deviceId,
+              connectionId: selectedScope.connectionId,
+            },
+            requestId: input.requestId,
+            kind: "delivery",
+          })
+        : undefined;
+    const selectedInput =
+      !input.expectedScope && actor.scope ? { ...input, expectedScope: actor.scope } : input;
     try {
       return {
         ...(await actor.client.json(userId, actor.id, {
           method: "POST",
           path: "/v1/communication",
-          body: input,
+          body: selectedInput,
         })),
         ...actor.owner,
+        ...(operation ? { operation } : {}),
       };
     } catch (error) {
-      return ownerFailure(error, input.requestId, actor.owner);
+      return {
+        ...ownerFailure(error, input.requestId, actor.owner),
+        ...(operation ? { operation } : {}),
+      };
     }
   }
   async collect(

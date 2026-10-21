@@ -58,10 +58,17 @@ export const settingsGuide: GuideDefinition = {
       prepare: { section: "development-environments" },
     },
     {
+      id: "environment-views",
+      anchor: "settings.environment-views",
+      kind: "look",
+      revision: 1,
+      prepare: { section: "development-environments" },
+    },
+    {
       id: "local-devices",
       anchor: "settings.local-devices",
       kind: "look",
-      revision: 9,
+      revision: 11,
       prepare: { section: "integrations-local" },
     },
     {
@@ -113,7 +120,7 @@ export const githubSetupGuide: GuideDefinition = {
       id: "codespaces",
       anchor: "settings.codespaces",
       kind: "look",
-      revision: 4,
+      revision: 6,
       prepare: { section: "development-environments" },
     },
     {

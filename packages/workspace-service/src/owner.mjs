@@ -23,6 +23,14 @@ import {
 } from "../../shared/src/codespaces/workspace-request-id.ts";
 import { validateOwnerPullRequestInput } from "./github-owner.mjs";
 import { readPrivateOwnerJson as optionalJson } from "./private-json.mjs";
+import { createSemanticOwner } from "./semantic-owner.mjs";
+import { sameFileIdentity } from "./file-primitives.mjs";
+import {
+  assertRequestIdentity,
+  initializeActiveRequests,
+  retainActiveRequest,
+  retireRequestInput,
+} from "./request-retirement.mjs";
 
 const DEFAULT_SEARCH_RESPONSE_BYTES = 1024 * 1024;
 
@@ -54,6 +62,7 @@ export async function createWorkspaceOwner({
   sourceProxy,
   sourceOpener = openNativeFile,
   publicationScope,
+  ownerSelector,
   pullRequest,
   collectCredentialRequest,
   communicationTransport,
@@ -109,6 +118,7 @@ export async function createWorkspaceOwner({
     refuse("UNSAFE_STATE", 409);
   await engine.persistDirectory(engineRoot);
   await engine.persistDirectory(requestsRoot);
+  const recoveryRequests = await initializeActiveRequests(stateRoot, requestsRoot);
   const lanes = new Map();
   const launches = new Map();
   const sourceAbort = new globalThis.AbortController();
@@ -147,6 +157,7 @@ export async function createWorkspaceOwner({
     )
       refuse("UNSAFE_STATE", 409);
     await engine.persistDirectory(directory);
+    await assertRequestIdentity(directory);
     return directory;
   };
   const assertLife = async () => {
@@ -172,8 +183,6 @@ export async function createWorkspaceOwner({
       }
       if (expectedSize !== null && size !== expectedSize) refuse("CONTENT_SIZE_MISMATCH", 409);
       await handle.sync();
-      const identity = await handle.stat();
-      await handle.close();
       const receipt = { size, sha256: hash.digest("hex") };
       if (previous) {
         if (previous.size !== receipt.size || previous.sha256 !== receipt.sha256)
@@ -182,10 +191,11 @@ export async function createWorkspaceOwner({
       }
       await rename(temporary, target);
       await engine.writeDurableJson(directory, "input.json", receipt);
-      await engine.writeDurableJson(directory, "input-identity.json", {
-        dev: identity.dev,
-        ino: identity.ino,
-      });
+      await engine.writeDurableJson(
+        directory,
+        "input-identity.json",
+        engine.fileIdentity(await handle.stat({ bigint: true })),
+      );
       return receipt;
     } finally {
       await handle.close().catch(() => undefined);
@@ -211,9 +221,12 @@ export async function createWorkspaceOwner({
     })();
   const operation = async (requestId) => {
     id(requestId);
-    const directory = await requestDirectory(requestId);
+    const directory = join(requestsRoot, requestId);
     const accepted = await optionalJson(join(directory, "accepted.json"));
-    if (!accepted) return { requestId, state: "absent" };
+    if (!accepted) {
+      await assertRequestIdentity(directory);
+      return { requestId, state: "absent" };
+    }
     if (accepted.kind === "security-acquisition") {
       const record =
         typeof collectCredentialRequest === "function"
@@ -230,6 +243,7 @@ export async function createWorkspaceOwner({
     if (recorded && !(accepted.kind === "exec" && recorded.state === "unknown")) {
       if (accepted.kind !== "exec" && recorded.state === "succeeded")
         await engine.withFileCommitLock(() => engine.cleanupFileTransaction(directory));
+      await retireRequestInput({ directory });
       return { requestId, ...recorded };
     }
     const result =
@@ -237,6 +251,7 @@ export async function createWorkspaceOwner({
         ? await engine.inspect({ version: 1, remoteMarker: marker(requestId) })
         : ((await optionalJson(join(directory, "result.json"))) ?? { state: "outcome_unknown" });
     const status = result;
+    if (accepted.kind === "exec") await retire(requestId);
     return {
       requestId,
       ...status,
@@ -345,15 +360,35 @@ export async function createWorkspaceOwner({
       throw error;
     }
   };
-  const commitWrite = (requestId, directory, path, expected, staged, source) =>
+  const accept = async (directory, record) => {
+    if (["exec", "write", "native-upload", "patch"].includes(record.kind))
+      await retainActiveRequest(directory);
+    try {
+      await engine.writeDurableJson(directory, "accepted.json", record);
+    } catch (error) {
+      if (["exec", "write", "native-upload", "patch"].includes(record.kind))
+        throw Object.assign(error, { publicCode: "WORKSPACE_OUTCOME_UNCONFIRMED", status: 503 });
+      throw error;
+    }
+  };
+  const retire = (requestId) =>
+    retireRequestInput({
+      directory: join(requestsRoot, requestId),
+      resultDirectory: join(engineRoot, marker(requestId)),
+    });
+  const commitWrite = (requestId, directory, path, expected, staged, source, intent) =>
     journalOutcome(directory, async () => {
-      await engine.writeDurableJson(directory, "accepted.json", {
+      await accept(directory, {
         kind: source ? "native-upload" : "write",
         path,
         expected,
         size: staged.size,
         sha256: staged.sha256,
         environmentIdentity: life,
+        intent: {
+          ...(intent ?? { kind: "file-change", description: `Write ${path}` }),
+          createdAt: Date.now(),
+        },
         ...(source ? { source, digest: digest({ path, expected, source }) } : {}),
       });
       await engine.withFileCommitLock(async () => {
@@ -370,11 +405,12 @@ export async function createWorkspaceOwner({
       };
       await engine.writeDurableJson(directory, "result.json", result);
       await engine.withFileCommitLock(() => engine.cleanupFileTransaction(directory));
+      await retireRequestInput({ directory });
       return { requestId, ...result };
     });
   let publications, communication;
   const pullRequestAction = async (body) => {
-    if (Object.keys(body).some((key) => !["action", "input", "requestId"].includes(key)))
+    if (Object.keys(body).some((key) => !["action", "input", "requestId", "intent"].includes(key)))
       refuse("INVALID_PULL_REQUEST_INPUT");
     if (typeof pullRequest !== "function") refuse("CODESPACE_PROVIDER_UNAVAILABLE", 503);
     if (body.action !== "pull_request_create") {
@@ -401,6 +437,10 @@ export async function createWorkspaceOwner({
           kind: "pull-request",
           digest: identity,
           environmentIdentity: life,
+          intent: {
+            ...(body.intent ?? { kind: "pull-request", description: "Create pull request" }),
+            createdAt: Date.now(),
+          },
         });
         let receipt;
         try {
@@ -446,7 +486,15 @@ export async function createWorkspaceOwner({
       );
       return journalOutcome(directory, async () => {
         try {
-          return await commitWrite(requestId, directory, body.path, body.expected, staged, source);
+          return await commitWrite(
+            requestId,
+            directory,
+            body.path,
+            body.expected,
+            staged,
+            source,
+            body.intent,
+          );
         } finally {
           await engine.cleanupStaged([staged]);
         }
@@ -478,7 +526,7 @@ export async function createWorkspaceOwner({
       const existing = await optionalJson(join(directory, "accepted.json"));
       if (existing && (existing.kind !== "exec" || existing.digest !== digest(canonical)))
         refuse("REQUEST_ID_CONFLICT", 409);
-      if (existing && native) return operation(requestId);
+      if (existing) return operation(requestId);
       const execution = {
         version: 1,
         action: "execute",
@@ -511,21 +559,36 @@ export async function createWorkspaceOwner({
         }
         if (input) {
           refusalReason = "INPUT_CHANGED";
+          if (
+            !Number.isSafeInteger(input.size) ||
+            input.size < 0 ||
+            !/^[a-f0-9]{64}$/.test(input.sha256)
+          )
+            refuse("INPUT_CHANGED", 409);
           const expectedIdentity = await optionalJson(join(directory, "input-identity.json"));
           inputHandle = await open(
             join(directory, "input"),
             constants.O_RDONLY | constants.O_NOFOLLOW,
           );
-          const info = await inputHandle.stat();
+          const info = await inputHandle.stat({ bigint: true });
+          const sameIdentity = expectedIdentity?.mtimeNs
+            ? sameFileIdentity(expectedIdentity, engine.fileIdentity(info))
+            : ["dev", "ino"].every((key) => {
+                const expected = expectedIdentity?.[key];
+                return (
+                  ((typeof expected === "string" && /^[0-9]+$/.test(expected)) ||
+                    (Number.isSafeInteger(expected) && expected >= 0)) &&
+                  BigInt(expected) === info[key]
+                );
+              });
           if (
             !info.isFile() ||
-            info.nlink !== 1 ||
-            info.uid !== process.getuid?.() ||
-            (info.mode & 0o077) !== 0 ||
-            info.size !== input.size ||
-            info.dev !== expectedIdentity?.dev ||
-            info.ino !== expectedIdentity?.ino ||
-            (await engine.hashRegular(inputHandle, info.size)) !== input.sha256
+            info.nlink !== 1n ||
+            info.uid !== BigInt(process.getuid()) ||
+            (info.mode & 0o077n) !== 0n ||
+            info.size !== BigInt(input.size) ||
+            !sameIdentity ||
+            (await engine.hashRegular(inputHandle, input.size)) !== input.sha256
           )
             refuse("INPUT_CHANGED", 409);
         }
@@ -536,17 +599,24 @@ export async function createWorkspaceOwner({
           directory,
           async () => {
             if (!existing) {
-              await engine.writeDurableJson(directory, "accepted.json", {
+              await accept(directory, {
                 kind: "exec",
                 digest: digest(canonical),
                 environmentIdentity: life,
+                intent: {
+                  ...(body.intent ?? { kind: "command", description: "Command" }),
+                  createdAt: Date.now(),
+                },
                 ...(native ? { source: native } : {}),
               });
               await engine.writeDurableJson(directory, "result.json", {
                 state: "not_started",
                 reason: refusalReason,
                 exitCode: null,
+                requestDigest: digest(canonical),
+                inputSettled: true,
               });
+              await retireRequestInput({ directory });
             }
             return operation(requestId);
           },
@@ -558,10 +628,14 @@ export async function createWorkspaceOwner({
         async () => {
           try {
             if (!existing)
-              await engine.writeDurableJson(directory, "accepted.json", {
+              await accept(directory, {
                 kind: "exec",
                 digest: digest(canonical),
                 environmentIdentity: life,
+                intent: {
+                  ...(body.intent ?? { kind: "command", description: "Command" }),
+                  createdAt: Date.now(),
+                },
                 ...(native ? { source: native } : {}),
               });
             if (await optionalJson(join(directory, "result.json"))) return operation(requestId);
@@ -569,13 +643,17 @@ export async function createWorkspaceOwner({
             const retainedInput = inputHandle;
             inputHandle = undefined;
             const launch = engine
-              .execute(execution, retainedInput?.fd)
+              .execute(execution, retainedInput?.fd, {
+                directory,
+                module: join(ownerRuntimeDirectory, "request-retirement.mjs"),
+              })
               // Only the engine's physical launch/result evidence decides the outcome.
               // Observer failure never publishes a second logical command result.
               .catch(() => undefined)
               .finally(async () => {
                 try {
                   await retainedInput?.close();
+                  await retire(requestId);
                 } finally {
                   if (launches.get(requestId) === launch) launches.delete(requestId);
                 }
@@ -592,7 +670,7 @@ export async function createWorkspaceOwner({
     });
     return result;
   };
-  const write = async ({ requestId, path, expected, source, expectedSize = null }) => {
+  const write = async ({ requestId, path, expected, source, expectedSize = null, intent }) => {
     id(requestId);
     const result = await inLane(requestId, async () => {
       const directory = await requestDirectory(requestId);
@@ -620,7 +698,7 @@ export async function createWorkspaceOwner({
         try {
           if (expectedSize !== null && staged.size !== expectedSize)
             refuse("CONTENT_SIZE_MISMATCH", 409);
-          return await commitWrite(requestId, directory, path, expected, staged);
+          return await commitWrite(requestId, directory, path, expected, staged, undefined, intent);
         } finally {
           await engine.cleanupStaged([staged]);
         }
@@ -639,10 +717,14 @@ export async function createWorkspaceOwner({
         return operation(requestId);
       }
       return journalOutcome(directory, async () => {
-        await engine.writeDurableJson(directory, "accepted.json", {
+        await accept(directory, {
           kind: "patch",
           digest: digest(body),
           environmentIdentity: life,
+          intent: {
+            ...(body.intent ?? { kind: "file-change", description: "Patch files" }),
+            createdAt: Date.now(),
+          },
         });
         let result;
         try {
@@ -669,6 +751,7 @@ export async function createWorkspaceOwner({
         await engine.writeDurableJson(directory, "result.json", result);
         if (result.state === "succeeded")
           await engine.withFileCommitLock(() => engine.cleanupFileTransaction(directory));
+        await retireRequestInput({ directory });
         return { requestId, ...result };
       });
     });
@@ -749,54 +832,89 @@ export async function createWorkspaceOwner({
     environmentIdentity: life,
     engine,
   });
-  if (publicationScope)
-    communication = await createOwnerCommunication({
-      stateRoot,
-      publications,
-      scope: {
-        kind: "workspace",
-        resourceId: publicationScope.resourceId,
-        resourceGeneration: publicationScope.resourceGeneration,
-        authorizationGeneration: publicationScope.authorizationGeneration,
-        environmentIdentity: life,
-      },
-      transport: communicationTransport,
-      sourceProxy,
-      sourceOpener,
-      renderProgress,
-      renderMaterialize,
-      deliverExtension,
-      extensionArtifact: communicationTransport?.artifact,
-      handlerHost: join(ownerRuntimeDirectory, "extension-handler-host.mjs"),
-      admit: (requestId, inputDigest, work) =>
-        inLane(requestId, async () => {
-          const directory = await requestDirectory(requestId),
-            accepted = await optionalJson(join(directory, "accepted.json"));
-          if (accepted) {
-            if (accepted.kind !== "communication" || accepted.digest !== inputDigest)
-              refuse("REQUEST_ID_CONFLICT", 409);
-            const receipt = await communication.inspect(requestId);
-            return receipt.state === "absent" ? { requestId, state: "unconfirmed" } : receipt;
-          }
-          await engine.writeDurableJson(directory, "accepted.json", {
-            kind: "communication",
-            digest: inputDigest,
-            environmentIdentity: life,
-          });
-          return journalOutcome(directory, work);
-        }),
+  const communicationScope = (scope) =>
+    scope
+      ? {
+          kind: "workspace",
+          resourceId: scope.resourceId,
+          resourceGeneration: scope.resourceGeneration,
+          authorizationGeneration: scope.authorizationGeneration,
+          environmentIdentity: life,
+        }
+      : undefined;
+  communication = await createOwnerCommunication({
+    stateRoot,
+    publications,
+    scope: communicationScope(publicationScope),
+    transport: communicationTransport,
+    sourceProxy,
+    sourceOpener,
+    renderProgress,
+    renderMaterialize,
+    deliverExtension,
+    extensionArtifact: communicationTransport?.artifact,
+    handlerHost: join(ownerRuntimeDirectory, "extension-handler-host.mjs"),
+    admit: (requestId, inputDigest, work, descriptor) =>
+      inLane(requestId, async () => {
+        const directory = await requestDirectory(requestId),
+          accepted = await optionalJson(join(directory, "accepted.json"));
+        if (accepted) {
+          if (accepted.kind !== "communication" || accepted.digest !== inputDigest)
+            refuse("REQUEST_ID_CONFLICT", 409);
+          const receipt = await communication.inspect(requestId);
+          return receipt.state === "absent" ? { requestId, state: "unconfirmed" } : receipt;
+        }
+        await engine.writeDurableJson(directory, "accepted.json", {
+          kind: "communication",
+          digest: inputDigest,
+          environmentIdentity: life,
+          intent: descriptor,
+        });
+        return journalOutcome(directory, work);
+      }),
+  });
+  owner.configureRemote = (configuration = {}) => {
+    publications.configureScope(configuration.publicationScope);
+    communication.configure({
+      scope: communicationScope(configuration.publicationScope),
+      transport: configuration.communicationTransport,
+      extensionArtifact: configuration.communicationTransport?.artifact,
     });
+    publicationScope = configuration.publicationScope;
+  };
+  const semantic = createSemanticOwner({
+    owner,
+    engine,
+    binding,
+    ownerSelector,
+    requestsRoot,
+    publicationScope: () => publicationScope,
+    readAccepted: (requestId) => optionalJson(join(requestsRoot, id(requestId), "accepted.json")),
+    readInput: (requestId) => optionalJson(join(requestsRoot, id(requestId), "input.json")),
+    readResult: (requestId, accepted) =>
+      optionalJson(
+        accepted.kind === "exec"
+          ? join(engine.operationDirectory(marker(requestId)), "result.json")
+          : accepted.kind === "communication"
+            ? join(stateRoot, "communication", `${requestId}.json`)
+            : join(requestsRoot, id(requestId), "result.json"),
+      ),
+    listRequests: () => readdir(requestsRoot),
+  });
+  owner.semantic = semantic.execute;
+  owner.operation_find = semantic.find;
   // Only the new service's private namespace owns these transactions. An interrupted
   // commit is rolled back from retained inode proof; it is never replayed as a request.
-  for (const entry of await readdir(requestsRoot)) {
+  for (const entry of recoveryRequests) {
     if (!WORKSPACE_REQUEST_ID_PATTERN.test(entry)) refuse("UNSAFE_STATE", 409);
     const directory = await requestDirectory(entry);
     const accepted = await optionalJson(join(directory, "accepted.json"));
-    if (
-      !accepted ||
-      ["exec", "pull-request", "security-acquisition", "communication"].includes(accepted.kind)
-    )
+    if (!accepted) refuse("UNSAFE_STATE", 409);
+    if (accepted.kind === "exec") {
+      await retire(entry);
       continue;
+    }
+    if (["pull-request", "security-acquisition", "communication"].includes(accepted.kind)) continue;
     const recorded = await optionalJson(join(directory, "result.json"));
     if (recorded) {
       if (recorded.state === "succeeded")
@@ -816,6 +934,7 @@ export async function createWorkspaceOwner({
         });
       }
     }
+    await retireRequestInput({ directory });
   }
 
   owner.health = () => ({

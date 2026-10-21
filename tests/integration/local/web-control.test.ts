@@ -11,7 +11,6 @@ import { main } from "../../../packages/local/src/cli.js";
 import { GiB, LocalRefusal, publicPolicy } from "../../../packages/local/src/policy.js";
 import { localFixture } from "./fixtures.js";
 import {
-  MAX_LOCAL_WORK_LEASE_MS,
   type LocalControlCeiling,
   type LocalDeviceControlView,
 } from "../../../packages/shared/src/codespaces/local-management-types.js";
@@ -25,6 +24,13 @@ afterEach(async () => {
 async function fixture() {
   const state = await PrivateState.open(directory),
     local = await localFixture(state);
+  local.space.admittedMachine = {
+    cpuCores: local.policy.runtime.cpuCores,
+    memoryBytes: local.policy.runtime.memoryBytes,
+    dockerBytes: local.policy.runtime.dockerBytes,
+  };
+  local.space.admittedRepositoryFullName = local.policy.repositories[0].fullName;
+  await local.records.put(local.space);
   const connection = {
     origin: "https://moira.example",
     credential: randomBytes(32).toString("base64url"),
@@ -40,7 +46,6 @@ async function fixture() {
     memoryBytes: 8 * GiB,
     storageBytes: 64 * GiB,
     dockerBytes: 8 * GiB,
-    maxLeaseMs: MAX_LOCAL_WORK_LEASE_MS,
   };
   return { ...local, state, connection, ceiling };
 }
@@ -48,10 +53,12 @@ describe("Locally pinned owner web control", () => {
   test("the owner CLI changes only the supplied limit and reports the previous approval metadata", async () => {
     const f = await fixture(),
       control = new LocalWebControl(f.records);
-    const initial = { ...f.ceiling, maxLeaseMs: 2 * 3600000 };
+    const initial = { ...f.ceiling };
     await control.optIn(f.connection, initial, true);
     const stored = await f.state.read("web-control.json", (value) => value as object);
-    const before = { ...stored, appliedRevision: 5, repositoryRequests: [randomUUID()] };
+    const before = { ...stored, repositoryRequests: [randomUUID()] };
+    f.policy.appliedRevision = 5;
+    await f.state.write("policy.json", f.policy);
     await f.state.write("web-control.json", before);
     const reports: unknown[] = [];
     const transport = jest.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
@@ -94,16 +101,18 @@ describe("Locally pinned owner web control", () => {
     });
     await control.optIn(f.connection, f.ceiling, true);
     const stored = await f.state.read("web-control.json", (value) => value as object);
+    const delegation = {
+      githubUserId: "42",
+      owner: "owner",
+      allowExistingPrivate: true,
+      allowNewPrivate: true,
+      allowPush: true,
+    };
+    f.policy.appliedRevision = 5;
+    f.policy.agentRepositoryManagement = delegation;
+    await f.state.write("policy.json", f.policy);
     const before = {
       ...stored,
-      appliedRevision: 5,
-      agentRepositoryManagement: {
-        githubUserId: "42",
-        owner: "owner",
-        allowExistingPrivate: true,
-        allowNewPrivate: true,
-        allowPush: true,
-      },
       repositoryRequests: [randomUUID()],
       rejectedRevision: 6,
       error: { code: "LOCAL_STORAGE_FULL", message: "Existing resize remains pending." },
@@ -144,7 +153,7 @@ describe("Locally pinned owner web control", () => {
       ceiling: next,
       appliedRevision: 5,
       rejectedRevision: 6,
-      settings: { agentRepositoryManagement: before.agentRepositoryManagement },
+      settings: { agentRepositoryManagement: delegation },
     });
   });
   test("existing approval cannot change without fresh local confirmation", async () => {
@@ -268,7 +277,7 @@ describe("Locally pinned owner web control", () => {
           beforeGrant?.repository,
         );
         expect((await f.records.policy()).runtime).toEqual(f.policy.runtime);
-        expect((await f.records.policy()).leaseUntil).toBe(f.policy.leaseUntil);
+        expect(await f.records.policy()).not.toHaveProperty("leaseUntil");
         expect(await control.report(f.connection)).toMatchObject({
           appliedRevision: 2,
           settings: {
@@ -368,7 +377,7 @@ describe("Locally pinned owner web control", () => {
       error: null,
     };
     try {
-      expect(await control.apply(view, manager)).toBe(true);
+      expect(await control.apply(view, manager)).toBe("live");
       expect(await control.report(f.connection)).toMatchObject({ appliedRevision: 1 });
       // The ACK persisted; interruption prevented only the final intent deletion.
       await f.state.write("control-intent.json", { revision: 1, settings });
@@ -382,7 +391,7 @@ describe("Locally pinned owner web control", () => {
           },
           manager,
         ),
-      ).toBe(true);
+      ).toBe("live");
       expect(await control.report(f.connection)).toMatchObject({
         appliedRevision: 2,
         settings: { label: "New owner settings", cpuCores: 2 },
@@ -392,7 +401,7 @@ describe("Locally pinned owner web control", () => {
       await manager.close();
     }
   });
-  test("human settings replace more than 64 grants and delegation through confirmed stop, even with an old admission receipt", async () => {
+  test("human settings replace more than 64 grants and delegation live, even with an old admission receipt", async () => {
     const f = await fixture(),
       manager = new LocalManager(f.records);
     const repositories = [
@@ -410,23 +419,13 @@ describe("Locally pinned owner web control", () => {
       allowNewPrivate: true,
       allowPush: true,
     };
-    let stopped = false,
-      replacements = 0;
+    const originalSpace = await f.records.get(f.space.id);
     manager.stopWork = async () => {
-      const space = (await f.records.get(f.space.id))!;
-      space.desiredState = "stopped";
-      space.phase = "stopped";
-      await f.records.put(space);
-      stopped = true;
-    };
-    manager.appendRepositoryPolicy = async () => {
-      throw new Error("Human replacement cannot enter delegated append");
+      throw new Error("Human grant editing must not stop existing work");
     };
     const control = new LocalWebControl(f.records, {
-      replacePolicy: async (records, next) => {
-        expect(stopped).toBe(true);
-        replacements++;
-        await records.state.write("policy.json", next);
+      replacePolicy: async () => {
+        throw new Error("Live grants must not replace physical custody");
       },
     });
     await control.optIn(f.connection, f.ceiling, true);
@@ -459,18 +458,20 @@ describe("Locally pinned owner web control", () => {
           },
           manager,
         ),
-      ).toBe(true);
-      expect(replacements).toBe(1);
+      ).toBe("live");
       expect((await f.records.policy()).repositories).toEqual(repositories);
       expect(await control.report(f.connection)).toMatchObject({
         appliedRevision: 1,
         settings: { agentRepositoryManagement: delegation },
       });
-      expect(await f.records.get(f.space.id)).toMatchObject({
-        runtimeId: f.space.runtimeId,
-        brokerToken: f.space.brokerToken,
-        desiredState: "stopped",
+      expect(await f.state.read("policy.json", (value) => value)).toMatchObject({
+        appliedRevision: 1,
+        agentRepositoryManagement: delegation,
       });
+      const approval = await f.state.read("web-control.json", (value) => value);
+      expect(approval).not.toHaveProperty("appliedRevision");
+      expect(approval).not.toHaveProperty("agentRepositoryManagement");
+      expect(await f.records.get(f.space.id)).toEqual(originalSpace);
     } finally {
       await manager.close();
     }
@@ -510,13 +511,13 @@ describe("Locally pinned owner web control", () => {
           { ...view, revision: 2, settings: { ...controlSettings(f.policy), enabled: false } },
           manager,
         ),
-      ).toBe(true);
+      ).toBe("live");
       expect(await control.report(f.connection)).toMatchObject({ appliedRevision: 2 });
     } finally {
       await manager.close();
     }
   });
-  test("opt-in is explicit, keeps existing connection, and expired disabled heartbeat reports without SDK work", async () => {
+  test("opt-in is explicit, keeps existing connection, and disabled heartbeat reports without SDK work", async () => {
     const f = await fixture(),
       control = new LocalWebControl(f.records);
     const original = await readFile(join(directory, "connection.json"));
@@ -524,7 +525,6 @@ describe("Locally pinned owner web control", () => {
       code: "LOCAL_CONTROL_CONFIRM",
     });
     f.policy.enabled = false;
-    f.policy.leaseUntil = 0;
     await f.state.write("policy.json", f.policy);
     await control.optIn(f.connection, f.ceiling, true);
     let sent: unknown;
@@ -542,26 +542,16 @@ describe("Locally pinned owner web control", () => {
       code: "LOCAL_IDENTITY_CHANGED",
     });
   });
-  test("changing defaults occurs after confirmed stop, preserves old VM admission and acknowledges only after policy commit", async () => {
+  test("changing defaults is live, preserves old VM admission and acknowledges only after policy commit", async () => {
     const f = await fixture();
-    let settled = false;
     const manager = new LocalManager(f.records);
     // Controlled physical boundary only; native SDK ownership is covered by its own consumer tests.
     manager.stopWork = async () => {
-      const space = await f.records.get(f.space.id);
-      space!.desiredState = "stopped";
-      space!.phase = "stopped";
-      space!.generation++;
-      await f.records.put(space!);
-      settled = true;
+      throw new Error("Default editing must not stop the existing VM");
     };
     const control = new LocalWebControl(f.records, {
-      replacePolicy: async (records, next) => {
-        expect(settled).toBe(true);
-        expect((await f.state.read("web-control.json", (value) => value)) as object).toMatchObject({
-          appliedRevision: 0,
-        });
-        await records.state.write("policy.json", next);
+      replacePolicy: async () => {
+        throw new Error("Defaults do not replace physical custody");
       },
     });
     await control.optIn(f.connection, f.ceiling, true);
@@ -569,7 +559,6 @@ describe("Locally pinned owner web control", () => {
       ...controlSettings(f.policy),
       cpuCores: 4,
       memoryBytes: 8 * GiB,
-      leaseUntil: Date.now() + MAX_LOCAL_WORK_LEASE_MS - 1000,
     };
     try {
       expect(
@@ -585,7 +574,7 @@ describe("Locally pinned owner web control", () => {
           },
           manager,
         ),
-      ).toBe(true);
+      ).toBe("live");
       expect((await f.records.policy()).runtime).toMatchObject({
         cpuCores: 4,
         memoryBytes: 8 * GiB,
@@ -595,10 +584,30 @@ describe("Locally pinned owner web control", () => {
         memoryBytes: GiB,
         dockerBytes: 4 * GiB,
       });
+      expect(await f.records.get(f.space.id)).toMatchObject({
+        runtimeId: f.space.runtimeId,
+        desiredState: "running",
+        generation: f.space.generation,
+      });
       expect(await control.report(f.connection)).toMatchObject({
         appliedRevision: 1,
         settings: { cpuCores: 4 },
       });
+      const retained = (await f.records.get(f.space.id))!;
+      delete retained.admittedMachine;
+      retained.failure = "LOCAL_CREATE_UNKNOWN";
+      retained.phase = "failed";
+      await f.records.put(retained);
+      const bytes = await readFile(join(directory, `space-${retained.id}.json`));
+      const current = await f.records.policy();
+      await expect(
+        manager.applyLivePolicy(current, {
+          ...current,
+          runtime: { ...current.runtime, cpuCores: 2 },
+        }),
+      ).rejects.toMatchObject({ code: "LOCAL_OBSERVATION_UNKNOWN" });
+      expect(await f.records.policy()).toEqual(current);
+      expect(await readFile(join(directory, `space-${retained.id}.json`))).toEqual(bytes);
     } finally {
       await manager.close();
     }
@@ -657,7 +666,6 @@ describe("Locally pinned owner web control", () => {
             settings: {
               ...controlSettings(f.policy),
               storageBytes: 64 * GiB,
-              leaseUntil: Date.now() + MAX_LOCAL_WORK_LEASE_MS - 1000,
             },
           },
           manager,

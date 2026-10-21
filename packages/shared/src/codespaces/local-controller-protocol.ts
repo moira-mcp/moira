@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { WORKSPACE_REQUEST_ID_PATTERN } from "./workspace-request-id.js";
+import { OPERATION_KINDS } from "./workspace-references.mjs";
+import { CODESPACE_IDLE_TIMEOUT_MINUTES } from "./resource-types.js";
+import { workspaceRemoteObservationSchema } from "./local-protocol.js";
 import {
   localDeviceSettingsSchema,
   localManagementRepositorySchema,
@@ -81,6 +84,32 @@ export const controllerIdentitySchema = z.object({
 });
 export type ControllerIdentity = z.infer<typeof controllerIdentitySchema>;
 
+export const controllerOperationKindSchema = z.enum(OPERATION_KINDS);
+export const controllerOperationDescriptorSchema = z
+  .object({
+    kind: controllerOperationKindSchema.exclude(["unknown"]),
+    description: z.string().min(1).max(512),
+    createdAt: z.number().int().nonnegative().safe(),
+  })
+  .strict();
+export const controllerOperationFindSchema = z
+  .object({
+    kind: controllerOperationKindSchema.optional(),
+    query: z.string().optional(),
+    cursor: controllerRequestIdSchema.optional(),
+  })
+  .strict();
+export const controllerWorkspaceResolveSchema = z.union([
+  z
+    .object({
+      deviceId: z.string().uuid(),
+      spaceId: z.string().uuid(),
+      operationMarker: z.string().regex(/^moira-[a-f0-9]{24}$/),
+    })
+    .strict(),
+  z.object({ deviceId: z.string().uuid(), resourceId: z.string().uuid() }).strict(),
+]);
+
 const generation = z.number().int().positive();
 export const controllerLifecycleSchema = z.discriminatedUnion("action", [
   z
@@ -98,6 +127,13 @@ export const controllerLifecycleSchema = z.discriminatedUnion("action", [
       requestId: controllerRequestIdSchema,
       expectedGeneration: generation,
       action: z.literal("start"),
+    })
+    .strict(),
+  z
+    .object({
+      requestId: controllerRequestIdSchema,
+      expectedGeneration: generation,
+      action: z.literal("resume_setup"),
     })
     .strict(),
   z
@@ -179,6 +215,17 @@ export const controllerOperationSchema = z
   })
   .strict();
 export type ControllerOperation = z.infer<typeof controllerOperationSchema>;
+export const controllerOperationFindResultSchema = z
+  .object({
+    operations: z.array(
+      controllerOperationSchema.extend({
+        kind: controllerOperationKindSchema,
+        descriptor: controllerOperationDescriptorSchema.optional(),
+      }),
+    ),
+    nextCursor: z.string().optional(),
+  })
+  .strict();
 
 /** Fixed GitHub lifecycle inputs are issued from a verified cloud assignment. */
 const githubCreation = {
@@ -198,6 +245,7 @@ export const controllerGitHubLifecycleSchema = z.discriminatedUnion("action", [
   ...(["start", "stop", "adopt"] as const).map((action) =>
     z.object({ ...githubAction, action: z.literal(action) }).strict(),
   ),
+  z.object({ ...githubAction, action: z.literal("resume_setup") }).strict(),
   z
     .object({
       ...githubAction,
@@ -208,13 +256,57 @@ export const controllerGitHubLifecycleSchema = z.discriminatedUnion("action", [
 ]);
 export type ControllerGitHubLifecycle = z.infer<typeof controllerGitHubLifecycleSchema>;
 
-export const githubProviderActionSchema = z
+export const githubMachineSchema = z
   .object({
-    requestId: controllerRequestIdSchema,
-    resourceGeneration: generation,
-    action: z.enum(["create", "get", "start", "stop", "delete"]),
+    name: z.string().min(1),
+    displayName: z.string().min(1),
+    operatingSystem: z.string().min(1),
+    cpuCores: z.number().int().positive().safe(),
+    memoryBytes: z.number().int().positive().safe(),
+    storageBytes: z.number().int().positive().safe(),
   })
   .strict();
+const githubIdleTimeout = z
+  .number()
+  .int()
+  .min(CODESPACE_IDLE_TIMEOUT_MINUTES.minimum)
+  .max(CODESPACE_IDLE_TIMEOUT_MINUTES.maximum);
+export const githubCreationSettingsSchema = z
+  .object({
+    autoStopEnabled: z.boolean(),
+    idleTimeoutMinutes: githubIdleTimeout,
+    retentionMinutes: z.number().int().positive().safe(),
+  })
+  .strict();
+export const githubPreparedCreateSchema = z
+  .object({
+    machine: githubMachineSchema,
+    idleTimeoutMinutes: githubIdleTimeout,
+    retentionMinutes: z.number().int().positive().safe(),
+  })
+  .strict();
+export type GitHubPreparedCreate = z.infer<typeof githubPreparedCreateSchema>;
+export type GitHubCreationSettings = z.infer<typeof githubCreationSettingsSchema>;
+export const githubCreatePreflightSchema = z
+  .object({ billableOwnerId: z.string().regex(/^[1-9][0-9]*$/) })
+  .strict();
+export const githubMachineOffersSchema = z.array(githubMachineSchema);
+const githubProviderRequest = {
+  requestId: controllerRequestIdSchema,
+  resourceGeneration: generation,
+};
+export const githubProviderActionSchema = z.discriminatedUnion("action", [
+  z
+    .object({
+      ...githubProviderRequest,
+      action: z.literal("create"),
+      prepared: githubPreparedCreateSchema,
+    })
+    .strict(),
+  ...(["preflight", "machines", "get", "start", "stop", "delete"] as const).map((action) =>
+    z.object({ ...githubProviderRequest, action: z.literal(action) }).strict(),
+  ),
+]);
 export type GitHubProviderAction = z.infer<typeof githubProviderActionSchema>;
 
 export const githubProvisionProofSchema = z
@@ -263,9 +355,18 @@ export const githubControllerResourceSchema = z
     pendingRequestIds: z.array(controllerRequestIdSchema),
     observedAt: z.number().int().nonnegative().safe().nullable(),
     providerResource: z.record(z.string(), z.unknown()).nullable(),
+    remote: workspaceRemoteObservationSchema.optional(),
   })
   .strict();
 export type GitHubControllerResource = z.infer<typeof githubControllerResourceSchema>;
+/** Account creation inputs are private assignment facts, never resource observations. */
+export const githubAssignmentSchema = githubControllerResourceSchema
+  .extend({
+    billableOwnerId: z.string().regex(/^[1-9][0-9]*$/),
+    creationSettings: githubCreationSettingsSchema,
+  })
+  .strict();
+export type GitHubAssignment = z.infer<typeof githubAssignmentSchema>;
 
 export const githubResourceAuthoritySchema = z
   .object({

@@ -18,6 +18,7 @@ export interface DirectoryIdentity {
 }
 export interface ExpectedFile {
   exists: boolean;
+  identity?: FileIdentity;
   size?: number;
   sha256?: string;
 }
@@ -105,6 +106,12 @@ export function sameDirectoryIdentity(
   left: DirectoryIdentity | null | undefined,
   right: DirectoryIdentity | null | undefined,
 ): boolean;
+export function publishDirectoryNoReplace(
+  parent: FileHandle,
+  stageName: string,
+  targetName: string,
+  stage: FileHandle,
+): Promise<DirectoryIdentity>;
 export function verifyParentIdentity(
   root: FileRoot,
   relative: string,
@@ -129,7 +136,11 @@ export function stageStream(
   marker: string,
 ): Promise<StagedFile>;
 export function cleanupStaged(staged: StagedFile[]): Promise<Error | null>;
-export function writeDurableJson(directory: string, name: string, value: unknown): Promise<void>;
+export function writeDurableJson(
+  directory: string | ConfinedFileHandle,
+  name: string,
+  value: unknown,
+): Promise<void>;
 export function commitStaged(
   staged: StagedFile[],
   marker: string,

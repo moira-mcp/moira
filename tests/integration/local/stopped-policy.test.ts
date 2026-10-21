@@ -2,11 +2,15 @@ import { afterEach, beforeEach, expect, test } from "@jest/globals";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { PrivateState } from "../../../packages/local/src/private-state.js";
 import { replaceStoppedPolicy } from "../../../packages/local/src/guard.js";
 import { localFixture } from "./fixtures.js";
-import { localPolicySchema, GiB } from "../../../packages/local/src/policy.js";
+import {
+  localPolicySchema,
+  localRuntimeProfileHash,
+  GiB,
+} from "../../../packages/local/src/policy.js";
 let directory: string;
 beforeEach(async () => {
   directory = await realpath(await mkdtemp(join(tmpdir(), "ml-policy-")));
@@ -37,9 +41,7 @@ test("owner-selected machine values have exact numeric representation without ar
 test("a stopped policy transition resumes after policy write before owner receipt without reopening unknown work", async () => {
   const f = await localFixture(await PrivateState.open(directory));
   const profile = (runtime: typeof f.policy.runtime) =>
-    createHash("sha256")
-      .update(JSON.stringify({ deviceId: f.policy.deviceId, runtime }))
-      .digest("hex");
+    localRuntimeProfileHash({ deviceId: f.policy.deviceId, runtime });
   await f.records.state.write("runtime-owner.json", {
     owner: randomUUID(),
     profile: profile(f.policy.runtime),
@@ -61,7 +63,7 @@ test("a stopped policy transition resumes after policy write before owner receip
     await expect(replaceStoppedPolicy(f.records, next)).rejects.toThrow("Controlled interruption");
     expect((await f.records.policy()).runtime.cpuCores).toBe(2);
     f.records.state.write = write;
-    await replaceStoppedPolicy(f.records, { ...next, leaseUntil: next.leaseUntil + 1000 });
+    await replaceStoppedPolicy(f.records, next);
     expect((await f.records.policy()).runtime.cpuCores).toBe(2);
     expect(await f.records.state.read("runtime-owner.json", (v) => v)).toMatchObject({
       profile: profile(next.runtime),

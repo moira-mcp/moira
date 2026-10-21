@@ -399,6 +399,7 @@ export class ScopedCredentialService {
   private async disposeMatching(
     userId: string,
     matches: (witness: ScopeWitness) => boolean,
+    retire?: (witness: ScopeWitness) => Promise<boolean>,
   ): Promise<void> {
     let pending = false;
     for (const row of this.dependencies.repository.getScopedCredentials(
@@ -406,9 +407,12 @@ export class ScopedCredentialService {
       CODESPACE_PROVIDER_GITHUB,
     )) {
       try {
+        const witness = JSON.parse(row.scopeMetadata) as ScopeWitness;
         if (
-          matches(JSON.parse(row.scopeMetadata) as ScopeWitness) &&
-          this.configuration().vault.decryptScoped(userId, row.provider, row.id, row.envelope).token
+          matches(witness) &&
+          this.configuration().vault.decryptScoped(userId, row.provider, row.id, row.envelope)
+            .token &&
+          (!retire || (await retire(witness)))
         )
           await this.dispose(row);
       } catch {
@@ -444,7 +448,7 @@ export class ScopedCredentialService {
     });
   }
 
-  async disposeDevice(userId: string, deviceId: string, throughRevision?: number): Promise<void> {
+  async disposeDevice(userId: string, deviceId: string): Promise<void> {
     return this.disposeMatching(userId, (witness) => {
       let identity: Record<string, unknown> | null = null;
       try {
@@ -452,13 +456,19 @@ export class ScopedCredentialService {
       } catch {
         /* Other provider witness. */
       }
-      return (
-        identity?.deviceId === deviceId &&
-        (throughRevision === undefined ||
-          typeof identity.ownerAppliedRevision !== "number" ||
-          identity.ownerAppliedRevision <= throughRevision)
-      );
+      return identity?.deviceId === deviceId;
     });
+  }
+
+  /** A settings revision alone is not revocation; retire only authority no longer granted. */
+  async revalidateDevice(userId: string, deviceId: string): Promise<void> {
+    return this.disposeMatching(
+      userId,
+      (witness) => object(JSON.parse(witness.authority.identity))?.deviceId === deviceId,
+      async (witness) =>
+        !this.dependencies.isAuthorityCurrent ||
+        !(await this.dependencies.isAuthorityCurrent(witness.authority, witness.request)),
+    );
   }
 
   async recover(): Promise<{ disposed: number; pending: number }> {

@@ -77,7 +77,6 @@ describe("browser Local settings body admission", () => {
       settings: {
         label: "Owner policy",
         enabled: true,
-        leaseUntil: Date.now() + 60_000,
         cpuCores: 1,
         memoryBytes: 1024,
         storageBytes: 2048,

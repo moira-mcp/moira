@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +17,7 @@ beforeEach(async () => {
   state = await PrivateState.open(directory);
 });
 afterEach(async () => {
+  jest.restoreAllMocks();
   for (const budget of budgets.splice(0)) {
     budget.closeAdmission();
     await budget.settle();
@@ -94,15 +95,27 @@ describe("network admission independent of workload quotas", () => {
     await expect(
       f.budget.reserve({ ...f.policy, enabled: true }, { refreshPolicy: () => f.records.policy() }),
     ).rejects.toMatchObject({ code: "LOCAL_NETWORK_DENIED" });
+  });
+
+  test("persistent permission still admits fresh network work beyond the former maximum window", async () => {
+    const f = await fixture();
+    const future = Date.now() + 8 * 24 * 60 * 60_000;
+    jest.spyOn(Date, "now").mockReturnValue(future);
+    const reservation = await f.budget.reserve(f.policy, {
+      refreshPolicy: () => f.records.policy(),
+    });
+    expect(await f.records.authorize(f.authorization)).not.toBeNull();
+    await reservation.release();
+    await state.write("policy.json", { ...f.policy, enabled: false });
     await expect(
-      f.budget.reserve({ ...f.policy, enabled: true, leaseUntil: Date.now() - 1 }),
+      f.budget.reserve(f.policy, { refreshPolicy: () => f.records.policy() }),
     ).rejects.toMatchObject({ code: "LOCAL_NETWORK_DENIED" });
   });
 
   test("an exhausted old traffic ledger cannot block development downloads", async () => {
     const f = await fixture();
     await state.write("network-budget.json", {
-      leaseUntil: f.policy.leaseUntil,
+      leaseUntil: 1,
       spent: Number.MAX_SAFE_INTEGER,
     });
     for (let index = 0; index < 3; index++) {
@@ -110,7 +123,7 @@ describe("network admission independent of workload quotas", () => {
       await reservation.release();
     }
     expect(await state.read("network-budget.json", (value) => value)).toEqual({
-      leaseUntil: f.policy.leaseUntil,
+      leaseUntil: 1,
       spent: Number.MAX_SAFE_INTEGER,
     });
   });

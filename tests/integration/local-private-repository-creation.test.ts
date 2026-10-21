@@ -1,10 +1,10 @@
-import { afterEach, beforeEach, describe, expect, test } from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { randomBytes, randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm, readFile } from "node:fs/promises";
 import { controllerFixture } from "../fixtures/local-controller.js";
 import { createWorkspaceRequestId } from "@mcp-moira/shared";
 import {
@@ -20,6 +20,8 @@ import { LocalRepositoryAdmissionService } from "../../packages/web-backend/src/
 import { LocalPrivateRepositoryCreationService } from "../../packages/web-backend/src/services/local-private-repository-creation.js";
 import { HttpGitHubCodespaceClient } from "../../packages/web-backend/src/services/github-codespace-client.js";
 import { personalGitHubInstallations } from "../../packages/web-backend/src/services/local-github-repository-authority.js";
+import { createWorkspaceSemanticServices } from "../../packages/web-backend/src/services/workspace-semantic-service.js";
+import { encodeReference, decodeReference } from "@mcp-moira/shared/workspace-references";
 
 let sqlite: Database.Database;
 let owners: Array<Awaited<ReturnType<typeof controllerFixture>>> = [],
@@ -70,7 +72,6 @@ async function fixture() {
   const settings: LocalDeviceSettingsValue = {
     label: "Owned",
     enabled: true,
-    leaseUntil: now + 3600000,
     cpuCores: 2,
     memoryBytes: 4 * GiB,
     storageBytes: 32 * GiB,
@@ -246,6 +247,226 @@ async function fixture() {
 }
 
 describe("Private repository creation precedes local admission without repeating unknown effects", () => {
+  test("explicit original repository resume finishes installation setup and applied resume remains pure", async () => {
+    const f = await fixture();
+    const repositoryCreation = f.makeService();
+    const semantic = createWorkspaceSemanticServices({
+      providers: [],
+      select: () => {
+        throw new Error("Repository recovery must not select a workspace provider");
+      },
+      devices: f.devices,
+      workspace: f.local.client,
+      controller: f.local.client,
+      repositories: f.admission,
+      repositoryCreation,
+    });
+    const selected = { deviceId: f.deviceId, connectionId: f.auth.connectionId };
+    const controller = encodeReference("controller", selected);
+    const installation = encodeReference("installation", {
+      controller: selected,
+      installationId: f.input.installationId,
+    });
+    f.state.installationDenied = true;
+    const first = (await semantic.invoke(
+      "owner",
+      "repository_create",
+      { controller, installation, name: f.input.repositoryName },
+      `ws1-${f.input.requestId}`,
+    )) as { operation: string; state: string; original: Record<string, unknown> };
+    expect(first).toMatchObject({
+      state: "pending",
+      original: {
+        status: "setup_required",
+        error: { stage: "installation_access", provider_status: 403 },
+      },
+    });
+    for (const field of ["request_id", "device_id", "revision"])
+      expect(first.original).not.toHaveProperty(field);
+    expect(first.original.instruction).not.toMatch(/request_id|repository_add|local_repository_id/);
+    const originalRef = decodeReference(first.operation, "operation");
+    expect(originalRef).toMatchObject({
+      requestId: f.input.requestId,
+      journal: "repository-create",
+      kind: "repository",
+    });
+    const saved = f.repository.getOwned("owner", f.input.requestId)!;
+    expect(saved).toMatchObject({ state: "created", repositoryId: "77", installationVerified: 0 });
+    expect(f.state.posts).toBe(1);
+    expect(f.state.puts).toBe(1);
+    const observed = await semantic.invoke("owner", "operation_get", {
+      reference: first.operation,
+    });
+    expect(observed).toMatchObject({ operation: first.operation, state: "pending" });
+    expect(f.repository.getOwned("owner", f.input.requestId)).toEqual(saved);
+    expect(f.state.posts).toBe(1);
+    expect(f.state.puts).toBe(1);
+    f.state.installationDenied = false;
+    const resumed = (await semantic.invoke("owner", "operation_resume", {
+      reference: first.operation,
+    })) as { outcome: { ok: true; result: { target: string } } };
+    expect(resumed).toMatchObject({
+      operation: first.operation,
+      state: "completed",
+      outcome: { ok: true, result: { status: "applied" } },
+    });
+    expect(decodeReference(resumed.outcome.result.target, "target")).toMatchObject({
+      provider: "local-sandboxes",
+      controller: selected,
+    });
+    const applied = f.repository.getOwned("owner", f.input.requestId)!;
+    expect(applied).toMatchObject({
+      requestId: saved.requestId,
+      deviceId: saved.deviceId,
+      repositoryName: saved.repositoryName,
+      installationId: saved.installationId,
+      marker: saved.marker,
+      admissionRequestId: saved.admissionRequestId,
+      fingerprint: saved.fingerprint,
+      repositoryId: saved.repositoryId,
+      installationVerified: 1,
+    });
+    expect(sqlite.prepare("SELECT count(*) count FROM codespaceRepositoryRequest").get()).toEqual({
+      count: 1,
+    });
+    expect(f.state.posts).toBe(1);
+    expect(f.state.puts).toBe(2);
+    const receiptPath = join(
+      f.local.state.root,
+      `controller-operation-ws1-${saved.admissionRequestId}.json`,
+    );
+    const receiptBytes = await readFile(receiptPath);
+    f.observation.unavailable = true;
+    f.local.manager.snapshot = async () => {
+      throw new Error("Completed resume must not capture native state");
+    };
+    repositoryCreation.createRepository = async () => {
+      throw new Error("Completed resume must not repeat provider or admission work");
+    };
+    const repeated = await semantic.invoke("owner", "operation_resume", {
+      reference: first.operation,
+    });
+    expect(repeated).toMatchObject({
+      operation: first.operation,
+      state: "completed",
+      outcome: {
+        ok: true,
+        result: {
+          status: "applied",
+          repository: `owner/${f.input.repositoryName}`,
+          target: resumed.outcome.result.target,
+        },
+      },
+    });
+    expect(f.repository.getOwned("owner", f.input.requestId)).toEqual(applied);
+    expect(await readFile(receiptPath)).toEqual(receiptBytes);
+    expect(f.state.posts).toBe(1);
+    expect(f.state.puts).toBe(2);
+  });
+  test("a lost applied repository reply is collected from its original controller proof without provider calls or native discovery", async () => {
+    const f = await fixture();
+    const created = await f.makeService().createRepository("owner", f.input);
+    expect(created.status).toBe("applied");
+    const retained = f.repository.getOwned("owner", f.input.requestId)!;
+    expect(retained.state).toBe("created");
+    const key = `controller-operation-ws1-${retained.admissionRequestId}.json`;
+    const before = await readFile(join(f.local.state.root, key));
+    f.observation.unavailable = true;
+    f.local.manager.snapshot = async () => {
+      throw new Error("Original collection must not capture native state");
+    };
+    const provider = f.makeService();
+    provider.createRepository = async () => {
+      throw new Error("Original collection must not resume or resubmit repository creation");
+    };
+    const controller = {
+      kind: "controller" as const,
+      deviceId: f.deviceId,
+      connectionId: f.auth.connectionId,
+    };
+    const reference = encodeReference("operation", {
+      owner: controller,
+      requestId: f.input.requestId,
+      kind: "repository",
+      journal: "repository-create",
+    });
+    const semantic = createWorkspaceSemanticServices({
+      providers: [],
+      select: () => {
+        throw new Error("Original collection must not select a provider");
+      },
+      devices: f.devices,
+      workspace: f.local.client,
+      controller: f.local.client,
+      repositories: f.admission,
+      repositoryCreation: provider,
+    });
+    const collected = (await semantic.invoke("owner", "operation_get", { reference })) as {
+      state: string;
+      outcome: { ok: true; result: { target: string } };
+    };
+    expect(collected).toMatchObject({
+      operation: reference,
+      state: "completed",
+      outcome: { ok: true },
+    });
+    expect(collected.outcome.result).not.toHaveProperty("local_repository_id");
+    expect(decodeReference(collected.outcome.result.target, "target")).toEqual({
+      provider: "local-sandboxes",
+      repositoryId: created.local_repository_id,
+      controller: { deviceId: f.deviceId, connectionId: f.auth.connectionId },
+    });
+    expect(await readFile(join(f.local.state.root, key))).toEqual(before);
+    expect(f.repository.getOwned("owner", f.input.requestId)).toEqual(retained);
+    expect(f.state.posts).toBe(1);
+    expect(f.state.puts).toBe(1);
+  });
+  test("historical original admission proves creation separately from the current exact grant without rewriting its receipt", async () => {
+    const f = await fixture();
+    await f.makeService().createRepository("owner", f.input);
+    const current = await f.devices.getActiveDevice("owner", f.deviceId);
+    const admitted = current.owner.local.control.repositoryAdmissions![0];
+    const key = "controller-operation-ws1-" + admitted.requestId + ".json";
+    const original = (await f.local.state.read(key, (value) => value)) as {
+      outcome: {
+        result: {
+          local: {
+            policy: Record<string, unknown>;
+            control: { settings: Record<string, unknown>; ceiling: Record<string, unknown> };
+          };
+        };
+      };
+    };
+    original.outcome.result.local.policy.leaseUntil = 1;
+    original.outcome.result.local.control.settings.leaseUntil = 1;
+    original.outcome.result.local.control.ceiling.maxLeaseMs = 3600000;
+    await f.local.state.write(key, original);
+    const before = await readFile(join(f.local.state.root, key));
+    sqlite
+      .prepare("UPDATE codespaceRepositoryRequest SET reservationHeld=1 WHERE requestId=?")
+      .run(f.input.requestId);
+    const repeated = { ...admitted, expectedRevision: current.owner.local.control.revision };
+    await expect(
+      f.devices.requestRepositoryAdmission("owner", f.deviceId, repeated),
+    ).resolves.toMatchObject({ deviceId: f.deviceId });
+    expect(f.repository.getOwned("owner", f.input.requestId)!.reservationHeld).toBe(0);
+    expect(await readFile(join(f.local.state.root, key))).toEqual(before);
+    await f.devices.requestSettings("owner", f.deviceId, {
+      requestId: createWorkspaceRequestId(),
+      expectedGeneration: 1,
+      expectedRevision: current.owner.local.control.revision,
+      settings: f.settings,
+    });
+    sqlite
+      .prepare("UPDATE codespaceRepositoryRequest SET reservationHeld=1 WHERE requestId=?")
+      .run(f.input.requestId);
+    await expect(
+      f.devices.requestRepositoryAdmission("owner", f.deviceId, repeated),
+    ).rejects.toMatchObject({ code: "LOCAL_CONFLICT" });
+    expect(f.repository.getOwned("owner", f.input.requestId)!.reservationHeld).toBe(1);
+    expect(await readFile(join(f.local.state.root, key))).toEqual(before);
+    expect(f.state.posts).toBe(1);
+  });
   test("admission completes from the post-verification witness and physical owner receipt when discovery disconnects", async () => {
     const f = await fixture();
     f.observation.disconnectAfterVerified = true;
@@ -627,14 +848,14 @@ describe("Private repository creation precedes local admission without repeating
     );
     expect(f.state.posts).toBe(0);
   });
-  test("a settings lease outside the physical ceiling is refused before GitHub POST", async () => {
+  test("settings beyond the physical resource ceiling are refused before GitHub POST", async () => {
     const f = await fixture();
     await expect(
       f.devices.requestSettings("owner", f.deviceId, {
         requestId: createWorkspaceRequestId(),
         expectedGeneration: 1,
         expectedRevision: 1,
-        settings: { ...f.settings, leaseUntil: now + 7200000 },
+        settings: { ...f.settings, cpuCores: 5 },
       }),
     ).rejects.toThrow();
     expect(f.state.posts).toBe(0);
@@ -754,8 +975,81 @@ describe("Private repository creation precedes local admission without repeating
     expect(completed.repositories.slice(0, 65)).toEqual(original.repositories);
     expect(completed.repositories[66].fullName).toBe("owner/new-project");
     expect(completed.machine).toEqual(original.machine);
-    expect(completed.leaseUntil).toBe(original.leaseUntil);
+    expect(completed.enabled).toBe(original.enabled);
     expect(f.state.posts).toBe(1);
+  });
+  test("Local device targets complete while GitHub installations are held and GitHub metadata never probes the Local owner", async () => {
+    const f = await fixture();
+    const installations = [
+      { installation_id: "8", owner: "owner", repository_selection: "selected" as const },
+    ];
+    let entered!: () => void, release!: (value: typeof installations) => void;
+    const requested = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const held = new Promise<typeof installations>((resolve) => {
+      release = resolve;
+    });
+    const listInstallations = jest.fn(async () => {
+      entered();
+      return held;
+    });
+    const discovery = new LocalRepositoryAdmissionService({
+      devices: f.devices,
+      verifyAccount: async () => ({ githubUserId: "42", owner: "owner" }),
+      verifyRepository: async () => {
+        throw new Error("No repository verification during discovery");
+      },
+      listInstallations,
+    });
+    const snapshot = jest.spyOn(f.devices, "snapshot");
+    let metadataCompleted = false;
+    const metadata = discovery.listDevices("owner", { observeDevices: false }).then((value) => {
+      metadataCompleted = true;
+      return value;
+    });
+    try {
+      await requested;
+      expect(snapshot).not.toHaveBeenCalled();
+      const observation = f.devices.createObservation("owner");
+      const local = await discovery.listDevices("owner", {
+        includeInstallations: false,
+        observation,
+      });
+      expect(local).toMatchObject({
+        installations: [],
+        github_setup_required: false,
+        devices: [
+          {
+            device_id: f.deviceId,
+            owner_available: true,
+            local: {
+              state: "configured",
+              enabled: true,
+              delegation: f.settings.agentRepositoryManagement,
+            },
+          },
+        ],
+      });
+      expect(metadataCompleted).toBe(false);
+      expect(listInstallations).toHaveBeenCalledTimes(1);
+      expect(snapshot).toHaveBeenCalledTimes(1);
+      release(installations);
+      expect(await metadata).toMatchObject({
+        installations,
+        github_setup_required: false,
+        devices: [
+          { device_id: f.deviceId, owner_available: false, local: { state: "unavailable" } },
+        ],
+      });
+      expect(snapshot).toHaveBeenCalledTimes(1);
+      expect(f.state.posts).toBe(0);
+      expect(f.state.puts).toBe(0);
+    } finally {
+      release(installations);
+      await metadata;
+      snapshot.mockRestore();
+    }
   });
   test("personal installation projection excludes organizations and stale connected accounts", async () => {
     const f = await fixture();

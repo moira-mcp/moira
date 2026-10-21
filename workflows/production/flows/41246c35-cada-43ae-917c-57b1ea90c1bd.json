@@ -2,7 +2,7 @@
   "id": "41246c35-cada-43ae-917c-57b1ea90c1bd",
   "metadata": {
     "name": "Test Suite Audit",
-    "version": "4.2.0",
+    "version": "4.2.1",
     "description": "Feature-first audit of an existing project test suite against real production behavior. The flow resolves a traversal-safe workspace and authority boundary, inventories the complete in-scope source and test corpus, builds and independently reviews a production-grounded taxonomy, maps every test in deterministic independently reviewed batches, and produces reviewed coverage, redundancy, gap, weak-assertion and exact-change recommendations. Users can correct resolved scope or taxonomy without losing unaffected evidence, request analysis only, authorize only the exact reviewed mutation set, revise recommendations, or abort. If changes are authorized, it records a pre-change baseline and recovery contract, applies one logical mutation class at a time with immediate targeted checks, independently reviews the actual delta, runs all applicable broader project gates, and either repairs within authority or performs and verifies a scoped revert. Irreducible evidence or an unsafe baseline can produce only an explicitly selected limited non-mutating report. Local Markdown and self-contained HTML reports are independently reviewed before optional authorized static publication and optional configured user notification; local mode has no external side effects, and upload or notification failure remains visible. The flow preserves unrelated dirty work, never treats sampling as authorization, never reports failing changed tests as success, and never broadens access or discovers credentials. Choose Test Suite Audit to assess and optionally refactor an existing suite; use Test Planning to design strategy before implementation, Test Generation to add tests for a defined target, Data Analysis for supplied datasets, or Software Development Flow for complete product delivery.",
     "tags": [
       "тесты",
@@ -1888,7 +1888,7 @@
     {
       "id": "notify-user",
       "type": "agent-directive",
-      "directive": "Send one factual notification through the authenticated `communication` tool and configured user channels. Include outcome {{outcome}}, report URL {{report_url}}, limitations and exact test result summary; disclose reverted or limited state without success wording. Return sent only after observing delivery confirmation, otherwise failed. Notification failure does not invalidate the reviewed local report or uploaded artifact. Do not select a provider, recipient, destination, or credential.",
+      "directive": "Send one factual notification through the authenticated `communication_send` tool and configured user channels. Include outcome {{outcome}}, report URL {{report_url}}, limitations and exact test result summary; disclose reverted or limited state without success wording. Return sent only after observing delivery confirmation, otherwise failed. Notification failure does not invalidate the reviewed local report or uploaded artifact. Do not select a provider, recipient, destination, or credential.",
       "completionCondition": "The authorized notification attempt has an observed truthful state",
       "inputSchema": {
         "type": "object",

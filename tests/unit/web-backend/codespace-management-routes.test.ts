@@ -3,19 +3,43 @@ import express from "express";
 import request from "supertest";
 import {
   CodespaceResourceError,
-  ScopedCredentialError,
+  LocalDeviceError,
   type CodespaceReadinessView,
   type CodespaceSummaryView,
 } from "@mcp-moira/shared";
+import { encodeReference, decodeReference } from "@mcp-moira/shared/workspace-references";
 import {
   createCodespaceManagementRoutes,
   type CodespaceManagementServices,
 } from "../../../packages/web-backend/src/routes/codespace-management.js";
+import {
+  createWorkspaceSemanticServices,
+  type WorkspaceSemanticDependencies,
+} from "../../../packages/web-backend/src/services/workspace-semantic-service.js";
 import { setupErrorMiddleware } from "../../../packages/web-backend/src/middleware/error-middleware.js";
 
-const CODESPACE_ID = "00000000-0000-4000-8000-000000000001";
+const CODESPACE_ID = "00000000-0000-4000-8000-000000000001",
+  DEVICE = "00000000-0000-4000-8000-000000000011",
+  CONNECTION = "00000000-0000-4000-8000-000000000012";
+const LOCAL_TARGET = `local:${DEVICE}:${CONNECTION}`;
 const SETTINGS_URL = "https://moira.example.com/settings#integrations-github";
-
+const captured = encodeReference("workspace", {
+  resourceId: CODESPACE_ID,
+  provider: "github-codespaces",
+  deviceId: DEVICE,
+  generation: 3,
+});
+const controller = encodeReference("controller", { deviceId: DEVICE, connectionId: CONNECTION });
+const operation = encodeReference("operation", {
+  owner: { kind: "controller", deviceId: DEVICE, connectionId: CONNECTION },
+  requestId: "ws1-00000000-0000-4000-8000-000000000002",
+  kind: "lifecycle",
+});
+const target = encodeReference("target", {
+  provider: "github-codespaces",
+  repositoryId: "42",
+  controller: { deviceId: DEVICE, connectionId: CONNECTION },
+});
 const readiness: CodespaceReadinessView = {
   state: "ready",
   reason: null,
@@ -24,7 +48,6 @@ const readiness: CodespaceReadinessView = {
   resources_enabled: true,
   checked_at: 1,
 };
-
 function codespace(overrides: Partial<CodespaceSummaryView> = {}): CodespaceSummaryView {
   return {
     codespace_id: CODESPACE_ID,
@@ -39,6 +62,7 @@ function codespace(overrides: Partial<CodespaceSummaryView> = {}): CodespaceSumm
     desired_state: "running",
     observed_state: "running",
     generation: 3,
+    device_id: DEVICE,
     observed_at: null,
     lifecycle_error: null,
     created_at: 10,
@@ -46,11 +70,24 @@ function codespace(overrides: Partial<CodespaceSummaryView> = {}): CodespaceSumm
     ...overrides,
   };
 }
-
+// Exercise the actual shared presentation while controlling only the operation boundary.
+const projection = createWorkspaceSemanticServices({
+  devices: { getDeviceIdentity: () => ({ deviceId: DEVICE, connectionId: CONNECTION }) },
+} as unknown as WorkspaceSemanticDependencies);
 function services(
   overrides: Partial<CodespaceManagementServices> = {},
 ): CodespaceManagementServices {
   return {
+    provider: "github-codespaces",
+    controllers: async () => [{ device_id: DEVICE, label: "Computer" }],
+    semantic: {
+      ...projection,
+      invoke: jest.fn<CodespaceManagementServices["semantic"]["invoke"]>(async () => ({
+        operation,
+        state: "completed",
+        outcome: { ok: true, result: projection.project("user-a", codespace()) },
+      })),
+    },
     connection: {
       getStatus: () => ({
         state: "connected",
@@ -65,27 +102,14 @@ function services(
       }),
       refreshGrants: jest.fn(async () => ({ refreshed: false, stale: false })),
     },
-    observability: {
-      readiness: async () => readiness,
-    },
+    observability: { readiness: async () => readiness },
     resource: {
       listRepositories: () => [{ id: "42", fullName: "owner/repository", private: true }],
       listResources: async () => ({ codespaces: [codespace()], unavailable: [] }),
-      refreshProviderState: jest.fn(async () => ({ stale: false })),
-      getCodespace: jest.fn(async () => codespace()),
-      create: jest.fn(async () => codespace({ state: "create_submitted" })),
-      startCodespace: jest.fn(async () => codespace()),
-      stopCodespace: jest.fn(async () =>
-        codespace({ state: "stopped", desired_state: "stopped", observed_state: "stopped" }),
-      ),
-      deleteCodespace: jest.fn(async () =>
-        codespace({ state: "delete_pending", desired_state: "deleted", generation: 4 }),
-      ),
     },
     ...overrides,
   };
 }
-
 function appWith(dependencies: CodespaceManagementServices, userId = "user-a") {
   const app = express();
   app.use(express.json());
@@ -97,411 +121,205 @@ function appWith(dependencies: CodespaceManagementServices, userId = "user-a") {
   app.use(setupErrorMiddleware());
   return app;
 }
-
+const prefix = "/api/integrations/github/codespaces";
 describe("website codespace management routes", () => {
-  test("keeps observed peers and unavailable identities without fabricating resource state", async () => {
+  test("normal Local read and refresh finish while GitHub observation and explicit billing stay pending", async () => {
+    const base = services();
+    const local = services({
+      provider: "local-sandboxes",
+      resource: {
+        ...base.resource!,
+        listRepositories: () => [{ id: LOCAL_TARGET, fullName: "owner/local", private: false }],
+        listResources: jest.fn(async () => ({
+          codespaces: [codespace({ provider: "local-sandboxes", repository_id: LOCAL_TARGET })],
+          unavailable: [],
+          has_diagnostics: false,
+        })),
+      },
+    });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const github = services({
+      resource: {
+        ...base.resource!,
+        listResources: async () => {
+          await held;
+          return { codespaces: [codespace()], unavailable: [] };
+        },
+      },
+    });
+    const billing = jest.fn(async () => {
+      await held;
+      return "unavailable" as const;
+    });
+    const app = appWith(services({ providers: [github, local], billing }));
+    let githubDone = false,
+      billingDone = false;
+    const pendingGithub = request(app)
+      .get(prefix)
+      .query({ provider: "github-codespaces" })
+      .then((value) => {
+        githubDone = true;
+        return value;
+      });
+    const pendingBilling = request(app)
+      .get(prefix + "/billing")
+      .then((value) => {
+        billingDone = true;
+        return value;
+      });
+    try {
+      const initial = await request(app).get(prefix).query({ provider: "local-sandboxes" });
+      const refreshed = await request(app)
+        .post(prefix + "/refresh")
+        .send({ provider: "local-sandboxes" });
+      for (const response of [initial, refreshed]) {
+        expect(response.status).toBe(200);
+        expect(response.body.data).toMatchObject({
+          provider: "local-sandboxes",
+          codespaces: [{ state: "usable" }],
+          provider_errors: [],
+          repositories: [{ target: expect.any(String), controller }],
+        });
+        expect(response.body.data).not.toHaveProperty("providers");
+        expect(response.body.data).not.toHaveProperty("provider_billing");
+        expect(decodeReference(response.body.data.repositories[0].target, "target").provider).toBe(
+          "local-sandboxes",
+        );
+      }
+      expect(githubDone).toBe(false);
+      expect(billingDone).toBe(false);
+      expect(local.connection.refreshGrants).not.toHaveBeenCalled();
+    } finally {
+      release();
+      await pendingGithub;
+      const billed = await pendingBilling;
+      expect(billed.body.data).toBe("unavailable");
+    }
+    expect(billing).toHaveBeenCalledTimes(1);
+  });
+  test("explicit diagnostics projects unavailable originals without a fabricated lifecycle reference", async () => {
     const base = services();
     const unavailable = {
-      codespace_id: "00000000-0000-4000-8000-000000000002",
+      codespace_id: CONNECTION,
       provider: "local-sandboxes",
-      repository_id: "local-target",
+      repository_id: LOCAL_TARGET,
       repository: "owner/unobserved",
       requested_ref: "main",
       created_at: 10,
+      device_id: DEVICE,
+      pending_request_ids: ["ws1-00000000-0000-4000-8000-000000000002"],
       error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" as const },
     };
     const local = services({
       provider: "local-sandboxes",
       resource: {
         ...base.resource!,
+        listRepositories: () => [],
         listResources: async () => ({
-          codespaces: [codespace({ provider: "local-sandboxes" })],
+          codespaces: [],
           unavailable: [unavailable],
+          has_diagnostics: true,
         }),
       },
     });
-    const response = await request(appWith(services({ providers: [local] }))).get(
-      "/api/integrations/github/codespaces",
-    );
+    const response = await request(appWith(services({ providers: [local] })))
+      .get(prefix)
+      .query({ provider: "local-sandboxes", view: "diagnostics" });
     expect(response.status).toBe(200);
     expect(response.body.data).toMatchObject({
-      codespaces: [{ codespace_id: CODESPACE_ID, generation: 3 }],
-      unavailable: [unavailable],
-      provider_errors: [],
+      codespaces: [],
+      has_diagnostics: true,
       resources_stale: true,
     });
+    expect(response.body.data.unavailable[0]).toMatchObject({
+      codespace_id: CONNECTION,
+      pending_operations: [expect.any(String)],
+    });
+    expect(
+      decodeReference(response.body.data.unavailable[0].pending_operations[0], "operation")
+        .requestId,
+    ).toBe("ws1-00000000-0000-4000-8000-000000000002");
+    expect(response.body.data.unavailable[0]).not.toHaveProperty("workspace");
     expect(response.body.data.unavailable[0]).not.toHaveProperty("generation");
     expect(response.body.data.unavailable[0]).not.toHaveProperty("state");
   });
-
-  test.each([false, true])(
-    "reports all provider failures while retaining successful peers (all failed: %s)",
-    async (allFailed) => {
-      const failed = (provider: string) =>
-        services({
-          provider,
-          observability: {
-            readiness: async () => {
-              throw new CodespaceResourceError(
-                "CODESPACE_AUTHORIZATION_REQUIRED",
-                "private credential diagnostic",
-              );
-            },
-          },
-        });
-      const response = await request(
-        appWith(
-          services({
-            providers: [
-              allFailed ? failed("github-codespaces") : services({ provider: "github-codespaces" }),
-              failed("local-sandboxes"),
-            ],
-          }),
-        ),
-      ).get("/api/integrations/github/codespaces");
-      expect(response.status).toBe(200);
-      expect(response.body.data.codespaces).toHaveLength(allFailed ? 0 : 1);
-      expect(response.body.data.provider_errors).toEqual(
-        (allFailed ? ["github-codespaces", "local-sandboxes"] : ["local-sandboxes"]).map(
-          (provider) => ({ provider, error: { code: "CODESPACE_AUTHORIZATION_REQUIRED" } }),
-        ),
-      );
-      expect(response.body.data.providers.at(-1)).toEqual({
-        provider: "local-sandboxes",
-        error: { code: "CODESPACE_AUTHORIZATION_REQUIRED" },
-      });
-      if (allFailed) {
-        expect(response.body.data).not.toHaveProperty("readiness");
-        expect(response.body.data).not.toHaveProperty("connection");
-        expect(response.body.data.repositories).toEqual([]);
-      }
-      expect(JSON.stringify(response.body)).not.toContain("private credential diagnostic");
-    },
-  );
-
-  test("a failed controller observation does not discard healthy provider resources", async () => {
+  test("selected provider failure remains visible without withholding healthy peer discovery", async () => {
+    const failed = services({
+      observability: {
+        readiness: async () => {
+          throw new CodespaceResourceError(
+            "CODESPACE_AUTHORIZATION_REQUIRED",
+            "private credential diagnostic",
+          );
+        },
+      },
+    });
+    const local = services({ provider: "local-sandboxes", resource: null });
+    const app = appWith(services({ providers: [failed, local] }));
+    const failure = await request(app).get(prefix).query({ provider: "github-codespaces" });
+    expect(failure.status).toBe(409);
+    expect(failure.body.error.code).toBe("CODESPACE_AUTHORIZATION_REQUIRED");
+    expect(failure.text).not.toContain("private credential diagnostic");
+    const healthy = await request(app).get(prefix).query({ provider: "local-sandboxes" });
+    expect(healthy.status).toBe(200);
+    expect(healthy.body.data.provider_errors).toEqual([]);
+  });
+  test("controller metadata failure does not discard selected provider resources", async () => {
     const response = await request(
       appWith(
         services({
-          providers: [services({ provider: "github-codespaces" })],
           controllers: async () => {
             throw new Error("private controller diagnostic");
           },
         }),
       ),
-    ).get("/api/integrations/github/codespaces");
+    )
+      .get(prefix)
+      .query({ provider: "github-codespaces" });
     expect(response.status).toBe(200);
     expect(response.body.data.codespaces).toHaveLength(1);
     expect(response.body.data.provider_errors).toEqual([
-      { provider: "local-sandboxes", error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" } },
+      { provider: "github-codespaces", error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" } },
     ]);
-    expect(JSON.stringify(response.body)).not.toContain("private controller diagnostic");
+    expect(response.text).not.toContain("private controller diagnostic");
   });
-
-  test("a confirmed payment refusal retains safe provider evidence and its original request instead of unknown creation", async () => {
-    const base = services(),
-      requestId = "ws1-00000000-0000-4000-8000-000000000002",
-      reason = "Codespaces usage not allowed by the configured budget";
-    const create = jest.fn(async () => {
-      const error = new CodespaceResourceError(
-        "CODESPACE_CREATE_REJECTED",
-        "Provider refused original creation",
-        reason,
-      );
-      error.requestId = requestId;
-      error.providerFailure = {
-        kind: "http",
-        phase: "request",
-        status: 402,
-        githubRequestId: "AB12:CD34",
-        reason,
-      };
-      throw error;
-    });
-    const response = await request(appWith(services({ resource: { ...base.resource!, create } })))
-      .post("/api/integrations/github/codespaces")
-      .send({ repository_id: "42", ref: "main", request_id: requestId });
-    expect(response.status).toBe(422);
-    expect(response.body.error).toMatchObject({
-      code: "CODESPACE_CREATE_REJECTED",
-      request_id: requestId,
-      provider_failure: { kind: "http", status: 402, reason },
-    });
-    expect(create).toHaveBeenCalledTimes(1);
-  });
-  test("unknown creation exposes only typed provider evidence and the original recovery identity", async () => {
-    const base = services(),
-      requestId = "ws1-00000000-0000-4000-8000-000000000002";
-    const create = jest.fn(async () => {
-      const error = new CodespaceResourceError(
-        "WORKSPACE_OUTCOME_UNCONFIRMED",
-        "private-response-body ghu_private_original",
-      );
-      error.requestId = requestId;
-      error.providerFailure = {
-        kind: "http",
-        phase: "request",
-        status: 503,
-        githubRequestId: "AB12:CD34",
-        reason: "Service unavailable",
-      };
-      throw error;
-    });
-    const response = await request(appWith(services({ resource: { ...base.resource!, create } })))
-      .post("/api/integrations/github/codespaces")
-      .send({ repository_id: "42", ref: "main", request_id: requestId });
-    expect(response.status).toBe(503);
-    expect(response.body.error).toMatchObject({
-      code: "WORKSPACE_OUTCOME_UNCONFIRMED",
-      request_id: requestId,
-      provider_failure: {
-        kind: "http",
-        phase: "request",
-        status: 503,
-        githubRequestId: "AB12:CD34",
-        reason: "Service unavailable",
-      },
-    });
-    expect(response.text).not.toMatch(/private-response-body|ghu_private_original/);
-    expect(create).toHaveBeenCalledTimes(1);
-  });
-  test("callable stop preserves scoped disposal uncertainty and the retained lifecycle fence", async () => {
-    const base = services();
-    let retained = codespace();
-    const stop = jest.fn<
-      (
-        userId: string,
-        id: string,
-        requestId?: string,
-        generation?: number,
-      ) => Promise<CodespaceSummaryView>
-    >(async () => {
-      retained = codespace({ state: "stop_pending", desired_state: "stopped" });
-      throw new ScopedCredentialError("SCOPED_CREDENTIAL_DISPOSAL_PENDING", 503);
-    });
-    const dependencies = services({
-      resource: { ...base.resource!, getCodespace: async () => retained, stopCodespace: stop },
-    });
+  test("discovery requires an explicit provider and rejects mixed service metadata", async () => {
+    const dependencies = services();
     const app = appWith(dependencies);
-    const response = await request(app).post(
-      `/api/integrations/github/codespaces/${CODESPACE_ID}/stop`,
-    );
-    expect({ status: response.status, body: response.body }).toEqual({
-      status: 503,
-      body: {
-        success: false,
-        error: {
-          code: "SCOPED_CREDENTIAL_DISPOSAL_PENDING",
-          message: "Scoped credential operation outcome is unconfirmed",
-        },
-      },
-    });
-    expect(stop).toHaveBeenCalledWith("user-a", CODESPACE_ID, undefined, undefined);
-    expect(response.text).not.toMatch(/secret-|data_preserved|settings_url/);
-    const observed = await request(app).get(`/api/integrations/github/codespaces/${CODESPACE_ID}`);
-    expect(observed.body.data.codespace).toMatchObject({
-      state: "stop_pending",
-      desired_state: "stopped",
-    });
+    for (const query of [
+      {},
+      { provider: "all" },
+      { provider: "local-sandboxes", generation: "1" },
+    ]) {
+      const response = await request(app).get(prefix).query(query);
+      expect(response.status).toBe(400);
+      expect(response.body.error.code).toBe("CODESPACE_RESOURCE_INVALID");
+    }
+    expect(dependencies.connection.refreshGrants).not.toHaveBeenCalled();
   });
-  test.each([
-    ["CODESPACE_LOCAL_CREATION_UNKNOWN", 409, "do not create a replacement"],
-    ["CODESPACE_LOCAL_PROTOCOL_ERROR", 409, "matching server and companion"],
-    ["CODESPACE_LOCAL_RUNTIME_ERROR", 503, "runtime diagnostics"],
-    ["CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED", 403, "Moira Settings > Local computers"],
-  ] as const)(
-    "local diagnostic %s reaches the website with an actionable safe message",
-    async (code, status, instruction) => {
-      const base = services();
-      const dependencies = services({
-        resource: {
-          ...base.resource!,
-          stopCodespace: async () => {
-            throw new CodespaceResourceError(code, "private-host-path credential-not-for-user");
-          },
-        },
-      });
-      const response = await request(appWith(dependencies)).post(
-        `/api/integrations/github/codespaces/${CODESPACE_ID}/stop`,
-      );
-      expect(response.status).toBe(status);
-      expect(response.body.error.code).toBe(code);
-      expect(response.body.error.message).toContain(instruction);
-      expect(response.text).not.toContain("private-host-path");
-      expect(response.text).not.toContain("credential-not-for-user");
-      expect(response.text).not.toContain("data are preserved");
-      expect(response.text).not.toContain("data is preserved");
-      if (code !== "CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED")
-        expect(response.body.error.message).toContain("physical outcome is not confirmed");
-    },
-  );
-  test.each(["create", "start", "stop", "delete"] as const)(
-    "%s preserves the selected unconfigured provider response while another provider is available",
-    async (action) => {
-      const base = services();
-      const selectedSettings = "https://moira.example.com/settings#selected-provider";
-      const selected = services({
-        provider: "github-codespaces",
-        resource: null,
-        connection: {
-          ...base.connection,
-          getStatus: () => ({
-            ...base.connection.getStatus("user-a"),
-            state: "disabled",
-            settingsUrl: selectedSettings,
-          }),
-        },
-      });
-      const local = services({ provider: "local-sandboxes" });
-      const app = appWith(
-        services({
-          resource: null,
-          providers: [selected, local],
-          select: () => selected,
-        }),
-      );
-      const prefix = "/api/integrations/github/codespaces";
-      const response =
-        action === "create"
-          ? await request(app).post(prefix).send({ repository_id: "162", ref: "main" })
-          : action === "delete"
-            ? await request(app)
-                .delete(`${prefix}/${CODESPACE_ID}`)
-                .send({ confirm_delete: true, expected_generation: 3 })
-            : await request(app).post(`${prefix}/${CODESPACE_ID}/${action}`);
-      expect({ status: response.status, body: response.body }).toMatchObject({
-        status: 503,
-        body: {
-          success: false,
-          error: { code: "CODESPACE_NOT_CONFIGURED" },
-          settings_url: selectedSettings,
-        },
-      });
-      expect(selected.connection.refreshGrants).not.toHaveBeenCalled();
-      expect(local.resource!.create).not.toHaveBeenCalled();
-    },
-  );
-
-  test("the existing website endpoint creates and stops local codespaces with GitHub disabled", async () => {
-    const requestId = "ws1-11111111-1111-4111-8111-111111111111";
-    const target =
-      "local:00000000-0000-4000-8000-000000000011:00000000-0000-4000-8000-000000000012";
+  test("lists current facts without exposing private provider authority or raw CAS fields", async () => {
     const base = services();
-    const local = services({
-      provider: "local-sandboxes",
-      resource: {
-        ...base.resource!,
-        create: async () => codespace({ provider: "local-sandboxes", repository_id: target }),
-        stopCodespace: async (_user, _id, originalId, generation) => {
-          if (originalId !== requestId || generation !== 3)
-            throw new CodespaceResourceError(
-              "CODESPACE_GENERATION_CONFLICT",
-              "The caller did not retain its observed generation",
-            );
-          return codespace({
-            provider: "local-sandboxes",
-            state: "stopped",
-            desired_state: "stopped",
-          });
-        },
-      },
-    });
-    const app = appWith(
-      services({
-        resource: null,
-        providers: [local],
-        connection: {
-          ...base.connection,
-          refreshGrants: async () => {
-            throw new Error("GitHub must not gate local work");
-          },
-        },
-        select: (_userId, input) => {
-          if (input.repositoryId === target || input.codespaceId === CODESPACE_ID) return local;
-          throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Not owned");
-        },
-      }),
-    );
-    const created = await request(app)
-      .post("/api/integrations/github/codespaces")
-      .send({ repository_id: target, ref: "main", request_id: requestId });
-    expect(created.status).toBe(201);
-    expect(created.body.data.codespace).toMatchObject({
-      provider: "local-sandboxes",
-      repository_id: target,
-    });
-    const stopped = await request(app)
-      .post(`/api/integrations/github/codespaces/${CODESPACE_ID}/stop`)
-      .send({ request_id: requestId, expected_generation: 3 });
-    expect(stopped.status).toBe(200);
-    expect(stopped.body.data).toMatchObject({
-      data_preserved: true,
-      codespace: { provider: "local-sandboxes", state: "stopped" },
-    });
-  });
-
-  test("one management list presents both providers without turning local readiness into GitHub readiness", async () => {
-    const base = services();
-    const local = services({
-      provider: "local-sandboxes",
-      resource: {
-        ...base.resource!,
-        listRepositories: () => [{ id: "local-target", fullName: "owner/local", private: false }],
-        listResources: async () => ({
-          codespaces: [
-            codespace({
-              provider: "local-sandboxes",
-              codespace_id: "00000000-0000-4000-8000-000000000002",
-            }),
-          ],
-          unavailable: [],
-        }),
-      },
-      observability: {
-        ...base.observability,
-        readiness: async () => ({ ...readiness, provider: "local-sandboxes" }),
-      },
+    const extra = Object.assign(codespace(), {
+      operationMarker: "secret-marker",
+      providerResourceName: "secret-provider",
+      connectionId: "secret-connection",
+      lastOutcome: "private diagnostic",
     });
     const response = await request(
       appWith(
         services({
-          providers: [{ ...base, provider: "github-codespaces" }, local],
-          repositoryMetadata: () => ({ device_id: "device", device_label: "Computer" }),
+          resource: {
+            ...base.resource!,
+            listResources: async () => ({ codespaces: [extra], unavailable: [] }),
+          },
         }),
       ),
-    ).get("/api/integrations/github/codespaces");
-    expect(response.status).toBe(200);
-    expect(response.body.data.repositories).toEqual([
-      {
-        repository_id: "42",
-        name: "owner/repository",
-        private: true,
-        provider: "github-codespaces",
-      },
-      {
-        repository_id: "local-target",
-        name: "owner/local",
-        private: false,
-        provider: "local-sandboxes",
-        device_id: "device",
-        device_label: "Computer",
-      },
-    ]);
-    expect(
-      response.body.data.codespaces.map((entry: { provider: string }) => entry.provider),
-    ).toEqual(["github-codespaces", "local-sandboxes"]);
-    expect(
-      response.body.data.providers.map(
-        (entry: { readiness: { provider: string } }) => entry.readiness.provider,
-      ),
-    ).toEqual(["github-codespaces", "local-sandboxes"]);
-  });
-
-  test("lists readiness, repositories and sanitized codespaces without internal authority", async () => {
-    const dependencies = services();
-    const response = await request(appWith(dependencies)).get(
-      "/api/integrations/github/codespaces",
-    );
+    )
+      .get(prefix)
+      .query({ provider: "github-codespaces" });
     expect(response.status).toBe(200);
     expect(response.headers["cache-control"]).toBe("no-store");
     expect(response.body.data).toMatchObject({
@@ -509,102 +327,80 @@ describe("website codespace management routes", () => {
       connection: { state: "connected" },
       repositories: [{ repository_id: "42", name: "owner/repository", private: true }],
       repositories_stale: false,
-      codespaces: [{ codespace_id: CODESPACE_ID, state: "usable", generation: 3 }],
+      codespaces: [{ codespace_id: CODESPACE_ID, state: "usable" }],
     });
+    expect(response.body.data.codespaces[0]).not.toHaveProperty("generation");
+    expect(response.text).not.toMatch(/secret-|private diagnostic/);
     expect(response.body.data).not.toHaveProperty("limits");
-    expect(dependencies.connection.refreshGrants).toHaveBeenCalledWith("user-a");
-    expect(response.body.data.codespaces).toEqual([codespace()]);
   });
-
   test.each(["CODESPACE_PROVIDER_UNAVAILABLE", null] as const)(
-    "projects safe lifecycle diagnostic %s with actual observation freshness",
-    async (outcome) => {
+    "preserves safe lifecycle diagnosis %s and observation freshness",
+    async (lifecycle_error) => {
       const base = services();
-      const dependencies = services({
-        resource: {
-          ...base.resource!,
-          listResources: async () => ({
-            codespaces: [
-              codespace({
-                state: "stop_pending",
-                desired_state: "stopped",
-                observed_at: 15,
-                updated_at: 500,
-                lifecycle_error: outcome,
+      const response = await request(
+        appWith(
+          services({
+            resource: {
+              ...base.resource!,
+              listResources: async () => ({
+                codespaces: [
+                  codespace({
+                    state: "stop_pending",
+                    desired_state: "stopped",
+                    observed_at: 15,
+                    updated_at: 500,
+                    lifecycle_error,
+                  }),
+                ],
+                unavailable: [],
               }),
-            ],
-            unavailable: [],
+            },
           }),
-        },
-      });
-      const response = await request(appWith(dependencies)).get(
-        "/api/integrations/github/codespaces",
-      );
-      expect(response.status).toBe(200);
+        ),
+      )
+        .get(prefix)
+        .query({ provider: "github-codespaces" });
       expect(response.body.data.codespaces[0]).toMatchObject({
         state: "stop_pending",
         observed_at: 15,
         updated_at: 500,
-        lifecycle_error: outcome,
+        lifecycle_error,
       });
     },
   );
-
-  test("fails closed with the same-origin Settings link when the feature is not configured", async () => {
+  test("unconfigured capability discovery stays available without inventing workspaces", async () => {
     const disabled = services({
       resource: null,
       observability: {
         readiness: async () => ({ ...readiness, state: "disabled", reason: "NOT_CONFIGURED" }),
       },
     });
-    const list = await request(appWith(disabled)).get("/api/integrations/github/codespaces");
-    expect(list.status).toBe(200);
-    expect(list.body.data).toMatchObject({ readiness: { state: "disabled" }, codespaces: [] });
-
-    const create = await request(appWith(disabled))
-      .post("/api/integrations/github/codespaces")
-      .send({ repository_id: "42", ref: "main" });
-    expect(create.status).toBe(503);
-    expect(create.body).toMatchObject({
-      error: { code: "CODESPACE_NOT_CONFIGURED" },
-      settings_url: SETTINGS_URL,
-    });
+    const response = await request(appWith(disabled))
+      .get(prefix)
+      .query({ provider: "github-codespaces" });
+    expect(response.status).toBe(200);
+    expect(response.body.data).toMatchObject({ readiness: { state: "disabled" }, codespaces: [] });
   });
-
-  test("creates a codespace and returns the owner summary with an unobserved machine", async () => {
-    const dependencies = services();
-    const response = await request(appWith(dependencies))
-      .post("/api/integrations/github/codespaces")
-      .send({ repository_id: "42", ref: "feature" });
-    expect(response.status).toBe(201);
-    expect(response.body.data.codespace).toEqual(codespace({ state: "create_submitted" }));
-    expect(dependencies.connection.refreshGrants).toHaveBeenCalledWith("user-a");
-    expect(dependencies.resource!.create).toHaveBeenCalledWith(
-      "user-a",
-      "42",
-      "feature",
-      undefined,
-    );
-  });
-
-  test("serves the stored management snapshot with an explicit stale marker", async () => {
+  test("stored grant fallback remains explicit and avoids absence reconciliation", async () => {
+    const base = services();
     const dependencies = services({
       connection: {
-        ...services().connection,
+        ...base.connection,
         refreshGrants: jest.fn(async () => ({ refreshed: false, stale: true })),
       },
     });
-    const response = await request(appWith(dependencies)).get(
-      "/api/integrations/github/codespaces",
-    );
+    const response = await request(appWith(dependencies))
+      .post(`${prefix}/refresh`)
+      .send({ provider: "github-codespaces" });
     expect(response.status).toBe(200);
-    expect(response.body.data.repositories_stale).toBe(true);
-    expect(response.body.data.repositories).toEqual([
-      { repository_id: "42", name: "owner/repository", private: true },
-    ]);
+    expect(response.body.data).toMatchObject({
+      repositories_stale: true,
+      resources_stale: true,
+      codespaces: [{ codespace_id: CODESPACE_ID }],
+    });
+    expect(dependencies.semantic.invoke).not.toHaveBeenCalled();
   });
-
-  test("refreshes GitHub grants and managed resource state before returning the list", async () => {
+  test("fresh refresh observes its selected provider once after current grant refresh", async () => {
     const base = services();
     let present = true;
     const dependencies = services({
@@ -614,139 +410,159 @@ describe("website codespace management routes", () => {
       },
       resource: {
         ...base.resource!,
-        refreshProviderState: jest.fn(async () => {
-          present = false;
-          return { stale: false };
-        }),
-        listResources: async () => ({ codespaces: present ? [codespace()] : [], unavailable: [] }),
-      },
-    });
-
-    const response = await request(appWith(dependencies)).post(
-      "/api/integrations/github/codespaces/refresh",
-    );
-    expect(response.status).toBe(200);
-    expect(response.body.data).toMatchObject({ resources_stale: false, codespaces: [] });
-    expect(dependencies.connection.refreshGrants).toHaveBeenCalledWith("user-a", { force: true });
-    expect(dependencies.resource!.refreshProviderState).toHaveBeenCalledWith("user-a", {
-      authorizationFresh: true,
-    });
-  });
-
-  test("stale GitHub grants preserve resources and skip absence reconciliation", async () => {
-    const base = services();
-    const dependencies = services({
-      connection: {
-        ...base.connection,
-        refreshGrants: jest.fn(async () => ({ refreshed: false, stale: true })),
-      },
-    });
-    const response = await request(appWith(dependencies)).post(
-      "/api/integrations/github/codespaces/refresh",
-    );
-    expect(response.status).toBe(200);
-    expect(response.body.data).toMatchObject({
-      repositories_stale: true,
-      resources_stale: true,
-      codespaces: [{ codespace_id: CODESPACE_ID }],
-    });
-    expect(dependencies.resource!.refreshProviderState).not.toHaveBeenCalled();
-  });
-
-  test("rejects malformed create input before any service call", async () => {
-    const dependencies = services();
-    const response = await request(appWith(dependencies))
-      .post("/api/integrations/github/codespaces")
-      .send({ repository_id: "", ref: "main" });
-    expect(response.status).toBe(400);
-    expect(dependencies.resource!.create).not.toHaveBeenCalled();
-  });
-
-  test("stop preserves data and delete requires confirmation with the current generation", async () => {
-    const dependencies = services();
-    const stopped = await request(appWith(dependencies)).post(
-      `/api/integrations/github/codespaces/${CODESPACE_ID}/stop`,
-    );
-    expect(stopped.status).toBe(200);
-    expect(stopped.body.data).toMatchObject({
-      data_preserved: true,
-      codespace: { state: "stopped" },
-    });
-
-    const unconfirmed = await request(appWith(dependencies))
-      .delete(`/api/integrations/github/codespaces/${CODESPACE_ID}`)
-      .send({ expected_generation: 3 });
-    expect(unconfirmed.status).toBe(400);
-    expect(unconfirmed.body.error.code).toBe("CODESPACE_DELETE_CONFIRMATION_REQUIRED");
-    expect(dependencies.resource!.deleteCodespace).not.toHaveBeenCalled();
-
-    const deleted = await request(appWith(dependencies))
-      .delete(`/api/integrations/github/codespaces/${CODESPACE_ID}`)
-      .send({ confirm_delete: true, expected_generation: 3 });
-    expect(deleted.status).toBe(200);
-    expect(deleted.body.data).toMatchObject({ data_preserved: false });
-    expect(dependencies.resource!.deleteCodespace).toHaveBeenCalledWith("user-a", CODESPACE_ID, 3, {
-      ownerConfirmed: true,
-      requestId: undefined,
-    });
-  });
-
-  test("maps bounded domain failures to status codes without provider detail", async () => {
-    const base = services();
-    const dependencies = services({
-      resource: {
-        ...base.resource!,
-        getCodespace: jest.fn(() => {
-          throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "foreign detail");
-        }),
-        startCodespace: jest.fn(async () => {
-          throw new CodespaceResourceError("CODESPACE_GENERATION_CONFLICT", "generation 9 != 3");
-        }),
-        create: jest.fn(async () => {
-          throw new CodespaceResourceError(
-            "CODESPACE_POLICY_LIMIT",
-            "limit detail",
-            "This Moira instance is at its ceiling of 16 held codespaces; stopped ones count too.",
-          );
-        }),
+        listResources: jest.fn(async () => ({
+          codespaces: present ? [codespace()] : [],
+          unavailable: [],
+        })),
       },
     });
     const app = appWith(dependencies);
-
-    const foreign = await request(app).get(`/api/integrations/github/codespaces/${CODESPACE_ID}`);
-    expect(foreign.status).toBe(404);
-    expect(foreign.text).not.toContain("foreign detail");
-
-    const malformed = await request(app).get("/api/integrations/github/codespaces/not-a-uuid");
-    expect(malformed.status).toBe(404);
-    expect(dependencies.resource!.getCodespace).toHaveBeenCalledTimes(1);
-
-    const conflict = await request(app).post(
-      `/api/integrations/github/codespaces/${CODESPACE_ID}/start`,
-    );
-    expect({ status: conflict.status, body: conflict.body }).toMatchObject({
-      status: 409,
-      body: { error: { code: "CODESPACE_GENERATION_CONFLICT" } },
-    });
-    expect(conflict.body.error.code).toBe("CODESPACE_GENERATION_CONFLICT");
-    expect(conflict.text).not.toContain("generation 9");
-
-    const limited = await request(app)
-      .post("/api/integrations/github/codespaces")
-      .send({ repository_id: "42", ref: "main" });
-    expect(limited.status).toBe(429);
-    // The operator sentence stays private; the bounded detail the refusal declared safe is shown.
-    expect(limited.text).not.toContain("limit detail");
-    expect(limited.body.error.message).toContain("ceiling of 16 held codespaces");
+    const initial = await request(app).get(prefix).query({ provider: "github-codespaces" });
+    expect(initial.body.data.codespaces).toHaveLength(1);
+    present = false;
+    const response = await request(app)
+      .post(`${prefix}/refresh`)
+      .send({ provider: "github-codespaces" });
+    expect(response.body.data).toMatchObject({ resources_stale: false, codespaces: [] });
+    expect(dependencies.connection.refreshGrants).toHaveBeenCalledWith("user-a", { force: true });
+    expect(dependencies.resource!.listResources).toHaveBeenCalledTimes(2);
+    expect(dependencies.semantic.invoke).not.toHaveBeenCalled();
   });
-
-  test("returns owned lifecycle metadata without a cloud command archive", async () => {
-    const response = await request(appWith(services())).get(
-      `/api/integrations/github/codespaces/${CODESPACE_ID}`,
-    );
+  test.each([
+    ["workspace_create", { target, branch: "feature" }],
+    ["workspace_lifecycle", { workspace: captured, action: "stop" }],
+    ["workspace_delete", { workspace: captured, confirm_delete: true }],
+    ["workspace_observe", { workspace: captured }],
+    ["workspace_adopt", { workspace: captured, controller }],
+    ["workspace_adopt_external", { controller, name: "owned-vm" }],
+    ["operation_get", { reference: operation }],
+    ["operation_find", { owner: controller, kind: "lifecycle", query: "Workspace" }],
+  ] as const)("%s delegates the exact semantic intent and current user", async (purpose, body) => {
+    const dependencies = services();
+    const response = await request(appWith(dependencies))
+      .post(`${prefix}/operations/${purpose}`)
+      .send(body);
     expect(response.status).toBe(200);
-    expect(response.body.data.codespace.codespace_id).toBe(CODESPACE_ID);
-    expect(response.body.data).not.toHaveProperty("operations");
-    expect(response.text).not.toContain("secret-marker");
+    expect(dependencies.semantic.invoke).toHaveBeenCalledWith(
+      "user-a",
+      purpose,
+      body,
+      undefined,
+      purpose === "workspace_delete" ? { ownerConfirmed: true } : undefined,
+    );
+    expect(response.body.data).toMatchObject({
+      operation,
+      state: "completed",
+      outcome: { ok: true, result: { workspace: captured, codespace_id: CODESPACE_ID } },
+    });
   });
+  test.each(["pending", "unconfirmed"])(
+    "%s receipt stays original without a fabricated completed outcome",
+    async (state) => {
+      const dependencies = services();
+      jest
+        .mocked(dependencies.semantic.invoke)
+        .mockResolvedValue({ operation, state, original: { phase: "submitted" } });
+      const response = await request(appWith(dependencies))
+        .post(`${prefix}/operations/workspace_lifecycle`)
+        .send({ workspace: captured, action: "stop" });
+      expect(response.body.data).toEqual({ operation, state, original: { phase: "submitted" } });
+      expect(response.body.data).not.toHaveProperty("outcome");
+    },
+  );
+  test.each([
+    { purpose: "workspace_create", body: { repository_id: "42", ref: "main" } },
+    {
+      purpose: "workspace_lifecycle",
+      body: { workspace: captured, action: "stop", generation: 3 },
+    },
+    { purpose: "workspace_delete", body: { workspace: captured } },
+    { purpose: "operation_get", body: { reference: operation, request_id: "raw" } },
+  ])("malformed $purpose refuses before semantic dispatch", async ({ purpose, body }) => {
+    const dependencies = services();
+    const response = await request(appWith(dependencies))
+      .post(`${prefix}/operations/${purpose}`)
+      .send(body);
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe("CODESPACE_RESOURCE_INVALID");
+    expect(dependencies.semantic.invoke).not.toHaveBeenCalled();
+  });
+  test.each([
+    "/",
+    "/00000000-0000-4000-8000-000000000001/start",
+    "/00000000-0000-4000-8000-000000000001/stop",
+  ])("legacy mutation path %s does not dispatch", async (path) => {
+    const dependencies = services();
+    const response = await request(appWith(dependencies))
+      .post(`${prefix}${path}`)
+      .send({ request_id: "raw", expected_generation: 3 });
+    expect(response.status).toBe(404);
+    expect(dependencies.semantic.invoke).not.toHaveBeenCalled();
+  });
+  test.each([
+    ["LOCAL_UNAUTHORIZED", 401],
+    ["LOCAL_CONFLICT", 409],
+    ["LOCAL_UNAVAILABLE", 503],
+  ] as const)("current authority failure %s uses a closed HTTP response", async (code, status) => {
+    const dependencies = services();
+    jest
+      .mocked(dependencies.semantic.invoke)
+      .mockRejectedValue(new LocalDeviceError(code, "private-controller-path secret-credential"));
+    const response = await request(appWith(dependencies))
+      .post(`${prefix}/operations/workspace_lifecycle`)
+      .send({ workspace: captured, action: "start" });
+    expect(response.status).toBe(status);
+    expect(response.body.error.code).toBe(code);
+    expect(response.text).not.toMatch(/private-controller-path|secret-credential|request_id/);
+  });
+  test("confirmed domain error returns only its declared safe provider detail", async () => {
+    const dependencies = services();
+    const error = new CodespaceResourceError(
+      "CODESPACE_CREATE_REJECTED",
+      "private host diagnosis",
+      "Configured provider budget prevents creation",
+      true,
+    );
+    error.providerFailure = {
+      kind: "http",
+      phase: "request",
+      status: 402,
+      githubRequestId: "AB12:CD34",
+      reason: "Configured provider budget prevents creation",
+    };
+    jest.mocked(dependencies.semantic.invoke).mockRejectedValue(error);
+    const response = await request(appWith(dependencies))
+      .post(`${prefix}/operations/workspace_create`)
+      .send({ target, branch: "main" });
+    expect(response.status).toBe(422);
+    expect(response.body.error).toMatchObject({
+      code: "CODESPACE_CREATE_REJECTED",
+      provider_failure: { status: 402 },
+    });
+    expect(response.body.error.message).toContain("Configured provider budget");
+    expect(response.text).not.toContain("private host diagnosis");
+  });
+  test.each([
+    ["CODESPACE_LOCAL_CREATION_UNKNOWN", 409, "do not create a replacement"],
+    ["CODESPACE_LOCAL_PROTOCOL_ERROR", 409, "matching server and companion"],
+    ["CODESPACE_LOCAL_RUNTIME_ERROR", 503, "runtime diagnostics"],
+    ["CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED", 403, "Moira Settings > Local computers"],
+  ] as const)(
+    "local diagnostic %s keeps its actionable safe HTTP message",
+    async (code, status, instruction) => {
+      const dependencies = services();
+      jest
+        .mocked(dependencies.semantic.invoke)
+        .mockRejectedValue(new CodespaceResourceError(code, "private-host-path secret-credential"));
+      const response = await request(appWith(dependencies))
+        .post(`${prefix}/operations/workspace_lifecycle`)
+        .send({ workspace: captured, action: "stop" });
+      expect(response.status).toBe(status);
+      expect(response.body.error.code).toBe(code);
+      expect(response.body.error.message).toContain(instruction);
+      expect(response.text).not.toMatch(
+        /private-host-path|secret-credential|data are preserved|data is preserved/,
+      );
+    },
+  );
 });

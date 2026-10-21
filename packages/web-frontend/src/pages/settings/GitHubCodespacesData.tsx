@@ -1,39 +1,149 @@
-/**
- * One data source for the GitHub & Codespaces section.
- *
- * The connection card and the codespaces card used to load and keep their own copies, so
- * disconnecting in one left the other showing codespaces for a connection that no longer existed.
- * Both now read the same state from here: the connection view (`GET /api/integrations/github`) and
- * the codespace view with repositories and limits (`GET /api/integrations/github/codespaces`),
- * loaded together; any change either card makes reloads what it can affect.
- */
-
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+/** Connection authority is shared; each provider/view owns its discovery response and request fence. */
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { apiClient } from "@/services/api-client";
 import type { CodespaceConnectionView } from "@mcp-moira/shared";
-import type { CodespaceManagementView } from "@/types/api-types";
+import type {
+  CodespaceManagementView,
+  WorkspaceDiscoveryProvider,
+  WorkspaceDiscoveryView,
+} from "@/types/api-types";
 import { useLatestRequest } from "@/hooks/useLatestRequest";
+import { useResource } from "@/hooks/useResource";
 import { useRefreshOnActivation } from "@/components/settings/useRefreshOnActivation";
+import { useReadOwnerGuard } from "@/auth/ReadScopeBoundary";
+import {
+  getReadOwner,
+  getReadScopeVersion,
+  isPrivateReadSuspended,
+  subscribeReadScope,
+} from "@/services/read-scope";
 
-export interface GitHubCodespacesState {
+type ReloadOptions = { silent?: boolean; sync?: boolean; throwOnError?: boolean };
+type DiscoveryResult = { data: CodespaceManagementView | null; pending: boolean; error: boolean };
+type OwnedDiscoveryResult = DiscoveryResult & { owner: string };
+const emptyResult: DiscoveryResult = { data: null, pending: true, error: false };
+
+function useProviderDiscovery(provider: WorkspaceDiscoveryProvider) {
+  const guard = useReadOwnerGuard();
+  const scope = useSyncExternalStore(subscribeReadScope, getReadScopeVersion, getReadScopeVersion);
+  const owner = getReadOwner();
+  const visited = useRef(new Set<WorkspaceDiscoveryView>(["actionable"]));
+  const [view, setView] = useState<WorkspaceDiscoveryView>("actionable");
+  const [results, setResults] = useState<
+    Partial<Record<WorkspaceDiscoveryView, OwnedDiscoveryResult>>
+  >({});
+  const actionable = useLatestRequest(),
+    diagnostics = useLatestRequest(),
+    history = useLatestRequest();
+  const requests = useMemo(
+    () => ({ actionable, diagnostics, history }),
+    [actionable, diagnostics, history],
+  );
+  const load = useCallback(
+    async (
+      target: WorkspaceDiscoveryView,
+      { sync = false, silent = false, throwOnError = false }: ReloadOptions = {},
+    ) => {
+      const current = requests[target]();
+      const capturedScope = getReadScopeVersion();
+      const capturedOwner = getReadOwner();
+      const owned = guard();
+      const applicable = () => current() && owned() && capturedScope === getReadScopeVersion();
+      visited.current.add(target);
+      if (!silent)
+        setResults((previous) => ({
+          ...previous,
+          [target]: {
+            ...(previous[target]?.owner === capturedOwner ? previous[target] : emptyResult),
+            owner: capturedOwner,
+            pending: true,
+            error: false,
+          },
+        }));
+      if (isPrivateReadSuspended()) return false;
+      try {
+        const data = sync
+          ? await apiClient.refreshCodespaces(provider, target)
+          : await apiClient.getCodespaces(provider, target);
+        if (applicable())
+          setResults((previous) => ({
+            ...previous,
+            [target]: { owner: capturedOwner, data, pending: false, error: false },
+          }));
+        return true;
+      } catch (error) {
+        if (applicable())
+          setResults((previous) => ({
+            ...previous,
+            [target]: {
+              ...(previous[target]?.owner === capturedOwner ? previous[target] : emptyResult),
+              owner: capturedOwner,
+              pending: false,
+              ...(!silent ? { error: true } : {}),
+            },
+          }));
+        if (throwOnError && applicable()) throw error;
+        return false;
+      }
+    },
+    [provider, requests, guard],
+  );
+  useEffect(() => {
+    // Revalidate each observed view independently; an unopened history is not an implicit read.
+    for (const target of visited.current) void load(target);
+  }, [load, scope]);
+  const reload = useCallback((options?: ReloadOptions) => load(view, options), [load, view]);
+  const select = useCallback(
+    (target: WorkspaceDiscoveryView) => {
+      setView(target);
+      void load(target);
+    },
+    [load],
+  );
+  const update = useCallback(
+    (change: React.SetStateAction<CodespaceManagementView | null>) => {
+      const owned = guard();
+      if (!owned() || owner !== getReadOwner() || scope !== getReadScopeVersion()) return;
+      requests[view]();
+      setResults((previous) => {
+        const current = previous[view]?.owner === owner ? previous[view] : emptyResult;
+        return {
+          ...previous,
+          [view]: {
+            ...current,
+            owner,
+            data: typeof change === "function" ? change(current.data) : change,
+            pending: false,
+          },
+        };
+      });
+    },
+    [guard, requests, view, scope, owner],
+  );
+  const accepted = results[view];
+  const result = !isPrivateReadSuspended() && accepted?.owner === owner ? accepted : emptyResult;
+  return { view, result, reload, select, update };
+}
+
+type DiscoveryState = ReturnType<typeof useProviderDiscovery>;
+interface GitHubCodespacesState {
   connection: CodespaceConnectionView | null;
   connectionLoading: boolean;
   connectionError: boolean;
-  management: CodespaceManagementView | null;
-  managementLoading: boolean;
-  managementError: boolean;
-  /** Replace the connection view with one a connection request returned, then refresh codespaces. */
-  applyConnection: (next: CodespaceConnectionView) => void;
-  reloadConnection: () => Promise<void>;
-  /** `sync` asks GitHub for current resource state; `silent` keeps the current view on screen. */
-  reloadManagement: (options?: {
-    silent?: boolean;
-    sync?: boolean;
-    throwOnError?: boolean;
-  }) => Promise<boolean>;
-  setManagement: React.Dispatch<React.SetStateAction<CodespaceManagementView | null>>;
+  applyConnection(next: CodespaceConnectionView): void;
+  reloadConnection(): Promise<void>;
+  discovery: Record<WorkspaceDiscoveryProvider, DiscoveryState>;
+  reloadManagement(provider: WorkspaceDiscoveryProvider, options?: ReloadOptions): Promise<boolean>;
 }
-
 const GitHubCodespacesContext = createContext<GitHubCodespacesState | null>(null);
 
 export function GitHubCodespacesProvider({
@@ -45,102 +155,51 @@ export function GitHubCodespacesProvider({
   active?: boolean;
   view?: "environments" | "github" | "local";
 }) {
-  const [connection, setConnection] = useState<CodespaceConnectionView | null>(null);
-  const [connectionLoading, setConnectionLoading] = useState(true);
-  const [connectionError, setConnectionError] = useState(false);
-  const [management, setManagement] = useState<CodespaceManagementView | null>(null);
-  const [managementLoading, setManagementLoading] = useState(true);
-  const [managementError, setManagementError] = useState(false);
-  const beginConnectionRequest = useLatestRequest();
-  const beginManagementRequest = useLatestRequest();
-
-  const reloadConnection = useCallback(async () => {
-    const isCurrent = beginConnectionRequest();
-    try {
-      setConnectionLoading(true);
-      setConnectionError(false);
-      const next = await apiClient.getGitHubCodespaceConnection();
-      if (isCurrent()) setConnection(next);
-    } catch {
-      if (isCurrent()) setConnectionError(true);
-    } finally {
-      if (isCurrent()) setConnectionLoading(false);
-    }
-  }, [beginConnectionRequest]);
-
-  const reloadManagement = useCallback(
-    async ({
-      sync = false,
-      silent = false,
-      throwOnError = false,
-    }: { silent?: boolean; sync?: boolean; throwOnError?: boolean } = {}) => {
-      const isCurrent = beginManagementRequest();
-      try {
-        if (!silent) {
-          setManagementLoading(true);
-          setManagementError(false);
-        }
-        const next = sync
-          ? await apiClient.refreshGitHubCodespaces()
-          : await apiClient.getGitHubCodespaces();
-        if (isCurrent()) setManagement(next);
-        return true;
-      } catch (error) {
-        if (isCurrent() && !silent) setManagementError(true);
-        if (throwOnError) throw error;
-        return false;
-      } finally {
-        if (isCurrent()) setManagementLoading(false);
-      }
-    },
-    [beginManagementRequest],
+  const {
+    data: connection,
+    pending: connectionLoading,
+    error: connectionError,
+    refresh: reloadConnection,
+    update: updateConnection,
+  } = useResource<CodespaceConnectionView>("github-codespace-connection", () =>
+    apiClient.getGitHubCodespaceConnection(),
   );
-
-  useEffect(() => {
-    void reloadConnection();
-    void reloadManagement();
-  }, [reloadConnection, reloadManagement]);
+  const scope = getReadScopeVersion();
+  const local = useProviderDiscovery("local-sandboxes"),
+    github = useProviderDiscovery("github-codespaces");
+  const reloadLocal = local.reload,
+    reloadGitHub = github.reload;
   useRefreshOnActivation(active && view === "github", reloadConnection);
-  useRefreshOnActivation(active && (view === "environments" || view === "local"), reloadManagement);
-
+  useRefreshOnActivation(active && view === "environments", github.reload);
+  useRefreshOnActivation(active && view === "local", local.reload);
   const applyConnection = useCallback(
     (next: CodespaceConnectionView) => {
-      beginConnectionRequest();
-      setConnection(next);
-      setConnectionLoading(false);
-      setConnectionError(false);
-      void reloadManagement({ silent: true });
+      if (scope !== getReadScopeVersion() || isPrivateReadSuspended()) return;
+      // All connection effects are enabled by an accepted connection observation.
+      updateConnection(() => next);
+      void reloadGitHub({ silent: true });
     },
-    [reloadManagement, beginConnectionRequest],
+    [scope, updateConnection, reloadGitHub],
   );
-
-  const value = useMemo(
-    () => ({
-      connection,
-      connectionLoading,
-      connectionError,
-      management,
-      managementLoading,
-      managementError,
-      applyConnection,
-      reloadConnection,
-      reloadManagement,
-      setManagement,
-    }),
-    [
-      connection,
-      connectionLoading,
-      connectionError,
-      management,
-      managementLoading,
-      managementError,
-      applyConnection,
-      reloadConnection,
-      reloadManagement,
-    ],
+  const reloadManagement = useCallback(
+    (provider: WorkspaceDiscoveryProvider, options?: ReloadOptions) =>
+      provider === "local-sandboxes" ? reloadLocal(options) : reloadGitHub(options),
+    [reloadLocal, reloadGitHub],
   );
   return (
-    <GitHubCodespacesContext.Provider value={value}>{children}</GitHubCodespacesContext.Provider>
+    <GitHubCodespacesContext.Provider
+      value={{
+        connection: connection ?? null,
+        connectionLoading,
+        connectionError: connectionError !== null,
+        applyConnection,
+        reloadConnection,
+        discovery: { "local-sandboxes": local, "github-codespaces": github },
+        reloadManagement,
+      }}
+    >
+      {children}
+    </GitHubCodespacesContext.Provider>
   );
 }
 
@@ -148,4 +207,7 @@ export function useGitHubCodespaces(): GitHubCodespacesState {
   const value = useContext(GitHubCodespacesContext);
   if (!value) throw new Error("useGitHubCodespaces must be used inside GitHubCodespacesProvider");
   return value;
+}
+export function useCodespaceDiscovery(provider: WorkspaceDiscoveryProvider) {
+  return useGitHubCodespaces().discovery[provider];
 }

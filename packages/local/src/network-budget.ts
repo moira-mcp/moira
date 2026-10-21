@@ -35,7 +35,7 @@ export class NetworkBudget {
         .then(() => admission.refreshPolicy?.() ?? policy)
         .then((fresh) => {
           if (signal.aborted) throw cancelled();
-          if (!fresh.enabled || fresh.leaseUntil <= Date.now())
+          if (!fresh.enabled)
             throw new LocalRefusal(
               "LOCAL_NETWORK_DENIED",
               "Local network permission is unavailable.",

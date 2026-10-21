@@ -35,8 +35,7 @@ describe("MCP communication tool", () => {
 
   test("ordinary configured-channel text remains callable without a file owner", async () => {
     expect(
-      await callMCPTool(clients[0]!.client, "communication", {
-        action: "send",
+      await callMCPTool(clients[0]!.client, "communication_send", {
         message: "Test-only notification",
       }),
     ).toMatchObject({ status: "no_configured_channels", deliveredChannels: 0 });
@@ -55,8 +54,8 @@ describe("MCP communication tool", () => {
         id: 67,
         method: "tools/call",
         params: {
-          name: "communication",
-          arguments: { action: "send", message: "private", recipient: "someone-else" },
+          name: "communication_send",
+          arguments: { message: "private", recipient: "someone-else" },
         },
       }),
     });
@@ -64,11 +63,8 @@ describe("MCP communication tool", () => {
     expect(await response.json()).toMatchObject({ error: { code: -32602 } });
   });
 
-  test("native delivery without a paired owner refuses before admission and preserves the chosen original identity", async () => {
-    const request_id = "ws1-033c20a1-3c09-487e-8d60-c75226769951";
-    const result = await callMCPTool(clients[0]!.client, "communication", {
-      action: "deliver-file",
-      request_id,
+  test("native delivery without a paired owner refuses before admission without fabricating an operation", async () => {
+    const result = await callMCPTool(clients[0]!.client, "communication_deliver", {
       kind: "document",
       message: "Report",
       file: {
@@ -80,19 +76,24 @@ describe("MCP communication tool", () => {
       },
     });
     expect(result).toMatchObject({
-      status: "unavailable",
-      request_id,
       error: { code: "COMMUNICATION_OWNER_UNAVAILABLE" },
     });
+    expect(result).not.toHaveProperty("operation");
     expect(JSON.stringify(result)).not.toContain("download_url");
   });
 
-  test("collection requires the original assigned owner and does not create an upload grant", async () => {
-    const result = await callMCPTool(clients[1]!.client, "communication", {
-      action: "operation",
-      request_id: "ws1-3669eb26-6af3-4e9e-a722-dcc43efa1792",
+  test("raw request IDs cannot collect a delivery or create an upload grant", async () => {
+    await expect(
+      clients[1]!.client.callTool({
+        name: "operation_get",
+        arguments: { reference: "ws1-3669eb26-6af3-4e9e-a722-dcc43efa1792" },
+      }),
+    ).rejects.toMatchObject({
+      code: 400,
+      message: expect.stringContaining(
+        '"error":{"code":-32602,"message":"Invalid workspace purpose parameters"}',
+      ),
     });
-    expect(result).toEqual({ status: "rejected", reason: "original_owner_identity_required" });
     expect(
       execSqliteInDocker(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('codespaceTransfer','communication_attachment_grant')",

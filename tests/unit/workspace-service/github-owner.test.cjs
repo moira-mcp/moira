@@ -1,5 +1,6 @@
 const { beforeAll, afterEach, expect, test } = require("@jest/globals");
 const { execFileSync } = require("node:child_process");
+const { randomUUID } = require("node:crypto");
 const {
   writeFileSync,
   readFileSync,
@@ -12,6 +13,8 @@ const { join } = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { createFixture, start, call, dispose } = require("../../fixtures/workspace-service.cjs");
 let configureOwnerGit, originalGitOrigin, createWorkspaceEngine, createWorkspaceRequestId;
+let serveOwnerGit;
+let decodeReference;
 const fixtures = [];
 const socketDirectories = [];
 beforeAll(async () => {
@@ -20,6 +23,9 @@ beforeAll(async () => {
   ({ createWorkspaceEngine } = await import("../../../packages/workspace-service/src/engine.mjs"));
   ({ createWorkspaceRequestId } =
     await import("../../../packages/shared/src/codespaces/workspace-request-id.ts"));
+  ({ serveOwnerGit } = await import("../../../packages/workspace-service/src/github-owner.mjs"));
+  ({ decodeReference } =
+    await import("../../../packages/shared/src/codespaces/workspace-references.mjs"));
 });
 afterEach(async () => {
   try {
@@ -31,12 +37,43 @@ afterEach(async () => {
 });
 function fixture() {
   const value = createFixture();
+  value.ownerSelector = { kind: "github", resourceId: randomUUID() };
   fixtures.push(value);
   return value;
 }
 function git(value, ...args) {
   return execFileSync("git", ["-C", value.root, ...args], { encoding: "utf8" }).trim();
 }
+
+test("anonymous Git admission has no work expiry and still obeys owner cancellation before transport", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let disposed = false;
+  await expect(
+    serveOwnerGit(
+      {
+        url: "/git/owner/project.git/info/refs?service=git-upload-pack",
+        method: "GET",
+        headers: {},
+      },
+      {},
+      {
+        repositoryFullName: "owner/project",
+        allowPush: false,
+        signal: controller.signal,
+        acquire: async () => ({
+          mode: "anonymous",
+          repositoryFullName: "owner/project",
+          useUntil: null,
+          dispose: async () => {
+            disposed = true;
+          },
+        }),
+      },
+    ),
+  ).rejects.toThrow("TLS transport refused");
+  expect(disposed).toBe(true);
+});
 
 test("owned Git transport retains canonical remote and unchanged life but refuses a foreign effective push mapping", async () => {
   const value = fixture();
@@ -115,31 +152,36 @@ test("original PR create identity collects the retained owner result across repl
   value.pullRequestFixture = pathToFileURL(module).href;
   await start(value);
   const requestId = createWorkspaceRequestId();
-  const request = { request_id: requestId, head: "work", base: "main", title: "Owner PR" };
-  const send = async (input) =>
+  const request = { head: "work", base: "main", title: "Owner PR" };
+  const send = async (input, action = "pull_request_create") =>
     call(
       value,
       "POST",
       "/v1/tools",
-      { action: "pull_request_create", request: input },
+      { action, request: input, ...(action === "pull_request_create" ? { requestId } : {}) },
       { "content-type": "application/json" },
     );
   const created = await send(request);
   expect(created.status).toBe(200);
   const result = JSON.parse(created.bytes.toString()).structuredContent;
   expect(result).toMatchObject({
-    request_id: requestId,
-    state: "succeeded",
-    pull_request: { number: 7 },
+    state: "completed",
+    outcome: { ok: true, result: { state: "succeeded", pull_request: { number: 7 } } },
+  });
+  expect(decodeReference(result.operation, "operation")).toEqual({
+    owner: value.ownerSelector,
+    requestId,
+    kind: "pull-request",
   });
   const collected = JSON.parse(
-    (await send({ request_id: requestId })).bytes.toString(),
+    (await send({ reference: result.operation }, "operation_get")).bytes.toString(),
   ).structuredContent;
   expect(collected).toEqual(result);
   expect(JSON.parse((await send(request)).bytes.toString()).structuredContent).toEqual(result);
   expect(readFileSync(effect, "utf8")).toBe("pull_request_create\n");
   const conflict = JSON.parse((await send({ ...request, title: "Other intent" })).bytes.toString());
   expect(conflict.structuredContent.error.code).toBe("REQUEST_ID_CONFLICT");
+  expect(conflict.structuredContent.operation).toBe(result.operation);
   expect(readFileSync(effect, "utf8")).toBe("pull_request_create\n");
 });
 
@@ -168,30 +210,50 @@ test.each([false, true])(
     value.pullRequestFixture = pathToFileURL(module).href;
     await start(value);
     const requestId = createWorkspaceRequestId();
-    const request = { request_id: requestId, head: "work", base: "main", title: "Socket proof" };
-    const send = async (input) =>
+    const request = { head: "work", base: "main", title: "Socket proof" };
+    const send = async (input, action = "pull_request_create") =>
       JSON.parse(
         (
           await call(
             value,
             "POST",
             "/v1/tools",
-            { action: "pull_request_create", request: input },
+            { action, request: input, ...(action === "pull_request_create" ? { requestId } : {}) },
             { "content-type": "application/json" },
           )
         ).bytes.toString(),
       ).structuredContent;
     const result = await send(request);
-    expect(result).toMatchObject({
-      request_id: requestId,
-      state: connected ? "unknown" : "not_started",
-      reason: connected ? "PULL_REQUEST_OUTCOME_UNKNOWN" : "CODESPACE_PROVIDER_UNAVAILABLE",
+    expect(decodeReference(result.operation, "operation")).toEqual({
+      owner: value.ownerSelector,
+      requestId,
+      kind: "pull-request",
     });
+    expect(result).toMatchObject(
+      connected
+        ? {
+            state: "unconfirmed",
+            original: { state: "unknown", reason: "PULL_REQUEST_OUTCOME_UNKNOWN" },
+          }
+        : {
+            state: "completed",
+            outcome: {
+              ok: false,
+              error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" },
+              result: { state: "not_started", reason: "CODESPACE_PROVIDER_UNAVAILABLE" },
+            },
+          },
+    );
+    expect(Object.hasOwn(result, "outcome")).toBe(!connected);
     expect(existsSync(effect)).toBe(connected);
-    if (connected) expect(readFileSync(effect, "utf8")).toBe("dispatch\n");
-    expect(await send({ request_id: requestId })).toEqual(result);
+    expect(existsSync(effect) ? readFileSync(effect, "utf8") : null).toBe(
+      connected ? "dispatch\n" : null,
+    );
+    expect(await send({ reference: result.operation }, "operation_get")).toEqual(result);
     expect(await send(request)).toEqual(result);
-    if (connected) expect(readFileSync(effect, "utf8")).toBe("dispatch\n");
+    expect(existsSync(effect) ? readFileSync(effect, "utf8") : null).toBe(
+      connected ? "dispatch\n" : null,
+    );
     expect(
       JSON.parse(readFileSync(join(value.stateRoot, "requests", requestId, "result.json"), "utf8")),
     ).toMatchObject({ state: connected ? "unknown" : "not_started" });

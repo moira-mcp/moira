@@ -299,7 +299,7 @@ test("the actual settings composition keeps navigation and independent controls 
   jest
     .spyOn(apiClient, "getGitHubCodespaceConnection")
     .mockRejectedValue(new Error("provider unavailable"));
-  jest.spyOn(apiClient, "getGitHubCodespaces").mockRejectedValue(new Error("provider unavailable"));
+  jest.spyOn(apiClient, "getCodespaces").mockRejectedValue(new Error("provider unavailable"));
   show(
     <BrowserRouter>
       <FeaturesProvider>
@@ -381,7 +381,7 @@ function mountSettingsProfile(
   jest
     .spyOn(apiClient, "getGitHubCodespaceConnection")
     .mockRejectedValue(new Error("provider unavailable"));
-  jest.spyOn(apiClient, "getGitHubCodespaces").mockRejectedValue(new Error("provider unavailable"));
+  jest.spyOn(apiClient, "getCodespaces").mockRejectedValue(new Error("provider unavailable"));
   return show(
     <MemoryRouter initialEntries={[initialEntry]}>
       <FeaturesProvider>

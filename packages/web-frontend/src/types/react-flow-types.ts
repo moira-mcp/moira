@@ -2,7 +2,7 @@
  * React Flow specific type definitions for MCP Moira
  */
 
-import { WorkflowNode, StructuredCondition } from "./workflow-types";
+import { WorkflowNode, StructuredCondition } from "./workflow-types.js";
 
 export interface Node {
   id: string;

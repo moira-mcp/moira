@@ -164,6 +164,11 @@ Use the root runners for focused checks:
 
 ```bash
 npm run test:unit -- --file tests/unit/workspace-service/service.test.cjs
+npm run test:unit -- --file tests/unit/workspace-service/semantic-owner.test.cjs
+npm run test:unit -- --file tests/unit/workspace-service/cli-native.test.cjs
+npm run test:unit -- --file tests/unit/workspace-service/native-publication.test.cjs
+npm run test:unit -- --file tests/unit/workspace-service/retention.test.cjs
+npm run test:unit -- --file tests/unit/workspace-service/daemon-diagnostics.test.cjs
 npm run test:unit -- --file tests/unit/local/controller.test.ts
 npm run test:unit -- --file tests/unit/local/controller-state.test.ts
 npm run test:integration -- --file tests/integration/workspace-router.test.ts
@@ -176,6 +181,15 @@ npm run test:integration -- --file tests/integration/local-device-control.test.t
 Host service fixtures require Git and ripgrep; the TLS router fixture also uses OpenSSL
 to create its disposable certificate. They use the repository's Node runtime.
 
+Discovery tests distinguish provider independence with deliberately unresolved GitHub,
+installation and billing reads while selected Local discovery completes. The provider and
+private-repository integrations check shared request-local observations, current registration
+fences, actionable known setup, diagnostic originals without lifecycle generations and retained
+history. Frontend settings tests check separate provider/view completion, lazy billing on the
+GitHub subsection, and rejection of late success or failure after same-account credential or
+capability changes. Browser scenarios exercise the current-view controls and original collection;
+these controlled responses do not prove live external provider availability.
+
 The common fixture in `tests/fixtures/workspace-service.cjs` owns a temporary Git
 repository, private state and Unix HTTP socket. Service cases observe real commands,
 exact binary and Unicode input/output, sessions, guarded files and direct CLI calls.
@@ -184,6 +198,32 @@ and actual command completion are distinguished from missing owner proof; surviv
 child or descendant effects after a response retain uncertainty. Cancellation never
 grants signal authority to a saved foreign PID. Storage faults observe directory/output
 sync errors before durable success.
+
+Retention fixtures inspect the real request directory and detached collector. Terminal native/stdin
+input is removed after physical reader settlement even when the observer has exited; original
+admission, input comparison metadata, result and complete stdout/stderr remain. Reopening and
+collecting or repeating the original identity neither reacquires input nor launches another effect.
+Live/unknown commands, file conflicts, weak or substituted identity and cleanup failure retain
+input and recovery membership. Guarded migration and filesystem read traps distinguish active
+lookup from a scan of terminal history; missing/corrupt indexes and orphan admissions refuse.
+The durable publisher case holds a directory capability across a named-path replacement, preserves
+the caller's open handle and excludes writes to the substitute directory.
+
+Daemon diagnostics cases exercise the actual rotating writer, oversized writes and restart,
+private-file checks, Node warnings and fatal sink failure without an inherited output fallback.
+These bounded service diagnostics do not impose a command-output retention limit.
+Host controller-state cases separately observe durable membership before effects, terminal and
+custody proof before removal, restart/replay and preservation of prepared provider/enrollment data.
+Routine pending/custody lookup is tested with terminal-history reads forbidden.
+
+Semantic owner and CLI cases use purpose-specific inputs and returned operation/process/file
+references over that same socket. They distinguish a concurrent text or inode replacement from
+the caller's captured file version, reject ambiguous/overlapping text patches, and preserve
+Cyrillic/emoji through complete-character file, initial command and output continuation windows.
+Discovery reads safe intent metadata without collecting candidates or exposing their result
+payloads. Explicit collection retains the original outcome; a lost first reply leaves candidates
+for explicit selection rather than authorizing resubmission. Two deliberately identical new calls
+remain separate intentions.
 
 Filesystem cases substitute targets and parents after staging and interrupt real
 multi-file publication. Owned recovery restores original bytes and inodes without replay.
@@ -204,8 +244,11 @@ remains a separate provider responsibility.
 The registered MCP fixture combines the real registry, lifecycle authority, attachment
 publication owner and Unix service. It edits and executes repository code, checks native binary
 upload/download and repeatable immutable publication, preserves files across restart and refuses
-foreign owners. Container-backed MCP cases check the advertised actions, `ws1-` command
-identities, strict action forms, setup guidance, normal path-based download and original-ID communication refusal/collection through the application origin without a configured provider.
+foreign owners. Container-backed MCP cases check the advertised purpose tools, strict semantic
+schemas, setup guidance, path-based download defaults and original-operation communication
+refusal/collection through the application origin without a configured provider. Private owner
+protocol tests retain their internal request identities; ordinary adapters do not ask callers to
+manufacture them.
 
 Local integration cases cover owner lifecycle receipts, policy, broker/device authority, SDK
 protocols, credential-store preparation, storage custody and independent shutdown.
@@ -246,8 +289,15 @@ a revoked binding with unresolved disk custody must still prevent metadata delet
 
 The browser fixture pairs and confirms its own device but does not connect a controller.
 It checks honest offline state, absence of effective settings, pre-admission write refusal
-and the same unavailable state after reload. UI unit cases separately check retained drafts,
-actual applied consent and original-ID recovery. Neither fixture claims a complete browser
+and the same unavailable state after reload. Separate mocked owner responses exercise the rendered
+English/Russian enabled, disabled, pending, rejected and unavailable cards, including persistent
+permission without expiry controls. Setup cards distinguish explicit same-VM resume and its
+preserved-root remedy, usable local work with unavailable enrollment or transport, and unknown
+creation with collection only. Those images establish UI behavior, not physical settings or VM effects.
+UI unit cases separately check retained drafts,
+actual applied consent, captured lifecycle/delete preconditions and original-operation recovery.
+Lost-first-reply cases keep explicit candidate selection even for one match; an absent original
+does not unblock resubmission. Neither fixture claims a complete browser
 settings effect on a physical VM.
 
 Host CLI cases refuse unsupported raw requests before creating private state. Supported
@@ -257,13 +307,25 @@ Git authority; transport loss does not revoke an existing paired owner's locally
 work. Journal cases check canonical-target serialization, failure cleanup and private
 custody; controller receipt cases cover durable original-ID collection and uncertainty
 after restarting an accepted request without replay.
+Host CLI cases also distinguish safe metadata discovery from full explicit collection and retain
+typed delivery uncertainty across both. Privileged maintenance/security collection uses the
+existing receipts and issuer collector: offline live custody and maintenance are readable, unknown
+IDs are locally absent without raw lifecycle fallback, issuer failure remains unconfirmed, and
+recovered-child disposal never becomes another issuance or Git effect.
 
+Provider/controller cases exercise setup resume on the same known runtime while retaining the
+failed original create receipt; unknown creation and custody recovery remain separate.
+Host orchestration fixtures use the real owner and private records with controlled runtime/cloud
+boundaries. They distinguish stopped initial-UNKNOWN acknowledgement from completed setup, then
+resume the same VM. Held credential/optional-author responses do not block local readiness or
+validation; generation, authority, revocation, stop and release changes reject stale enrollment.
+These fixtures do not establish native SDK recovery or an installed-owner update.
 Native recovery cases distinguish SDK/Engine custody from guest readiness, preserve
-peer state and unknown receipts, and exercise lease expiry, parent loss and emergency
+peer state and unknown receipts, and exercise persistent permission, parent loss and emergency
 shutdown. Storage fixtures check retained image reattachment, sector/byte sizing,
 lost replies and unsafe binding refusal without native disk tools. Broker cases check
 all resolved addresses, peer pinning, streaming backpressure, establishment-only timers
-and later revocation/lease closure. Network admission has no socket-count or traffic-ledger
+and later grant revocation or explicit disable. Network admission has no socket-count or traffic-ledger
 workload quota; authority remains mandatory. Local physical budgets and cloud billing
 capacity have separate fixtures.
 
@@ -273,6 +335,13 @@ cases are skips, not proof of native storage behavior. Controlled process/socket
 fixtures do not replace the disposable real-VM acceptance below.
 
 Owner communication fixtures distinguish source acquisition before admission from retained delivery uncertainty. The common service cases observe original-ID submit/collect, per-channel stages, source consumption and physical settlement, scope changes, separate long-message stages and no resend after a lost result. Framing cases exercise large Unicode control, coalesced prefix/file chunks and cancellation of a held original read. Actual HTTP refusal/replay fixtures require the complete known response before unread ingress closes.
+
+Native publication cases exercise successful semantic `file_upload` and `command_run_native`
+through the existing isolated source fixture. They compare exact binary bytes, discover and collect
+a lost upload reply after source refusal without reacquisition, and collect command stdin results
+across restart without a duplicate effect. This is controlled source transport evidence, not live
+ChatGPT attachment networking. Shared receipt-state cases distinguish typed credential/vendor
+uncertainty from confirmed refusal while leaving private stored receipts unchanged.
 
 `tests/integration/extension-owner.test.ts` exercises a real compiled installed binary handler, immutable artifact admission, demand-driven byte pipes, held vendor/source work and supervised completion. Fixed transport fixtures verify declared endpoint/recipient/secret authority, exact raw/multipart file bytes and early vendor completion without real provider sends. Migration fixtures compare the complete immutable transfer/grant archives and preserve retained bytes without replay.
 
@@ -289,7 +358,17 @@ npm run workspace:verify:guest
 This builds and packages the canonical payload, then exercises its installer, daemon
 and CLI in a network-disabled pinned Linux container. It checks actual startup refusal
 and readiness, single ownership, repository binding, exact binary/Unicode bytes, files,
-sessions, cancellation and restart receipts. The pinned image must already exist locally.
+sessions, cancellation and restart receipts. Setup scenarios exercise owned-stage continuation,
+exclusive publication without replacing occupied targets, and preserved repository/user contents.
+They distinguish usable Unix commands from unavailable cloud authority, automatic transport
+reconnection and later configuration reload into the same owner without replaying accepted work.
+The verifier uses the ordinary semantic CLI and tools, checked text references, complete UTF-8
+windows and binary streaming. Native source networking, real GitHub provisioning and actual vendor
+delivery are outside this network-disabled check. The pinned image must already exist locally.
+The assembled daemon scenarios also check competing-owner refusal without diagnostic modification,
+bounded diagnostics across restart, captured Node warnings and input retirement by the detached
+collector while the daemon is absent. Full stdout/stderr and compact original evidence survive;
+recollection and original-identity replay produce no additional command effect.
 Container compatibility and `npm run verify:docker` do not establish physical sbx
 ownership or host/LAN/VPN/metadata/other-VM isolation.
 
@@ -300,7 +379,7 @@ endpoints, exact repository/action authority, physical upstream closure and orig
 collection. Actual CLI subprocess cases distinguish a confirmed source refusal from retained
 credential custody/disposal uncertainty and an unknown post-dispatch PR effect, preserving both
 recovery identities without redispatch. Migrated issuer/account cases check encrypted candidate
-custody, pure security collection without mint, retirement cutoffs and retention of unresolved
+custody, original security collection without mint, retirement cutoffs and retention of unresolved
 credentials/resources before account cascade. These fixtures do not prove live GitHub permissions.
 
 The packaged Linux guest check also observes the actual GH daemon's inherited kernel lock,
@@ -314,8 +393,9 @@ Local physical VM/network acceptance remains separate below.
 Use the supported macOS runtime described in [CODESPACES.md](../docs/CODESPACES.md) with
 an explicitly approved disposable profile and repository. Validate usable mountless
 creation, guest Docker, command exits and separate output streams, native byte integrity,
-session directory/variables and file persistence across stop/start. Lease expiry and local
-emergency disable must stop physical work independently of the parent process, retain
+session directory/variables and file persistence across stop/start. Permission remains enabled
+without a work deadline; controlled authority clocks distinguish that contract from finite credential
+expiry. Explicit local disable must stop physical work independently of the client process, retain
 data and produce settled ownership before restart. Check that host files, credentials
 and SSH sockets are not forwarded; credential-shaped guest variables require classification
 against documented public placeholders rather than assuming that their presence means

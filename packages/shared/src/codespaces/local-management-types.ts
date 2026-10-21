@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { WORKSPACE_REQUEST_ID_PATTERN } from "./workspace-request-id.js";
+import { canonicalJson } from "../utils/canonical-json.js";
+import { LocalDeviceError, type LocalDeviceAuth } from "./local-device-types.js";
 
-export const MAX_LOCAL_WORK_LEASE_MS = 7 * 24 * 60 * 60_000;
 const integer = (min: number, max: number) => z.number().int().min(min).max(max);
 const text = (maximum: number) =>
   z
@@ -51,7 +52,6 @@ export const localDeviceSettingsSchema = z
   .object({
     label: text(80),
     enabled: z.boolean(),
-    leaseUntil: integer(0, Number.MAX_SAFE_INTEGER),
     cpuCores: integer(1, Number.MAX_SAFE_INTEGER),
     memoryBytes: integer(1, Number.MAX_SAFE_INTEGER),
     storageBytes: integer(1, Number.MAX_SAFE_INTEGER),
@@ -78,7 +78,6 @@ export const localControlCeilingSchema = z
     memoryBytes: integer(1, Number.MAX_SAFE_INTEGER),
     storageBytes: integer(1, Number.MAX_SAFE_INTEGER),
     dockerBytes: integer(1, Number.MAX_SAFE_INTEGER),
-    maxLeaseMs: integer(1, MAX_LOCAL_WORK_LEASE_MS),
   })
   .strict();
 export type LocalControlCeiling = z.infer<typeof localControlCeilingSchema>;
@@ -98,6 +97,81 @@ export const localRepositoryAdmissionReceiptSchema = z
   })
   .strict();
 export type LocalRepositoryAdmissionReceipt = z.infer<typeof localRepositoryAdmissionReceiptSchema>;
+
+/** Prove an original applied admission without treating its historical policy as current. */
+export function repositoryAdmissionProof(
+  value: unknown,
+  expected: {
+    userId: string;
+    deviceId: string;
+    connectionId: string;
+    deviceGeneration?: number;
+    requestId: string;
+    creationRequestId?: string;
+    githubRepositoryId?: string;
+  },
+): {
+  receipt: LocalRepositoryAdmissionReceipt;
+  repository: z.infer<typeof localManagementRepositorySchema>;
+  identity: LocalDeviceAuth;
+} {
+  const original = z
+    .object({
+      userId: z.literal(expected.userId),
+      deviceId: z.literal(expected.deviceId),
+      deviceGeneration: z.number().int().positive().safe(),
+      connectionId: z.literal(expected.connectionId),
+      ownerConnectionId: z.literal(expected.connectionId),
+      local: z.object({
+        state: z.literal("configured"),
+        control: z.object({
+          status: z.literal("applied"),
+          appliedRevision: z.number().int().positive().safe(),
+          repositoryAdmissions: z.array(localRepositoryAdmissionReceiptSchema),
+        }),
+        policy: z.object({ repositories: z.array(localManagementRepositorySchema) }),
+      }),
+    })
+    .parse(value);
+  const matching = original.local.control.repositoryAdmissions.filter(
+    (receipt) => receipt.requestId === expected.requestId,
+  );
+  const receipt = matching[0];
+  const repositories = original.local.policy.repositories.filter(
+    (repository) => repository.id === receipt?.localRepositoryId,
+  );
+  const repository = repositories[0];
+  if (
+    matching.length !== 1 ||
+    repositories.length !== 1 ||
+    !receipt ||
+    !repository ||
+    (expected.deviceGeneration !== undefined &&
+      original.deviceGeneration !== expected.deviceGeneration) ||
+    receipt.deviceGeneration !== original.deviceGeneration ||
+    receipt.connectionId !== original.connectionId ||
+    receipt.creationRequestId !== expected.creationRequestId ||
+    (expected.githubRepositoryId !== undefined &&
+      receipt.githubRepositoryId !== expected.githubRepositoryId) ||
+    original.local.control.appliedRevision < receipt.revision ||
+    receipt.repository.id !== receipt.localRepositoryId ||
+    canonicalJson(repository) !== canonicalJson(receipt.repository)
+  )
+    throw new LocalDeviceError(
+      "LOCAL_CONFLICT",
+      "The original repository admission is not confirmed.",
+    );
+  return {
+    receipt,
+    repository,
+    identity: {
+      userId: original.userId,
+      deviceId: original.deviceId,
+      deviceGeneration: original.deviceGeneration,
+      connectionId: original.connectionId,
+    },
+  };
+}
 export const localDeviceControlViewSchema = z
   .object({
     optedIn: z.boolean(),
@@ -150,39 +224,20 @@ export function assertAgentRepositoryAdmission(
     throw new Error("Repository addition exceeds the applied agent delegation.");
 }
 
-/** Compare parsed settings, preserving the exact order and content of every previous grant. */
+/** Classify physical interruption, independently of who may change repository authority. */
 export function isLiveLocalSettingsChange(
   previous: LocalDeviceSettingsValue,
   next: LocalDeviceSettingsValue,
 ): boolean {
-  const stable = (settings: LocalDeviceSettingsValue) => ({
-    ...settings,
-    repositories: [],
-    agentRepositoryManagement: null,
-  });
-  return (
-    JSON.stringify(stable(previous)) === JSON.stringify(stable(next)) &&
-    next.repositories.length >= previous.repositories.length &&
-    previous.repositories.every(
-      (repository, index) =>
-        JSON.stringify(repository) === JSON.stringify(next.repositories[index]),
-    )
-  );
+  return previous.enabled === next.enabled && previous.storageBytes === next.storageBytes;
 }
 
-/** The local opt-in and server save use exactly the same finite upper-bound decision. */
+/** The local opt-in and server save use the same approved resource bounds. */
 export function assertLocalControlSettings(
   settings: LocalDeviceSettingsValue,
   ceiling: LocalControlCeiling,
-  now: number,
 ): void {
   for (const key of Object.keys(ceiling) as (keyof LocalControlCeiling)[]) {
-    if (key !== "maxLeaseMs" && settings[key] > ceiling[key])
-      throw new Error(`Local control ceiling exceeded: ${key}`);
+    if (settings[key] > ceiling[key]) throw new Error(`Local control ceiling exceeded: ${key}`);
   }
-  if (
-    settings.enabled &&
-    (settings.leaseUntil <= now || settings.leaseUntil > now + ceiling.maxLeaseMs)
-  )
-    throw new Error("Local work lease exceeds its finite approval");
 }

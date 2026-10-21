@@ -889,51 +889,84 @@ execution inspector) receive `null` for a user that no longer exists and show th
   The token remains page-local and is absent from later device-list responses.
   After local enrollment, confirmation binds the device ID and label using the pairing
   revision; revoke uses the device generation. Current repository permissions, resource
-  settings and lease are read from the live owner's configured `owner.local.policy` and
+  settings and enabled permission are read from the live owner's configured `owner.local.policy` and
   `owner.local.control`. A neutral paired controller has `owner.local.state:"unconfigured"`:
   its connection and GitHub capability remain visible without fabricated Local settings.
   A refused decision keeps the selected device and accessible local error inside
   `ConfirmDialog`. Owner guards retire delayed actions after identity changes.
   Device cards show localized pending/active/revoked status and nullable last-seen
-  time. Revocation fences server access; local lease expiry and disable enforce
-  physical stop when a device cannot reach Moira.
+  time. Revocation fences server access; explicit local disable remains the owner's
+  physical-stop choice, including when the device cannot reach Moira.
   An unavailable owner shows explicit local feedback rather than cached policy as current;
   that state does not mean the device has no grants. Registry last-seen time remains separate.
-  `LocalDeviceEditor` edits the name, enabled state, finite lease, CPU/RAM, bounded disk and guest
+  `LocalDeviceEditor` edits the name, persistent enabled state, CPU/RAM, bounded disk and guest
   Docker capacity, repository read/push/PR/delete permissions, repository-management delegation
   and Git commit identity. It validates through the pure
   `@mcp-moira/shared/local-management-types` export. Web control requires explicit local
-  `web-control --confirm` approval; numeric ceilings remain locally owned and the lease cannot
-  exceed seven days. A PUT carries a fresh ws1 request ID, expected device generation and control revision.
+  `web-control --confirm` approval; numeric ceilings remain locally owned. Work remains
+  enabled until explicit disable; there is no datetime or renewal control. A PUT carries
+  a fresh ws1 request ID, expected device generation and control revision.
   Admitted owner settings and pending/applied/rejected revisions stay separate from effective policy;
   offline saves are refused before dispatch and drafts remain editable. A refusal
   exposes its reason while preserving fields. Fresh accepted settings update untouched fields;
   a pending save cannot discard a newer draft, including when submitted text is normalized.
   CPU/RAM/Docker defaults apply to new environments; existing environments retain their admitted
-  profile. Bounded disk changes require stopped owned work and companion verification.
+  profile. Label, Git identity, repository rights/delegation and default edits apply live
+  without stopping unrelated VMs. Git author settings take effect during workspace
+  preparation; saving them does not rewrite an existing running checkout's Git configuration.
+  Enablement and shared-disk changes use explicit stopped
+  control and companion verification. Missing proved VM admission refuses a default change.
   Owner `pendingRequestId` restores **Check settings result** after reload; it collects only the
   original receipt, without restoring or resending a saved draft. A known rejection allows a
   corrected request against the newly observed revision; an unresolved physical change remains blocked.
-- Codespace provider choice: the existing `GitHubCodespaceManagement` card offers
-  GitHub and Local providers. Readiness and connection use the selected provider's facts.
+  Historical success without a typed current snapshot clears only its matching pending
+  identity and refreshes current owner state; it does not install the old result as current policy.
+- Codespace provider choice: `GitHubCodespaceManagement` shows GitHub environments;
+  Local computer cards show their own Local environments. Readiness and connection use the
+  selected provider's facts.
   Readiness reports configuration as `disabled|misconfigured|ready`, not cached guest health
   or administrative controls. Local physical ceilings remain in current owner settings.
-  GitHub creation selects an explicit live paired controller, or the sole eligible one;
+  GitHub creation selects an explicit registered paired controller, or the sole eligible one;
   creation is refused before admission when none is eligible; multiple owners require selection.
   Repository choices are filtered by provider, local targets also
   show their device label, and a repository selected under another provider cannot
-  be submitted. Local agent work requires a live confirmed owner and enabled finite local lease;
-  it does not require a GitHub App connection. The combined codespace list retains
-  provider context and the existing Start/Stop/Delete controls. Creation and actions
+  be submitted. Local agent work requires a live confirmed owner and enabled local permission;
+  it does not require a GitHub App connection. Each provider's current-environment list retains
+  its context and Start/Stop/Delete controls for observed resources. Diagnostic identities offer
+  original collection without lifecycle controls. A known incomplete Local setup
+  shows **Resume setup** separately from disabled ordinary Start. It sends the captured workspace
+  reference to prepare the same VM; unknown creation offers original
+  state collection instead. Closed setup reasons explain preserved-root inspection, missing
+  publication prerequisites, repository access/ref repair or fixed configuration diagnostics.
+  A GitHub environment with verified local preparation and initial remote state `unconfigured`
+  or `enrollment_unavailable` also offers **Resume setup**. It continues enrollment from its
+  original retained proof on the same known VM, without another provider Start or installation.
+  Existing-credential `connecting` or `unavailable` states do not offer initial setup resume;
+  refused authority requires its own repair rather than automatic credential replacement.
+  Optional observed remote state distinguishes unconfigured, enrollment unavailable, connecting,
+  connected, connection unavailable and refused authority. Local usability remains independent
+  of these remote observations; absent health is not guessed from controller connectivity.
+  Creation and actions
   use the shared management endpoints under `/api/integrations/github/codespaces`;
-  the prefix does not restrict routing to GitHub. Every create chooses a ws1 request ID before
-  dispatch; Start/Stop/Delete also send the observed resource generation. A stale action is refused
-  and requires a fresh observation and decision. **Check state again** collects the original
-  pending IDs from the owner journal, or refreshes state when none is pending; it does not repeat
-  lifecycle mutations. Pending identities survive page reload through owner observations.
+  the prefix does not restrict routing to GitHub. Purpose-specific POSTs under `operations/:purpose`
+  use the same strict schemas as MCP. Create sends the selected target; lifecycle and delete send
+  returned workspace references unchanged, without browser-generated request IDs or generations.
+  A stale action requires a fresh observation and explicit decision. **Check state again** collects
+  the original operation reference or refreshes state when none is pending. `pending_operations`
+  restores collection after reload. If the first reply supplied no handle, the browser preserves
+  the selected controller and intent. Creation discovery keeps its repository query; non-create
+  recovery searches that controller's originals without assuming repository metadata in their
+  descriptions. The browser requires the user to choose a candidate even when only one matches.
+  No match or `absent` does not clear uncertainty or enable automatic resubmission.
+  Discovery shows safe metadata; explicit
+  collection reads the original outcome. Known uncertainty remains `unconfirmed` even when the
+  private handler receipt is terminal; confirmed refusal stays completed with a failed outcome.
+  Generic operation results remain opaque. A result can update a workspace card only when its
+  returned workspace reference addresses the same resource as its HTTP projection.
   Provider-specific disclosures
-  explain that local work stays inside locally approved bounds and lease. The
-  Settings screen tour includes the local-device anchor; the GitHub task tour
+  explain that local work stays inside current locally approved rights and resource bounds,
+  with permission lasting until explicit disable. The
+  Settings screen tour explains the current/diagnostics/history selector and includes the local-device anchor; the GitHub task tour
   retains its separate GitHub setup steps. English and Russian local-device text
   is merged under `localDevices` from the matching locale modules.
 
@@ -949,17 +982,28 @@ execution inspector) receive `null` for a user that no longer exists and show th
 - API tokens: the token list inside a card with status badges (Active/Expired/Revoked); a create
   dialog with name and expiration (30d/90d/365d/never); a one-time token display with copy and
   warning; revoke through `ConfirmDialog` (variant="destructive").
-- Development: `GitHubCodespacesProvider` loads connection and environment observations
-  independently; a failed refresh retains the other view and form drafts. The connection card
+- Development: `GitHubCodespacesProvider` retains separate connection and provider/view observations.
+  Provider requests can start together without waiting for one another; Local discovery and
+  its follow-up reads remain usable while GitHub or billing is pending. A failed refresh retains
+  other regions and form drafts. Each provider offers Current environments, Diagnostics and History.
+  Current environments (`actionable`) includes known incomplete setup; a diagnostic hint leads to uncertain or
+  unavailable identities and their original-result collection. Those identities do not expose
+  lifecycle controls or a guessed generation. History retains confirmed retired identities.
+  Switching views preserves records and does not replay work. A failed selected-provider read
+  remains distinct from a healthy empty list. The connection card
   shows the connection/installation/repository-grant stepper. GitHub creation requires personal
   billing; organization payers are refused before creation. Environment cards show repository,
   nullable current ref (falling back to requested ref), observed machine when available,
-  state and technical details. Start/Stop/Delete carry the observed owner generation and
-  original ws1 identity; Delete uses `ConfirmDialog`. GitHub adoption preserves an existing VM
+  state and technical details. Start/Stop/Delete carry the captured workspace reference;
+  Delete uses `ConfirmDialog` and preserves that exact target through background refresh and
+  refusal. A different observation requires a new human confirmation, not an automatic retry.
+  GitHub adoption explicitly selects a controller and preserves an existing VM
   while the assigned controller settles old custody and performs fixed preparation.
   `CodespaceAutoPause` edits `codespaces.auto_stop_enabled` and
   `codespaces.idle_timeout_minutes` within the server's provider range. This is provider idle
-  policy, not a cloud Moira stop timer. `CodespaceBillingPanel` displays current-month GitHub
+  policy, not a cloud Moira stop timer. Billing loads separately when the GitHub subsection is
+  active, through `GET /api/integrations/github/codespaces/billing`, with its own error and retry.
+  Environment Refresh does not request billing. `CodespaceBillingPanel` displays current-month GitHub
   compute, storage and billed amount, with an unavailable state when Plan read permission
   or the provider read is unavailable. There are no cloud held-resource, command or transfer
   quota meters. **Update GitHub permissions** opens App user consent through
@@ -1028,7 +1072,7 @@ PreferencesSettings.tsx
 - Handle change via PATCH /api/user/handle
 - GitHub codespace connection via GET /api/integrations/github, browser navigation to GET /api/integrations/github/start or GET /api/integrations/github/reauthorize for a connected account, and DELETE /api/integrations/github; the page reports every `?github=<outcome>` redirect as a localized toast (an unknown outcome as the generic authorization failure), and in `installation_required` the card shows Install GitHub App and Check installation (`github-codespace-check-installation`, a forced refresh) instead of Reconnect
 - External GitHub grant recovery via DELETE /api/integrations/github/external-revocation after the user revokes the grant in GitHub; this covers unreadable credentials and an untracked refresh successor
-- Installation and repository-grant refresh on Settings load plus the connection-card Refresh use `POST /api/integrations/github/refresh`; a failed provider read retains saved grants with a stale warning. Environment Refresh uses `POST /api/integrations/github/codespaces/refresh` for current grants, provider/owner resource observations and monthly billing. These reads do not reconcile or replay lifecycle effects; original pending operations are collected separately.
+- Installation and repository-grant refresh on Settings load plus the connection-card Refresh use `POST /api/integrations/github/refresh`; a failed provider read retains saved grants with a stale warning. Environment Refresh uses `POST /api/integrations/github/codespaces/refresh` with the selected `provider` and `view`; GitHub refresh includes its current grants, while Local reuses one request-local owner observation. Billing has its own read. These reads do not reconcile or replay lifecycle effects; original pending operations are collected separately.
 
 **Password Strength Indicator (Progress component):**
 

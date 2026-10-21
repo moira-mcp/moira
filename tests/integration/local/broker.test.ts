@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { connect, createServer, Socket } from "node:net";
-import { PrivateState } from "../../../packages/local/src/private-state.js";
+import { PrivateState, hostBootIdentity } from "../../../packages/local/src/private-state.js";
 import { startBroker } from "../../../packages/local/src/broker.js";
 import { startBrokerTunnel, BROKER_PREFACE } from "../../../packages/local/src/broker-tunnel.js";
 import { NetworkBudget } from "../../../packages/local/src/network-budget.js";
@@ -15,7 +15,7 @@ import { localFixture } from "./fixtures.js";
 import { LocalManager } from "../../../packages/local/src/manager.js";
 import { SbxRuntime } from "../../../packages/local/src/sbx-runtime.js";
 import { adaptSbxRuntime } from "../../../packages/local/src/local-vm-runtime-factory.js";
-import { LocalRefusal } from "../../../packages/local/src/policy.js";
+import { LocalRefusal, localRuntimeProfileHash } from "../../../packages/local/src/policy.js";
 import { gitBroker } from "../../../packages/local/src/git-broker.js";
 import {
   serveOwnerGit,
@@ -131,7 +131,7 @@ describe("local broker authority and address boundary", () => {
         credentialId: randomUUID(),
         repositoryFullName: grant.repository.fullName,
         expiresAt: Date.now() + 60000,
-        useUntil: grant.policy.leaseUntil,
+        useUntil: Date.now() + 60000,
         validate: async () => {},
         dispose: async () => {},
       }),
@@ -310,7 +310,6 @@ describe("local broker authority and address boundary", () => {
     "bad token",
     "revoked repository",
     "renamed repository",
-    "expired lease",
     "disabled policy",
   ])("resume CONNECT refuses %s before opening an upstream", async (reason) => {
     const fixture = await localFixture(state);
@@ -328,7 +327,6 @@ describe("local broker authority and address boundary", () => {
     else if (reason === "revoked repository") fixture.policy.repositories = [];
     else if (reason === "renamed repository")
       fixture.space.admittedRepositoryFullName = "owner/previous";
-    else if (reason === "expired lease") fixture.policy.leaseUntil = Date.now() - 1;
     else if (reason === "disabled policy") fixture.policy.enabled = false;
     await fixture.records.put(fixture.space);
     await state.write("policy.json", fixture.policy);
@@ -408,7 +406,7 @@ describe("local broker authority and address boundary", () => {
     await state.write("runtime-owner.json", {
       owner: randomUUID(),
       ownerPID: deadPid,
-      profile: "a".repeat(64),
+      profile: localRuntimeProfileHash(fixture.policy),
       settled: false,
     });
     const retained = { state: "running", remoteMarker: "retained-unknown-operation" };
@@ -434,15 +432,191 @@ describe("local broker authority and address boundary", () => {
     await Promise.all([manager.holdRunnerLock(), manager.holdRunnerLock()]);
     await manager.open();
     expect(ownerStarts).toBe(1);
-    expect(await readFile(join(root, "runner.lock"), "utf8")).toBe(String(process.pid));
+    expect(JSON.parse(await readFile(join(root, "runner.lock"), "utf8"))).toEqual({
+      pid: process.pid,
+      boot: await hostBootIdentity(),
+    });
     expect(await state.read("job-retained.json", (value) => value)).toEqual(retained);
-    expect(await fixture.records.get(fixture.space.id)).toEqual(fixture.space);
+    expect(await fixture.records.get(fixture.space.id)).toEqual({
+      ...fixture.space,
+      admittedMachine: {
+        cpuCores: fixture.policy.runtime.cpuCores,
+        memoryBytes: fixture.policy.runtime.memoryBytes,
+        dockerBytes: fixture.policy.runtime.dockerBytes,
+      },
+      admittedRepositoryFullName: fixture.policy.repositories[0].fullName,
+    });
     expect(await fixture.records.policy()).toEqual(fixture.policy);
     await expect(state.lock()).rejects.toMatchObject({ code: "LOCAL_ALREADY_RUNNING" });
     await manager.close();
     const release = await state.lock();
     await release();
   });
+
+  test.each(
+    ["replace", "release"].flatMap((operation) =>
+      ["dead", "live", "stopping", "unknown", "missing", "profile"].map((reason) => ({
+        operation,
+        reason,
+      })),
+    ),
+  )(
+    "cached inactive guard $operation preserves surviving work and fences $reason ownership",
+    async ({ operation, reason }) => {
+      const fixture = await localFixture(state);
+      const peer = spawn(process.execPath, ["-e", "process.stdin.pipe(process.stdout)"], {
+        stdio: ["pipe", "pipe", "ignore"],
+      });
+      const guards: ReturnType<typeof spawn>[] = [];
+      closers.push(async () => {
+        for (const child of [...guards, peer]) {
+          if (child.exitCode === null && child.signalCode === null) {
+            const ended = once(child, "close");
+            child.kill("SIGTERM");
+            await ended;
+          }
+        }
+      });
+      const echo = async (value: string) => {
+        const reply = once(peer.stdout!, "data");
+        peer.stdin!.write(value);
+        expect(String((await reply)[0])).toBe(value);
+      };
+      const profile = localRuntimeProfileHash(fixture.policy);
+      let retiring = false,
+        cleaning = false;
+      const manager = new LocalManager(fixture.records, {
+        storage: async () => {},
+        guard: async () => {
+          // New admission must retain the actual physical runner gate.
+          await expect(state.lock()).rejects.toMatchObject({ code: "LOCAL_ALREADY_RUNNING" });
+          const child = spawn(
+            process.execPath,
+            ["-e", "process.stdout.write('ready');setInterval(()=>{},1000)"],
+            {
+              stdio: ["ignore", "pipe", "ignore"],
+            },
+          );
+          guards.push(child);
+          await once(child.stdout!, "data");
+          await state.write("runtime-owner.json", {
+            owner: randomUUID(),
+            ownerPID: child.pid!,
+            profile,
+            settled: false,
+          });
+          return {
+            get active() {
+              return !retiring && child.exitCode === null && child.signalCode === null;
+            },
+            stop: async () => {
+              if (child.exitCode !== null || child.signalCode !== null)
+                throw new LocalRefusal(
+                  "LOCAL_STOP_PENDING",
+                  "The old guard did not settle physical work.",
+                );
+              throw new Error("Observation replacement must not stop surviving work");
+            },
+            release: async () => {
+              if (!cleaning && (child.exitCode !== null || child.signalCode !== null))
+                throw new LocalRefusal(
+                  "LOCAL_STOP_PENDING",
+                  "The old guard exited without a release acknowledgement.",
+                );
+            },
+            observe: async () => [
+              { id: fixture.space.runtimeId!, name: fixture.space.name, status: "running" },
+            ],
+            retire: async () => {},
+            remove: async () => {},
+            space: async () => {
+              throw Error("Observation must not replay guest work");
+            },
+          };
+        },
+      });
+      closers.push(async () => {
+        cleaning = true;
+        retiring = false;
+        await state.write("runtime-owner.json", {
+          owner: randomUUID(),
+          ownerPID: guards.at(-1)!.pid!,
+          profile,
+          settled: false,
+        });
+        await manager.release();
+      });
+      await manager.open();
+      const admitted = await fixture.records.get(fixture.space.id);
+      expect(admitted).toEqual({
+        ...fixture.space,
+        admittedMachine: {
+          cpuCores: fixture.policy.runtime.cpuCores,
+          memoryBytes: fixture.policy.runtime.memoryBytes,
+          dockerBytes: fixture.policy.runtime.dockerBytes,
+        },
+        admittedRepositoryFullName: fixture.policy.repositories[0].fullName,
+      });
+      const retained = Buffer.from('{"state":"running","command":"original-only"}');
+      await writeFile(join(root, "job-retained.json"), retained, { mode: 0o600 });
+      await echo("before-owner-loss");
+      const first = guards[0];
+      if (reason === "stopping") retiring = true;
+      else {
+        const ended = once(first, "close");
+        first.kill("SIGTERM");
+        await ended;
+      }
+      const receipt = await state.read(
+        "runtime-owner.json",
+        (value) => value as Record<string, unknown>,
+      );
+      if (reason === "live") receipt!.ownerPID = process.pid;
+      if (reason === "unknown") delete receipt!.ownerPID;
+      if (reason === "profile") receipt!.profile = "f".repeat(64);
+      if (reason === "missing") await state.remove("runtime-owner.json");
+      else await state.write("runtime-owner.json", receipt);
+      const before = await state.read("runtime-owner.json", (value) => value);
+      const observe = () => (operation === "replace" ? manager.snapshot() : manager.release());
+      if (reason === "dead") {
+        if (operation === "replace") {
+          const snapshot = await manager.snapshot();
+          expect(snapshot.spaces[0]).toMatchObject({ state: "running", failure: null });
+          expect(guards).toHaveLength(2);
+          expect(await state.read("runtime-owner.json", (value) => value)).toMatchObject({
+            ownerPID: guards[1].pid,
+          });
+        } else {
+          const broker = await state.read("broker.json", (value) => value as { port: number });
+          await manager.release();
+          expect(guards).toHaveLength(1);
+          const release = await state.lock();
+          await release();
+          const listener = createServer();
+          await new Promise<void>((resolve, reject) => {
+            listener.once("error", reject);
+            listener.listen(broker!.port, "127.0.0.1", resolve);
+          });
+          await new Promise<void>((resolve) => listener.close(() => resolve()));
+          expect(await state.read("runtime-owner.json", (value) => value)).toEqual(before);
+        }
+      } else {
+        await expect(observe()).rejects.toMatchObject({
+          code:
+            reason === "profile" || reason === "missing"
+              ? "LOCAL_RUNTIME_CHANGED"
+              : "LOCAL_OWNER_ACTIVE",
+        });
+        expect(guards).toHaveLength(1);
+        expect(await state.read("runtime-owner.json", (value) => value)).toEqual(before);
+        await expect(state.lock()).rejects.toMatchObject({ code: "LOCAL_ALREADY_RUNNING" });
+      }
+      await echo("after-owner-loss");
+      expect(await readFile(join(root, "job-retained.json"))).toEqual(retained);
+      expect(await fixture.records.get(fixture.space.id)).toEqual(admitted);
+      expect(await fixture.records.policy()).toEqual(fixture.policy);
+    },
+  );
 
   test.each(["live-runner", "live-guard", "unknown-guard", "invalid-receipt", "invalid-marker"])(
     "automatic startup refuses %s without admitting an owner or changing saved work",
@@ -592,6 +766,7 @@ describe("local broker authority and address boundary", () => {
       guard: async () => ({
         active: true,
         stop: async () => {},
+        release: async () => {},
         observe: async () => [],
         retire: async () => {},
         remove: async () => {},
@@ -685,7 +860,7 @@ describe("local broker authority and address boundary", () => {
     expect(dials).toBe(0);
   });
 
-  test.each(["revoked", "expired"] as const)(
+  test.each(["revoked"] as const)(
     "the validated address is used once and active access is cut when locally %s",
     async (reason) => {
       const fixture = await localFixture(state);
@@ -740,8 +915,15 @@ describe("local broker authority and address boundary", () => {
       expect(Buffer.concat(received).toString()).toContain("guest-payload");
       expect(destinations).toEqual(["8.8.8.8:443"]);
       expect(lookups).toBe(1);
-      if (reason === "revoked") fixture.policy.enabled = false;
-      else fixture.policy.leaseUntil = Date.now() - 1;
+      // Controlled authority time crosses the former maximum. This observes
+      // exact bytes on the established socket, without changing the Mac clock.
+      jest.spyOn(Date, "now").mockReturnValue(Date.now() + 8 * 24 * 60 * 60_000);
+      const later = once(client, "data");
+      const binary = Buffer.from([0, 255, 128, 1]);
+      client.write(binary);
+      expect((await later)[0]).toEqual(binary);
+      expect(await fixture.records.authorize(fixture.authorization)).not.toBeNull();
+      fixture.policy.enabled = false;
       await state.write("policy.json", fixture.policy);
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => {

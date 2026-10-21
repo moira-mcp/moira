@@ -4,7 +4,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "node:path";
 import { randomUUID, createHash } from "node:crypto";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import express from "express";
 import request from "supertest";
@@ -35,6 +35,10 @@ import { LocalRecords } from "../../packages/local/src/space-record.js";
 import { LocalManager } from "../../packages/local/src/manager.js";
 import { LocalController } from "../../packages/local/src/controller.js";
 import { LocalRelay } from "../../packages/local/src/relay.js";
+import type {
+  provisionGitHubWorkspace,
+  resumeGitHubWorkspaceEnrollment,
+} from "../../packages/local/src/github-provisioner.js";
 
 const config: Extract<CodespaceGitHubConfigStatus, { state: "available" }> = {
   state: "available",
@@ -45,6 +49,18 @@ const config: Extract<CodespaceGitHubConfigStatus, { state: "available" }> = {
   vaultKeyHex: "db9cae418f0673b254e0a1c76d9348fb624e37b8a901dc5f02a1e64c739db805",
   vaultKeyVersion: "v1",
   settingsUrl: "https://moira.example/settings",
+};
+const preparedCreate = {
+  machine: {
+    name: "standard",
+    displayName: "Standard",
+    operatingSystem: "linux",
+    cpuCores: 2,
+    memoryBytes: 8 * 1024 ** 3,
+    storageBytes: 32 * 1024 ** 3,
+  },
+  idleTimeoutMinutes: 30,
+  retentionMinutes: 30 * 24 * 60,
 };
 function fixture() {
   const sqlite = new Database(":memory:");
@@ -84,8 +100,16 @@ function fixture() {
   let createResponse: () => Promise<Response> = async () => {
     throw new Error("Provider creation reply lost");
   };
-  let providerResponse: () => Promise<Response> = async () => new Response(null, { status: 404 });
+  let providerResponse: (name: string) => Promise<Response> = async () =>
+    new Response(null, { status: 404 });
   let listResponse: () => Promise<Response> = async () => Response.json({ codespaces: [] });
+  let beforeCreate: (() => Promise<void>) | undefined;
+  const permissionReads: Array<{
+    profile: string;
+    permission: string;
+    method: string;
+    path: string;
+  }> = [];
   let realOwner: LocalController | undefined;
   let ownerResources: GitHubControllerResource[] = [];
   let ownerOutcome: ControllerOperation["outcome"];
@@ -96,6 +120,31 @@ function fixture() {
   );
   const fetchImpl = jest.fn<typeof fetch>(async (url, init) => {
     const target = new URL(String(url));
+    const credential = new Headers(init?.headers).get("authorization");
+    const profile =
+      credential === "Bearer ghu_test_parent"
+        ? "parent-write"
+        : credential === "Bearer ghu_fixture_provision"
+          ? "provision-read-lifecycle"
+          : "unknown";
+    const method = init?.method ?? "GET";
+    const permission =
+      target.pathname.endsWith("/new") ||
+      method === "DELETE" ||
+      (method === "POST" && target.pathname.endsWith("/codespaces"))
+        ? "codespaces:write"
+        : target.pathname.endsWith("/machines")
+          ? "codespaces_metadata:read"
+          : /\/(?:start|stop)$/.test(target.pathname)
+            ? "codespaces_lifecycle_admin:write"
+            : "codespaces:read";
+    permissionReads.push({ profile, permission, method, path: target.pathname });
+    if (
+      profile === "unknown" ||
+      (profile === "provision-read-lifecycle" &&
+        ["codespaces:write", "codespaces_metadata:read"].includes(permission))
+    )
+      return Response.json({ message: "Resource not accessible by integration" }, { status: 403 });
     requests.push({
       method: init?.method ?? "GET",
       path: target.pathname,
@@ -115,9 +164,12 @@ function fixture() {
           },
         ],
       });
-    if (init?.method === "POST" && target.pathname === "/repos/person/project/codespaces")
+    if (init?.method === "POST" && target.pathname === "/repos/person/project/codespaces") {
+      await beforeCreate?.();
       return createResponse();
-    if (target.pathname.startsWith("/user/codespaces/")) return providerResponse();
+    }
+    if (target.pathname.startsWith("/user/codespaces/"))
+      return providerResponse(decodeURIComponent(target.pathname.split("/").at(-1)!));
     if (target.pathname === "/user/codespaces") return listResponse();
     throw new Error("Unexpected provider request");
   });
@@ -186,6 +238,10 @@ function fixture() {
     identities,
     requests,
     fetchImpl,
+    permissionReads,
+    setBeforeCreate: (value: () => Promise<void>) => {
+      beforeCreate = value;
+    },
     deviceId,
     deviceCredential,
     deviceConnectionId,
@@ -202,7 +258,7 @@ function fixture() {
     setCreateResponse(value: () => Promise<Response>) {
       createResponse = value;
     },
-    setProviderResponse(value: () => Promise<Response>) {
+    setProviderResponse(value: (name: string) => Promise<Response>) {
       providerResponse = value;
     },
     setListResponse(value: () => Promise<Response>) {
@@ -217,7 +273,13 @@ function fixture() {
     auth: { userId: "owner", deviceId, deviceGeneration: 1, connectionId: deviceConnectionId },
   };
 }
-async function attachOwner(value: ReturnType<typeof fixture>) {
+async function attachOwner(
+  value: ReturnType<typeof fixture>,
+  implementation?: {
+    provision: typeof provisionGitHubWorkspace;
+    resume: typeof resumeGitHubWorkspaceEnrollment;
+  },
+) {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), "gh-owner-boundary-")));
   const records = new LocalRecords(await PrivateState.open(root));
   await records.state.write("connection.json", {
@@ -254,19 +316,24 @@ async function attachOwner(value: ReturnType<typeof fixture>) {
     const response = await call;
     return Response.json(response.body, { status: response.status });
   };
-  const provision = jest.fn(async () => {
-    throw new Error("Controlled explicit adoption provisioning refusal");
-  });
+  const provision = jest.fn(
+    implementation?.provision ??
+      (async () => {
+        throw new Error("Controlled explicit adoption provisioning refusal");
+      }),
+  );
   const make = () =>
     new LocalController(new LocalManager(records), value.auth, undefined, undefined, {
       relay: new LocalRelay(records, bridge),
       provision,
+      ...(implementation ? { resume: implementation.resume } : {}),
       readiness: async () => ({ state: "available" as const }),
     });
   const owner = make();
   value.setRealOwner(owner);
   return {
     owner,
+    records,
     app,
     provision,
     restart() {
@@ -276,7 +343,207 @@ async function attachOwner(value: ReturnType<typeof fixture>) {
   };
 }
 describe("GitHub cloud identity and fixed provider broker", () => {
-  test("one unavailable provider observation retains its owned identity beside an independent summary without leaking diagnostics or replaying work", async () => {
+  test("verified local GitHub readiness remains separate from missing enrollment and explicit resume uses the same original proof and generation", async () => {
+    const value = fixture();
+    const provider = () =>
+      Response.json({
+        name: "known-space",
+        display_name: value.identities.listOwned("owner")[0]?.operationMarker,
+        owner: { id: 101 },
+        billable_owner: { id: 101 },
+        repository: { id: 201, full_name: "person/project" },
+        state: "Available",
+        created_at: "2026-10-14T00:00:00Z",
+      });
+    value.setCreateResponse(async () => {
+      const response = provider();
+      return Response.json(await response.json(), { status: 201 });
+    });
+    value.setProviderResponse(async () => provider());
+    const provision: typeof provisionGitHubWorkspace = async (target, deps) => {
+      const { resourceId: _resource, previousRepositoryFullName: _previous, ...original } = target;
+      const proof = {
+        ...original,
+        root: "/workspaces/project",
+        rootDevice: "1",
+        rootInode: "2",
+        release: "b".repeat(64),
+        environmentIdentity: "a".repeat(64),
+      };
+      await deps.prepared(proof);
+      const health = {
+        releaseIdentity: proof.release,
+        environmentIdentity: proof.environmentIdentity,
+        remote: { state: "enrollment_unavailable" as const },
+      };
+      await deps.ready(health);
+      return { proof, health };
+    };
+    const resume: typeof resumeGitHubWorkspaceEnrollment = async (_target, proof, deps) => {
+      const before = {
+        releaseIdentity: proof.release,
+        environmentIdentity: proof.environmentIdentity,
+        remote: { state: "enrollment_unavailable" as const },
+      };
+      await deps.ready(before);
+      await deps.enroll(proof);
+      return { proof, health: { ...before, remote: { state: "connected" } } };
+    };
+    const boundary = await attachOwner(value, { provision, resume });
+    const requestId = `ws1-${randomUUID()}`,
+      id = requestId.slice(4);
+    try {
+      await value.service.create("owner", "201", "main", requestId);
+      expect(await value.service.getCodespace("owner", id)).toMatchObject({
+        state: "start_pending",
+        remote: { state: "enrollment_unavailable" },
+        lifecycle_error: "CODESPACE_LOCAL_SETUP_INCOMPLETE",
+      });
+      const original = await readFile(
+        path.join(boundary.records.state.root, `controller-operation-${requestId}.json`),
+      );
+      const proof = await boundary.owner.state.githubSetupProof(id, value.auth);
+      const resumed = `ws1-${randomUUID()}`;
+      await value.service.resumeSetup("owner", id, resumed, 2);
+      expect((await boundary.owner.snapshot()).github.resources[0]).toMatchObject({
+        resourceGeneration: 2,
+        environmentIdentity: proof.environmentIdentity,
+        remote: { state: "connected" },
+      });
+      expect(
+        await readFile(
+          path.join(boundary.records.state.root, `controller-operation-${requestId}.json`),
+        ),
+      ).toEqual(original);
+      expect(value.requests.filter((entry) => entry.method === "POST")).toHaveLength(1);
+      expect(new WorkspaceAuthRepository(value.sqlite).getOwned("owner", id)).toMatchObject({
+        resourceGeneration: 2,
+        environmentIdentity: proof.environmentIdentity,
+      });
+      expect(await value.service.getCodespace("owner", id)).toMatchObject({
+        state: "start_pending",
+      });
+    } finally {
+      await boundary.close();
+      value.sqlite.close();
+    }
+  });
+  test("the real owner journals prepared inputs before the fixed parent-authorized POST and lost-reply collection never repeats it", async () => {
+    const value = fixture(),
+      boundary = await attachOwner(value),
+      requestId = `ws1-${randomUUID()}`,
+      id = requestId.slice(4);
+    let saved: unknown, witness: unknown;
+    try {
+      value.setBeforeCreate(async () => {
+        saved = await boundary.records.state.read(
+          `controller-operation-${requestId}.json`,
+          (entry) => entry,
+        );
+        witness = value.identities.getOwned("owner", id);
+      });
+      await expect(value.service.create("owner", "201", "main", requestId)).rejects.toMatchObject({
+        code: "WORKSPACE_OUTCOME_UNCONFIRMED",
+      });
+      const record = path.join(
+        boundary.records.state.root,
+        `controller-operation-${requestId}.json`,
+      );
+      const original = await readFile(record);
+      const post = value.requests.find((entry) => entry.method === "POST");
+      expect(post?.body).toMatchObject({
+        machine: preparedCreate.machine.name,
+        idle_timeout_minutes: 30,
+        retention_period_minutes: preparedCreate.retentionMinutes,
+      });
+      expect(saved).toMatchObject({ preparedCreate });
+      expect(saved).toMatchObject({ phase: { name: "provider_create", resourceGeneration: 2 } });
+      expect(witness).toMatchObject({ retirement: "unknown" });
+      expect(original.toString()).not.toContain("ghu_test_parent");
+      expect(value.permissionReads.every((entry) => entry.profile === "parent-write")).toBe(true);
+      expect(value.permissionReads.filter((entry) => entry.path.endsWith("/new"))).toHaveLength(2);
+      const offers = value.requests.filter((entry) => entry.path.endsWith("/machines")).length;
+      boundary.restart();
+      expect(await value.service.listResources("owner")).toEqual({
+        codespaces: [],
+        unavailable: [],
+        has_diagnostics: true,
+      });
+      const diagnostics = await value.service.listResources("owner", { view: "diagnostics" });
+      expect(diagnostics.unavailable).toEqual([
+        expect.objectContaining({ codespace_id: id, pending_request_ids: [requestId] }),
+      ]);
+      expect(diagnostics.unavailable[0]).not.toHaveProperty("generation");
+      await request(boundary.app)
+        .get(`/api/integrations/local/devices/${value.deviceId}/operations/${requestId}`)
+        .expect(200);
+      expect(await readFile(record)).toEqual(original);
+      expect(value.requests.filter((entry) => entry.method === "POST")).toHaveLength(1);
+      expect(value.requests.filter((entry) => entry.path.endsWith("/machines"))).toHaveLength(
+        offers,
+      );
+    } finally {
+      await boundary.close();
+      value.sqlite.close();
+    }
+  });
+  test("the controlled permission boundary refuses provisioning-read create/delete but permits its lifecycle-admin start/stop", async () => {
+    const value = fixture();
+    const client = new HttpGitHubCodespaceClient(config, value.fetchImpl);
+    try {
+      await expect(
+        client.create("ghu_fixture_provision", {
+          repository: { id: "201", fullName: "person/project", private: true },
+          ref: "main",
+          operationMarker: `moira-${"a".repeat(24)}`,
+          ...preparedCreate,
+        }),
+      ).resolves.toMatchObject({ outcome: "rejected", providerFailure: { status: 403 } });
+      await expect(
+        client.preflightCreate(
+          "ghu_fixture_provision",
+          { id: "201", fullName: "person/project", private: true },
+          "main",
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      await expect(
+        client.deleteExact("ghu_fixture_provision", "owned-space"),
+      ).rejects.toMatchObject({ status: 403 });
+      value.setProviderResponse(async () => new Response(null, { status: 202 }));
+      await expect(client.startExact("ghu_fixture_provision", "owned-space")).resolves.toBe(
+        "accepted",
+      );
+      await expect(client.stopExact("ghu_fixture_provision", "owned-space")).resolves.toBe(
+        "accepted",
+      );
+      expect(
+        value.requests.some(
+          (entry) =>
+            entry.method === "DELETE" ||
+            (entry.method === "POST" && entry.path.endsWith("/codespaces")),
+        ),
+      ).toBe(false);
+      expect(value.permissionReads).toEqual(
+        expect.arrayContaining([
+          {
+            profile: "provision-read-lifecycle",
+            permission: "codespaces:write",
+            method: "DELETE",
+            path: "/user/codespaces/owned-space",
+          },
+          {
+            profile: "provision-read-lifecycle",
+            permission: "codespaces_lifecycle_admin:write",
+            method: "POST",
+            path: "/user/codespaces/owned-space/start",
+          },
+        ]),
+      );
+    } finally {
+      value.sqlite.close();
+    }
+  });
+  test("unavailable provider observation and unproved creation are explicit identity-only diagnostics without leaking details or replaying work", async () => {
     const value = fixture(),
       requestId = "ws1-" + randomUUID(),
       peerRequest = "ws1-" + randomUUID();
@@ -306,26 +573,29 @@ describe("GitHub cloud identity and fixed provider broker", () => {
         throw new Error("private-provider-token-and-URL");
       });
       const view = await value.service.listResources("owner");
-      expect(view.codespaces).toEqual([
-        expect.objectContaining({
-          codespace_id: peerRequest.slice(4),
-          generation: 1,
-        }),
-      ]);
-      expect(view.unavailable).toEqual([
-        {
-          codespace_id: original.codespace_id,
-          provider: "github-codespaces",
-          repository_id: "201",
-          repository: "person/project",
-          requested_ref: "HEAD",
-          created_at: original.created_at,
-          device_id: value.deviceId,
-          error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" },
-        },
-      ]);
-      expect(JSON.stringify(view)).not.toContain("private-provider-token-and-URL");
-      expect(await value.service.refreshProviderState("owner")).toEqual({ stale: true });
+      expect(view).toEqual({ codespaces: [], unavailable: [], has_diagnostics: true });
+      const diagnostics = await value.service.listResources("owner", { view: "diagnostics" });
+      expect(diagnostics.codespaces).toEqual([]);
+      expect(diagnostics.unavailable).toEqual(
+        expect.arrayContaining([
+          {
+            codespace_id: original.codespace_id,
+            provider: "github-codespaces",
+            repository_id: "201",
+            repository: "person/project",
+            requested_ref: "HEAD",
+            created_at: original.created_at,
+            device_id: value.deviceId,
+            error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" },
+          },
+          expect.objectContaining({ codespace_id: peerRequest.slice(4) }),
+        ]),
+      );
+      expect(diagnostics.unavailable).toHaveLength(2);
+      for (const identity of diagnostics.unavailable)
+        expect(identity).not.toHaveProperty("generation");
+      expect(JSON.stringify(diagnostics)).not.toContain("private-provider-token-and-URL");
+      expect(await value.service.listResources("owner")).toMatchObject({ has_diagnostics: true });
       await expect(value.service.getCodespace("owner", original.codespace_id)).rejects.toThrow();
       expect(value.identities.listOwned("owner")).toEqual(identities);
       expect(value.requests.every((entry) => entry.method === "GET")).toBe(true);
@@ -337,6 +607,12 @@ describe("GitHub cloud identity and fixed provider broker", () => {
       expect(await value.service.listResources("other")).toEqual({
         codespaces: [],
         unavailable: [],
+        has_diagnostics: false,
+      });
+      await expect(
+        value.service.getCodespace("other", original.codespace_id),
+      ).rejects.toMatchObject({
+        code: "CODESPACE_NOT_FOUND",
       });
     } finally {
       value.sqlite.close();
@@ -506,7 +782,7 @@ describe("GitHub cloud identity and fixed provider broker", () => {
       const response = await request(app)
         .post(`/api/codespaces/github/resources/${id}/provider`)
         .set("Authorization", `Bearer ${value.deviceCredential}`)
-        .send({ requestId, resourceGeneration: 2, action: "create" });
+        .send({ requestId, resourceGeneration: 2, action: "create", prepared: preparedCreate });
       expect(response.status).toBe(503);
       expect(response.body.error).toMatchObject({
         code: "WORKSPACE_OUTCOME_UNCONFIRMED",
@@ -691,6 +967,7 @@ describe("GitHub cloud identity and fixed provider broker", () => {
         requestId,
         resourceGeneration: 2,
         action: "create",
+        prepared: preparedCreate,
       });
       await dispatched;
       value.identities.advanceAuthority("owner", id, {
@@ -739,6 +1016,132 @@ describe("GitHub cloud identity and fixed provider broker", () => {
     });
     return { ...value, id };
   }
+  test("GitHub discovery separates observed setup and preparation from unknown identities and reads retired history without external observation", async () => {
+    const value = await ownedFixture();
+    const original = value.identities.getOwned("owner", value.id)!;
+    const cases = [
+      { name: "owned-space", state: "stopped", providerState: "Shutdown", retirement: "owned" },
+      { name: "setup-space", state: "running", providerState: "Available", retirement: "owned" },
+      {
+        name: "preparing-space",
+        state: "provisioning",
+        providerState: "Provisioning",
+        retirement: "owned",
+      },
+      { name: "unknown-space", state: "creating", providerState: null, retirement: "unknown" },
+      { name: "uncreated-space", state: "creating", providerState: null, retirement: "uncreated" },
+      { name: "authority-lost", state: "running", providerState: "Available", retirement: "owned" },
+      { name: "retired-space", state: "deleted", providerState: null, retirement: "retired" },
+    ] as const;
+    const ids = new Map<string, string>();
+    const resources: GitHubControllerResource[] = [];
+    try {
+      for (const [index, entry] of cases.entries()) {
+        const id = index === 0 ? value.id : randomUUID();
+        ids.set(entry.name, id);
+        if (index !== 0)
+          value.identities.reserve({
+            ...original,
+            id,
+            operationMarker: "moira-" + createHash("sha256").update(id).digest("hex").slice(0, 24),
+            providerResourceName: entry.providerState ? entry.name : null,
+            retirement: entry.retirement,
+            revokedAt: entry.name === "authority-lost" ? 1 : null,
+          });
+        resources.push({
+          resourceId: id,
+          resourceGeneration: 1,
+          authorizationGeneration: 1,
+          repositoryId: original.repositoryId,
+          repositoryFullName: original.repositoryFullName,
+          requestedRef: original.requestedRef,
+          operationMarker: value.identities.getOwned("owner", id)!.operationMarker,
+          providerResourceName: entry.providerState ? entry.name : null,
+          retirement: entry.retirement,
+          state: entry.state,
+          desiredState:
+            entry.state === "stopped"
+              ? "stopped"
+              : entry.state === "deleted"
+                ? "deleted"
+                : "running",
+          environmentIdentity: entry.state === "running" ? "a".repeat(64) : null,
+          observedAt: null,
+          providerResource: null,
+          pendingRequestIds: entry.state === "creating" ? [`ws1-${id}`] : [],
+          ...(entry.name === "setup-space" ? { remote: { state: "enrollment_unavailable" } } : {}),
+        });
+      }
+      value.setOwnerResources(resources);
+      value.setProviderResponse(async (name) => {
+        const entry = cases.find((candidate) => candidate.name === name);
+        if (!entry?.providerState) throw new Error("Unexpected historical provider observation");
+        return Response.json({
+          name,
+          display_name: original.operationMarker,
+          owner: { id: 101 },
+          billable_owner: { id: 101 },
+          repository: { id: 201, full_name: "person/project" },
+          state: entry.providerState,
+          created_at: "2026-10-14T00:00:00Z",
+        });
+      });
+      const retained = value.identities.listOwned("owner");
+      const actionable = await value.service.listResources("owner");
+      expect(actionable.codespaces.map((entry) => entry.codespace_id).sort()).toEqual(
+        [ids.get("owned-space"), ids.get("setup-space"), ids.get("preparing-space")].sort(),
+      );
+      expect(
+        actionable.codespaces.find((entry) => entry.codespace_id === ids.get("setup-space")),
+      ).toMatchObject({ lifecycle_error: "CODESPACE_LOCAL_SETUP_INCOMPLETE" });
+      expect(actionable).toMatchObject({ unavailable: [], has_diagnostics: true });
+      const diagnostics = await value.service.listResources("owner", { view: "diagnostics" });
+      expect(diagnostics.codespaces).toEqual([]);
+      expect(diagnostics.unavailable.map((entry) => entry.codespace_id).sort()).toEqual(
+        [ids.get("unknown-space"), ids.get("uncreated-space"), ids.get("authority-lost")].sort(),
+      );
+      for (const entry of diagnostics.unavailable) expect(entry).not.toHaveProperty("generation");
+      expect(
+        diagnostics.unavailable.find((entry) => entry.codespace_id === ids.get("unknown-space")),
+      ).toMatchObject({ pending_request_ids: [`ws1-${ids.get("unknown-space")}`] });
+      const snapshot = jest.spyOn(value.devices, "snapshot");
+      const providerRequests = value.requests.slice();
+      try {
+        const history = await value.service.listResources("owner", { view: "history" });
+        expect(history).toMatchObject({
+          codespaces: [
+            expect.objectContaining({ codespace_id: ids.get("retired-space"), state: "deleted" }),
+          ],
+          unavailable: [],
+          has_diagnostics: false,
+        });
+        expect(snapshot).not.toHaveBeenCalled();
+        expect(value.requests).toEqual(providerRequests);
+      } finally {
+        snapshot.mockRestore();
+      }
+      expect(value.identities.listOwned("owner")).toEqual(retained);
+      expect(value.requests.every((entry) => entry.method === "GET")).toBe(true);
+      value.sqlite.prepare("UPDATE user SET blocked=1 WHERE id='owner'").run();
+      await expect(
+        value.service.getCodespace("owner", ids.get("retired-space")!),
+      ).rejects.toMatchObject({
+        code: "CODESPACE_AUTHORIZATION_REQUIRED",
+      });
+      expect(await value.service.listResources("owner", { view: "history" })).toMatchObject({
+        codespaces: [],
+        has_diagnostics: true,
+        unavailable: [
+          expect.objectContaining({
+            codespace_id: ids.get("retired-space"),
+            error: { code: "CODESPACE_AUTHORIZATION_REQUIRED" },
+          }),
+        ],
+      });
+    } finally {
+      value.sqlite.close();
+    }
+  });
   test("lost account authority retains only owned unavailable identities while exact get remains refused", async () => {
     const value = await ownedFixture();
     try {
@@ -770,9 +1173,15 @@ describe("GitHub cloud identity and fixed provider broker", () => {
       });
       value.sqlite.prepare("UPDATE user SET blocked=1 WHERE id='owner'").run();
       const requests = value.requests.slice();
-      const view = await value.service.listResources("owner");
+      expect(await value.service.listResources("owner")).toEqual({
+        codespaces: [],
+        unavailable: [],
+        has_diagnostics: true,
+      });
+      const view = await value.service.listResources("owner", { view: "diagnostics" });
       expect(view).toEqual({
         codespaces: [],
+        has_diagnostics: true,
         unavailable: [
           {
             codespace_id: value.id,
@@ -789,7 +1198,7 @@ describe("GitHub cloud identity and fixed provider broker", () => {
       await expect(value.service.getCodespace("owner", value.id)).rejects.toMatchObject({
         code: "CODESPACE_AUTHORIZATION_REQUIRED",
       });
-      expect(await value.service.refreshProviderState("owner")).toEqual({ stale: true });
+      expect(await value.service.listResources("owner")).toMatchObject({ has_diagnostics: true });
       expect(value.identities.getOwned("owner", value.id)).toEqual(original);
       expect(value.identities.getOwned("other", foreignId)).not.toBeNull();
       expect(value.requests).toEqual(requests);
@@ -1233,9 +1642,14 @@ describe("GitHub cloud identity and fixed provider broker", () => {
         machine: null,
         createdAt: 1,
       });
+      const {
+        billableOwnerId: _payer,
+        creationSettings: _settings,
+        ...observedAssignment
+      } = await value.service.assignment(value.auth, id);
       value.setOwnerResources([
         {
-          ...(await value.service.assignment(value.auth, id)),
+          ...observedAssignment,
           state: "running",
           desiredState: "running",
           environmentIdentity: "a".repeat(64),
@@ -1293,6 +1707,27 @@ describe("GitHub cloud identity and fixed provider broker", () => {
         state: "usable",
         observed_state: "running",
       });
+      value.setOwnerResources([
+        {
+          ...observedAssignment,
+          state: "running",
+          desiredState: "running",
+          environmentIdentity: "c".repeat(64),
+          observedAt: 2,
+        },
+      ]);
+      await expect(value.service.getCodespace("owner", id)).resolves.toMatchObject({
+        state: "start_pending",
+      });
+      value.setOwnerResources([
+        {
+          ...observedAssignment,
+          state: "running",
+          desiredState: "running",
+          environmentIdentity: binding.environmentIdentity,
+          observedAt: 3,
+        },
+      ]);
       value.setConnectedGuest(null);
       await expect(value.service.getCodespace("owner", id)).resolves.toMatchObject({
         state: "start_pending",
@@ -1433,6 +1868,7 @@ describe("GitHub cloud identity and fixed provider broker", () => {
           requestId,
           resourceGeneration: 2,
           action: "create",
+          prepared: preparedCreate,
         }),
       ).rejects.toThrow();
       expect(value.identities.getOwned("owner", id)?.retirement).toBe("unknown");
@@ -1441,6 +1877,7 @@ describe("GitHub cloud identity and fixed provider broker", () => {
           requestId,
           resourceGeneration: 2,
           action: "create",
+          prepared: preparedCreate,
         }),
       ).rejects.toMatchObject({ code: "WORKSPACE_OUTCOME_UNCONFIRMED" });
       await expect(
@@ -1485,6 +1922,7 @@ describe("GitHub cloud identity and fixed provider broker", () => {
           requestId,
           resourceGeneration: 2,
           action: "create",
+          prepared: preparedCreate,
         }),
       ).resolves.toMatchObject({ outcome: "rejected" });
       expect(value.identities.getOwned("owner", id)?.retirement).toBe("retired");

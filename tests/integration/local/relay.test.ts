@@ -31,6 +31,98 @@ async function fixture() {
   return { ...local, state, manager: new LocalManager(local.records) };
 }
 describe("Native owner boundaries and device authority", () => {
+  test("explicit setup recovery retains the known VM and failure while only its admitted preparation can use egress", async () => {
+    const local = await fixture();
+    Object.assign(local.space, {
+      phase: "failed",
+      desiredState: "stopped",
+      lastStartedAt: null,
+      failure: "LOCAL_SETUP_INCOMPLETE",
+      admittedMachine: {
+        cpuCores: 1,
+        memoryBytes: local.policy.runtime.memoryBytes,
+        dockerBytes: local.policy.runtime.dockerBytes,
+      },
+    });
+    await local.records.put(local.space);
+    const original = {
+      state: "completed",
+      outcome: { ok: false, error: { code: "LOCAL_SETUP_INCOMPLETE" } },
+    };
+    await local.state.write("original-create.json", original);
+    const owner = new RuntimeOwner(
+      local.records,
+      local.space.id,
+      async () => {},
+      async () => {},
+    );
+    await owner.admit("resume-setup");
+    try {
+      expect(await local.records.get(local.space.id)).toMatchObject({
+        runtimeId: local.space.runtimeId,
+        generation: 2,
+        desiredState: "running",
+        phase: "failed",
+        failure: "LOCAL_SETUP_INCOMPLETE",
+      });
+      expect(await local.records.authorize(local.authorization)).toBeNull();
+      expect(
+        await local.records.authorize(
+          local.authorization,
+          (space) => space.generation === owner.admittedGeneration,
+        ),
+      ).toMatchObject({ spaceId: local.space.id, generation: 2 });
+      expect(await local.records.authorize(local.authorization, () => false)).toBeNull();
+      expect(
+        await local.records.authorize(local.authorization, (space) => space.generation === 1),
+      ).toBeNull();
+      await local.state.write("policy.json", { ...local.policy, repositories: [] });
+      expect(await local.records.authorize(local.authorization, () => true)).toBeNull();
+      expect(await local.state.read("original-create.json", (value) => value)).toEqual(original);
+    } finally {
+      await owner.release();
+    }
+  });
+  test.each(["identity-unknown", "settlement-unknown", "deleted", "machine-unknown"] as const)(
+    "setup recovery preserves %s without adopting or rewriting the original record",
+    async (reason) => {
+      const local = await fixture();
+      Object.assign(local.space, {
+        phase: "failed",
+        desiredState: "stopped",
+        lastStartedAt: null,
+        failure: "LOCAL_SETUP_INCOMPLETE",
+        admittedMachine: {
+          cpuCores: 1,
+          memoryBytes: local.policy.runtime.memoryBytes,
+          dockerBytes: local.policy.runtime.dockerBytes,
+        },
+      });
+      if (reason === "identity-unknown") local.space.runtimeId = null;
+      if (reason === "settlement-unknown") local.space.failure = "LOCAL_GUEST_SETTLEMENT_UNKNOWN";
+      if (reason === "deleted") local.space.phase = "deleted";
+      if (reason === "machine-unknown") delete local.space.admittedMachine;
+      await local.records.put(local.space);
+      const before = await local.records.get(local.space.id);
+      const owner = new RuntimeOwner(
+        local.records,
+        local.space.id,
+        async () => {
+          throw new Error("Refused recovery reached native custody");
+        },
+        async () => {},
+      );
+      await expect(owner.admit("resume-setup")).rejects.toMatchObject({
+        code:
+          reason === "settlement-unknown"
+            ? "LOCAL_GUEST_SETTLEMENT_UNKNOWN"
+            : reason === "identity-unknown"
+              ? "LOCAL_CREATE_UNKNOWN"
+              : "LOCAL_SETUP_INCOMPLETE",
+      });
+      expect(await local.records.get(local.space.id)).toEqual(before);
+    },
+  );
   test.each([404, 503, "network"] as const)(
     "device authority distinguishes confirmed refusal from unavailability (%s)",
     async (failure) => {
@@ -319,7 +411,7 @@ describe("Native owner boundaries and device authority", () => {
           { ...local.policy.repositories[0], id: randomUUID(), fullName: "owner/another" },
         ],
       };
-      await manager.appendRepositoryPolicy(local.policy, next);
+      await manager.applyLivePolicy(local.policy, next);
       expect((await local.records.policy()).repositories).toEqual(next.repositories);
       expect(await manager.stop(creatingId)).toMatchObject({
         desiredState: "stopped",

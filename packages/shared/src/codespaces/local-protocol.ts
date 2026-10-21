@@ -5,6 +5,29 @@ const uuid = z.string().uuid();
 const generation = z.number().int().positive();
 const marker = z.string().regex(/^moira-[a-f0-9]{24}$/);
 
+/** Last observed guest transport health; independent of local Unix readiness. */
+export const workspaceRemoteObservationSchema = z
+  .object({
+    state: z.enum([
+      "unconfigured",
+      "enrollment_unavailable",
+      "connecting",
+      "connected",
+      "unavailable",
+      "refused",
+    ]),
+  })
+  .strict();
+export type WorkspaceRemoteObservation = z.infer<typeof workspaceRemoteObservationSchema>;
+
+export const workspaceSetupFailureSchema = z.enum([
+  "repository_unproven",
+  "prerequisite_unavailable",
+  "repository_checkout_failed",
+  "configuration_failed",
+]);
+export type WorkspaceSetupFailure = z.infer<typeof workspaceSetupFailureSchema>;
+
 /** Management can close admission while the physical outcome remains unknown. */
 export const localManagementOutcomeSchema = z
   .object({
@@ -49,6 +72,8 @@ export const localResourceSnapshotSchema = z
           phase: z.string().max(80),
           failure: z.string().max(160).nullable(),
           nativeStopConfirmed: z.boolean(),
+          remote: workspaceRemoteObservationSchema.optional(),
+          setupFailure: workspaceSetupFailureSchema.optional(),
         })
         .passthrough(),
     ),

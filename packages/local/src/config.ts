@@ -10,11 +10,13 @@ import {
   GiB,
   LocalRefusal,
   localPolicySchema,
+  legacyLocalPolicySchema,
   localRepositorySchema,
   repositoryName,
-  MAX_LEASE_MS,
 } from "./policy.js";
 import { initializeStorage } from "./storage.js";
+import { controlApprovalSchema } from "./control-approval.js";
+import type { LocalPolicy } from "./policy.js";
 
 // Docker's multi-platform shell-docker image, resolved and inspected on 2026-10-02.
 export const DEFAULT_TEMPLATE =
@@ -72,11 +74,10 @@ export async function initializeLocal(
   const capacity = (options.storageGiB ?? 32) * GiB;
   const storageRoot = options.storageRoot ?? join(state.root, "storage");
   const policy = localPolicySchema.parse({
-    version: 1,
+    version: 2,
     deviceId,
     label: options.label ?? identity?.label ?? hostname(),
     enabled: false,
-    leaseUntil: 0,
     runtime: {
       binary,
       template: options.template ?? DEFAULT_TEMPLATE,
@@ -109,27 +110,75 @@ export async function approveRepository(
   },
 ) {
   repositoryName.parse(input.fullName);
-  const policy = await records.policy();
-  const previous = policy.repositories.find(
-    (entry) => entry.fullName.toLowerCase() === input.fullName.toLowerCase(),
-  );
-  const grant = localRepositorySchema.parse({
-    ...input,
-    id: previous?.id ?? randomUUID(),
+  return records.withSettingsChange(async () => {
+    const policy = await records.policy();
+    const revision = await nextPolicyRevision(records, policy);
+    const previous = policy.repositories.find(
+      (entry) => entry.fullName.toLowerCase() === input.fullName.toLowerCase(),
+    );
+    const grant = localRepositorySchema.parse({
+      ...input,
+      id: previous?.id ?? randomUUID(),
+    });
+    policy.repositories = policy.repositories
+      .filter((entry) => entry.id !== grant.id)
+      .concat(grant);
+    policy.appliedRevision = revision;
+    await records.state.write("policy.json", localPolicySchema.parse(policy));
+    return grant;
   });
-  policy.repositories = policy.repositories.filter((entry) => entry.id !== grant.id).concat(grant);
-  await records.state.write("policy.json", localPolicySchema.parse(policy));
-  return grant;
 }
 
-export async function setEnabled(records: LocalRecords, enabled: boolean, hours = 8) {
-  const policy = await records.policy();
-  z.number()
-    .positive()
-    .max(MAX_LEASE_MS / 3_600_000)
-    .parse(hours);
-  policy.enabled = enabled;
-  policy.leaseUntil = enabled ? Date.now() + Math.floor(hours * 3_600_000) : 0;
-  await records.state.write("policy.json", policy);
-  return { enabled: policy.enabled, leaseUntil: policy.leaseUntil };
+export async function setEnabled(records: LocalRecords, enabled: boolean) {
+  return records.withSettingsChange(async () => {
+    const raw = await records.state.read("policy.json", (value) => value);
+    const current = localPolicySchema.safeParse(raw);
+    if (!current.success) {
+      const previous = legacyLocalPolicySchema.parse(raw);
+      if (enabled)
+        throw new LocalRefusal(
+          "LOCAL_SERVICE_MAINTENANCE_REQUIRED",
+          "Complete the explicit owner update before enabling persistent work.",
+        );
+      await records.state.write("policy.json", { ...previous, enabled: false });
+      return { enabled: false };
+    }
+    const policy = current.data;
+    policy.appliedRevision = await nextPolicyRevision(records, policy, !enabled);
+    policy.enabled = enabled;
+    await records.state.write("policy.json", localPolicySchema.parse(policy));
+    return { enabled: policy.enabled };
+  });
+}
+
+/** Caller holds the settings gate; state and its applied revision publish in one document. */
+async function nextPolicyRevision(
+  records: LocalRecords,
+  policy: LocalPolicy,
+  disabling = false,
+): Promise<number> {
+  const approval = await records.state.read("web-control.json", controlApprovalSchema.parse);
+  const intent = await records.state.read("control-intent.json", (value) =>
+    z.object({ revision: z.number().int().positive() }).passthrough().parse(value),
+  );
+  if (
+    (intent && intent.revision > policy.appliedRevision) ||
+    (await records.state.read("policy-transition.json", (value) => value)) !== null
+  ) {
+    // Emergency denial does not certify another operation's uncertain effects.
+    if (disabling) return policy.appliedRevision;
+    throw new LocalRefusal(
+      "LOCAL_CONTROL_PENDING",
+      "Collect the original settings effect before changing local approval.",
+    );
+  }
+  const latest = await records.state.read("controller-settings-current.json", (value) =>
+    z
+      .object({ requestId: z.string(), revision: z.number().int().nonnegative() })
+      .strict()
+      .parse(value),
+  );
+  return (
+    Math.max(policy.appliedRevision, approval?.rejectedRevision ?? 0, latest?.revision ?? 0) + 1
+  );
 }

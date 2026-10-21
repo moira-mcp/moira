@@ -47,7 +47,7 @@ export type {
 import type {
   CodespaceConnectionView,
   CodespaceReadinessView,
-  CodespaceSummaryView,
+  CodespaceProviderBillingView,
   AnalyticsQuery,
   AnalyticsOverview,
   AnalyticsUsers,
@@ -209,6 +209,9 @@ import {
   AdminSystemStatusResponse,
   NodeTypeCatalog,
   CodespaceManagementView,
+  WorkspaceOperationView,
+  WorkspaceDiscoveryProvider,
+  WorkspaceDiscoveryView,
 } from "../types";
 
 /**
@@ -1051,74 +1054,76 @@ export class MoiraApiClient {
     return response.data.data!;
   }
 
-  async getGitHubCodespaces(): Promise<CodespaceManagementView> {
+  async getCodespaces(
+    provider: WorkspaceDiscoveryProvider,
+    view: WorkspaceDiscoveryView = "actionable",
+  ): Promise<CodespaceManagementView> {
     const response = await this.client.get<ApiResponse<CodespaceManagementView>>(
       "/integrations/github/codespaces",
+      { params: { provider, view } },
     );
     return response.data.data!;
   }
 
-  async refreshGitHubCodespaces(): Promise<CodespaceManagementView> {
+  async refreshCodespaces(
+    provider: WorkspaceDiscoveryProvider,
+    view: WorkspaceDiscoveryView = "actionable",
+  ): Promise<CodespaceManagementView> {
     const response = await this.client.post<ApiResponse<CodespaceManagementView>>(
       "/integrations/github/codespaces/refresh",
+      { provider, view },
     );
     return response.data.data!;
   }
 
-  async createGitHubCodespace(input: {
-    repository_id: string;
-    ref: string;
-    request_id: string;
-    device_id?: string;
-    devcontainer_path?: string;
-  }): Promise<CodespaceSummaryView> {
-    const response = await this.client.post<ApiResponse<{ codespace: CodespaceSummaryView }>>(
-      "/integrations/github/codespaces",
+  async getCodespaceBilling(): Promise<CodespaceProviderBillingView> {
+    const response = await this.client.get<ApiResponse<CodespaceProviderBillingView>>(
+      "/integrations/github/codespaces/billing",
+    );
+    return response.data.data!;
+  }
+
+  private async workspacePurpose<T>(purpose: string, input: Record<string, unknown>): Promise<T> {
+    const response = await this.client.post<ApiResponse<T>>(
+      `/integrations/github/codespaces/operations/${purpose}`,
       input,
     );
-    return response.data.data!.codespace;
+    return response.data.data!;
   }
 
-  async startGitHubCodespace(
-    codespaceId: string,
-    requestId: string,
-    generation: number,
-  ): Promise<CodespaceSummaryView> {
-    const response = await this.client.post<ApiResponse<{ codespace: CodespaceSummaryView }>>(
-      `/integrations/github/codespaces/${encodeURIComponent(codespaceId)}/start`,
-      { request_id: requestId, expected_generation: generation },
-    );
-    return response.data.data!.codespace;
+  createWorkspace(input: {
+    target: string;
+    branch: string;
+    devcontainer_path?: string;
+  }): Promise<WorkspaceOperationView> {
+    return this.workspacePurpose("workspace_create", input);
   }
 
-  async stopGitHubCodespace(
-    codespaceId: string,
-    requestId: string,
-    generation: number,
-  ): Promise<CodespaceSummaryView> {
-    const response = await this.client.post<ApiResponse<{ codespace: CodespaceSummaryView }>>(
-      `/integrations/github/codespaces/${encodeURIComponent(codespaceId)}/stop`,
-      { request_id: requestId, expected_generation: generation },
-    );
-    return response.data.data!.codespace;
+  changeWorkspace(
+    workspace: string,
+    action: "start" | "stop" | "resume_setup",
+  ): Promise<WorkspaceOperationView> {
+    return this.workspacePurpose("workspace_lifecycle", { workspace, action });
   }
 
-  async deleteGitHubCodespace(
-    codespaceId: string,
-    expectedGeneration: number,
-    requestId: string,
-  ): Promise<CodespaceSummaryView> {
-    const response = await this.client.delete<ApiResponse<{ codespace: CodespaceSummaryView }>>(
-      `/integrations/github/codespaces/${encodeURIComponent(codespaceId)}`,
-      {
-        data: {
-          confirm_delete: true,
-          expected_generation: expectedGeneration,
-          request_id: requestId,
-        },
-      },
-    );
-    return response.data.data!.codespace;
+  deleteWorkspace(workspace: string): Promise<WorkspaceOperationView> {
+    return this.workspacePurpose("workspace_delete", { workspace, confirm_delete: true });
+  }
+
+  getWorkspaceOperation(reference: string): Promise<WorkspaceOperationView> {
+    return this.workspacePurpose("operation_get", { reference });
+  }
+
+  findWorkspaceOperations(
+    owner: string,
+    query?: string,
+    cursor?: string,
+  ): Promise<{ operations: WorkspaceOperationView[]; nextCursor?: string }> {
+    return this.workspacePurpose("operation_find", {
+      owner,
+      ...(query ? { query } : {}),
+      ...(cursor ? { cursor } : {}),
+    });
   }
 
   async getAdminCodespaces(): Promise<{
@@ -1131,33 +1136,12 @@ export class MoiraApiClient {
     return response.data.data!;
   }
 
-  async adoptGitHubCodespace(
-    input:
-      | {
-          codespace_id: string;
-          expected_generation: number;
-          request_id: string;
-          device_id?: string;
-        }
-      | {
-          provider_resource_name: string;
-          request_id: string;
-          device_id?: string;
-        },
-  ): Promise<CodespaceSummaryView> {
-    const response = await this.client.post<ApiResponse<{ codespace: CodespaceSummaryView }>>(
-      "codespace_id" in input
-        ? `/integrations/github/codespaces/${encodeURIComponent(input.codespace_id)}/adopt`
-        : "/integrations/github/codespaces/adopt",
-      "codespace_id" in input
-        ? {
-            request_id: input.request_id,
-            expected_generation: input.expected_generation,
-            ...(input.device_id ? { device_id: input.device_id } : {}),
-          }
-        : input,
-    );
-    return response.data.data!.codespace;
+  adoptWorkspace(workspace: string, controller: string): Promise<WorkspaceOperationView> {
+    return this.workspacePurpose("workspace_adopt", { workspace, controller });
+  }
+
+  adoptExternalWorkspace(controller: string, name: string): Promise<WorkspaceOperationView> {
+    return this.workspacePurpose("workspace_adopt_external", { controller, name });
   }
 
   /**

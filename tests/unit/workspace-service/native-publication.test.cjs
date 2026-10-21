@@ -58,6 +58,7 @@ async function fixture(bytes = Buffer.from([0, 255, 13, 10, 128, 1])) {
     authorizationGeneration: 1,
     publicOrigin: "https://moira.example",
   };
+  value.ownerSelector = { kind: "github", resourceId: value.publicationScope.resourceId };
   value.sourceServer = createServer((incoming, response) => {
     value.sourceRequests.push({
       method: incoming.method,
@@ -88,7 +89,7 @@ async function fixture(bytes = Buffer.from([0, 255, 13, 10, 128, 1])) {
     value.sourceServer.listen(value.sourceFixture.socketPath, done);
   });
   value.file = {
-    fileId: "file-owner-control",
+    fileId: "file_ownerControl",
     downloadUrl: "https://files.oaiusercontent.com/control?fixtureSignedAuthority=private-sentinel",
     fileName: "control.bin",
     mimeType: "application/octet-stream",
@@ -101,6 +102,26 @@ async function fixture(bytes = Buffer.from([0, 255, 13, 10, 128, 1])) {
 async function jsonCall(value, method, path, body) {
   const response = await call(value, method, path, body, { "content-type": "application/json" });
   return { ...response, body: JSON.parse(response.bytes.toString()) };
+}
+
+function nativeDescriptor(file) {
+  return {
+    file_id: file.fileId,
+    download_url: file.downloadUrl,
+    file_name: file.fileName,
+    mime_type: file.mimeType,
+    size_bytes: file.declaredSize,
+  };
+}
+async function semantic(value, action, input, requestId) {
+  const response = await jsonCall(value, "POST", "/v1/tools", {
+    action,
+    request: input,
+    ...(requestId ? { requestId } : {}),
+  });
+  expect(response.status).toBe(200);
+  expect(response.body.isError).toBeUndefined();
+  return response.body.structuredContent;
 }
 
 async function collect(value, requestId) {
@@ -127,36 +148,46 @@ function assertNoSourceAuthority(value) {
   expect(Buffer.concat(value.diagnostics).includes(sentinel)).toBe(false);
 }
 
-test("the separate owner acquires exact native bytes and restart collects without using rotated source authority", async () => {
+test("semantic upload acquires exact native bytes at the separate owner and restart collects without rotated source authority", async () => {
   const value = await fixture(Buffer.alloc(1024 * 1024 + 17, 0xc7));
   const requestId = createWorkspaceRequestId();
-  const body = { requestId, path: "native.bin", expected: { exists: false }, file: value.file };
-  const uploaded = await jsonCall(value, "POST", "/v1/files/native-upload", body);
-  expect(uploaded.status).toBe(200);
-  expect(uploaded.body).toMatchObject({ requestId, state: "succeeded" });
-  expect(readFileSync(join(value.root, body.path)).equals(value.sourceBytes)).toBe(true);
+  const uploaded = await semantic(
+    value,
+    "file_upload",
+    {
+      target: { create: { path: "native.bin" } },
+      file: nativeDescriptor(value.file),
+    },
+    requestId,
+  );
+  expect(uploaded).toMatchObject({
+    state: "completed",
+    kind: "file-change",
+    outcome: { ok: true },
+  });
+  expect(readFileSync(join(value.root, "native.bin")).equals(value.sourceBytes)).toBe(true);
   expect(value.sourceRequests).toEqual([
     {
       method: "GET",
       pid: value.child.pid,
       url: value.file.downloadUrl,
-      path: "/source/file-owner-control",
+      path: "/source/file_ownerControl",
     },
   ]);
   expect(value.sourceRequests[0].pid).not.toBe(process.pid);
-  const original = statSync(join(value.root, body.path));
+  const original = statSync(join(value.root, "native.bin"));
   await stop(value);
   value.sourceMode = "refused";
   await start(value);
-  const replay = await jsonCall(value, "POST", "/v1/files/native-upload", {
-    ...body,
-    file: { ...body.file, downloadUrl: "https://files.oaiusercontent.com/expired-rotated" },
-  });
-  expect(replay.status).toBe(200);
-  expect(replay.body).toEqual(uploaded.body);
-  expect(await collect(value, requestId)).toMatchObject({ requestId, state: "succeeded" });
+  value.file.downloadUrl = "https://files.oaiusercontent.com/expired-rotated";
+  expect(await semantic(value, "operation_get", { reference: uploaded.operation })).toEqual(
+    uploaded,
+  );
+  expect(await semantic(value, "operation_get", { reference: uploaded.operation })).toEqual(
+    uploaded,
+  );
   expect(value.sourceRequests).toHaveLength(1);
-  const retained = statSync(join(value.root, body.path));
+  const retained = statSync(join(value.root, "native.bin"));
   expect([retained.dev, retained.ino, retained.mtimeMs]).toEqual([
     original.dev,
     original.ino,
@@ -285,61 +316,78 @@ test("the final session gate refuses a prepared native stdin command without an 
   assertNoSourceAuthority(value);
 });
 
-test("one native stdin request retains exact command output and cannot change its command or fetch on replay", async () => {
+test("semantic native stdin retains exact binary input and original command output without another acquisition or effect", async () => {
   const value = await fixture();
   const requestId = createWorkspaceRequestId();
-  const body = {
-    requestId,
-    nativeInput: value.file,
+  const command = {
     argv: [
       process.execPath,
       "-e",
-      "require('node:fs').appendFileSync('effects','once');process.stdin.pipe(process.stdout)",
+      "const fs=require('node:fs');fs.appendFileSync('effects','once');const chunks=[];process.stdin.on('data',bytes=>chunks.push(bytes));process.stdin.on('end',()=>{const input=Buffer.concat(chunks);fs.writeFileSync('native-stdin.bin',input);process.stdout.write(require('node:crypto').createHash('sha256').update(input).digest('hex'))})",
     ],
   };
-  expect((await jsonCall(value, "POST", "/v1/exec", body)).status).toBe(200);
-  expect(await collect(value, requestId)).toMatchObject({
-    requestId,
-    state: "succeeded",
-    stdoutBytes: value.sourceBytes.length,
+  const body = { command, stdin_file: nativeDescriptor(value.file) };
+  const original = await semantic(value, "command_run_native", body, requestId);
+  const digest = createHash("sha256").update(value.sourceBytes).digest("hex");
+  expect(original).toMatchObject({
+    state: "completed",
+    kind: "command",
+    stdout: digest,
+    outcome: { ok: true, result: { exitCode: 0, stdoutBytes: digest.length } },
+  });
+  expect(readFileSync(join(value.root, "native-stdin.bin"))).toEqual(value.sourceBytes);
+  expect(existsSync(join(value.stateRoot, "requests", requestId, "input"))).toBe(false);
+  expect(
+    JSON.parse(readFileSync(join(value.stateRoot, "requests", requestId, "input.json"), "utf8")),
+  ).toEqual({ size: value.sourceBytes.length, sha256: digest });
+  value.sourceMode = "refused";
+  await stop(value);
+  await start(value);
+  expect(await semantic(value, "operation_get", { reference: original.operation })).toMatchObject({
+    state: "completed",
+    outcome: original.outcome,
   });
   expect(
-    (await call(value, "GET", `/v1/operations/${requestId}/output`)).bytes.equals(
-      value.sourceBytes,
-    ),
-  ).toBe(true);
-  value.sourceMode = "refused";
-  expect(
-    (
-      await jsonCall(value, "POST", "/v1/exec", {
-        ...body,
-        nativeInput: { ...value.file, downloadUrl: "https://files.oaiusercontent.com/expired" },
-      })
-    ).status,
-  ).toBe(200);
-  expect(
-    (
-      await jsonCall(value, "POST", "/v1/exec", {
-        ...body,
-        argv: [process.execPath, "-e", "process.exit(7)"],
-      })
-    ).status,
-  ).toBe(409);
+    await semantic(value, "process_output", { process: original.process, stream: "stdout" }),
+  ).toMatchObject({ text: digest });
+  const repeated = await semantic(
+    value,
+    "command_run_native",
+    {
+      ...body,
+      stdin_file: { ...body.stdin_file, download_url: "https://files.oaiusercontent.com/expired" },
+    },
+    requestId,
+  );
+  expect(repeated).toMatchObject({ state: "completed", outcome: original.outcome });
+  const conflict = await jsonCall(value, "POST", "/v1/tools", {
+    action: "command_run_native",
+    requestId,
+    request: { ...body, command: { argv: [process.execPath, "-e", "process.exit(7)"] } },
+  });
+  expect(conflict.body.structuredContent.error.code).toBe("REQUEST_ID_CONFLICT");
   expect(readFileSync(join(value.root, "effects"), "utf8")).toBe("once");
   expect(value.sourceRequests).toHaveLength(1);
   assertNoSourceAuthority(value);
 });
 
-test("losing the upload reply collects the same completed effect without replacing its file or acquiring the source twice", async () => {
+test("losing a semantic upload reply discovers and collects the same file without reacquiring a refused source", async () => {
   const value = await fixture();
   const requestId = createWorkspaceRequestId();
-  const body = { requestId, path: "lost.bin", expected: { exists: false }, file: value.file };
+  const body = {
+    action: "file_upload",
+    requestId,
+    request: {
+      target: { create: { path: "lost.bin" } },
+      file: nativeDescriptor(value.file),
+    },
+  };
   await new Promise((done, reject) => {
     const outgoing = request(
       {
         socketPath: value.socketPath,
         method: "POST",
-        path: "/v1/files/native-upload",
+        path: "/v1/tools",
         headers: { "content-type": "application/json" },
       },
       (response) => {
@@ -350,12 +398,27 @@ test("losing the upload reply collects the same completed effect without replaci
     outgoing.once("error", reject);
     outgoing.end(JSON.stringify(body));
   });
-  expect(await collect(value, requestId)).toMatchObject({ requestId, state: "succeeded" });
-  const original = statSync(join(value.root, body.path));
+  const original = statSync(join(value.root, "lost.bin"));
+  expect(readFileSync(join(value.root, "lost.bin"))).toEqual(value.sourceBytes);
   value.sourceMode = "refused";
-  expect((await jsonCall(value, "POST", "/v1/files/native-upload", body)).status).toBe(200);
-  expect(statSync(join(value.root, body.path)).ino).toBe(original.ino);
+  const found = await semantic(value, "operation_find", {
+    kind: "file-change",
+    query: "Upload lost.bin",
+  });
+  expect(found.operations).toHaveLength(1);
+  const reference = found.operations[0].operation;
+  const collected = await semantic(value, "operation_get", { reference });
+  expect(collected).toMatchObject({ state: "completed", outcome: { ok: true } });
+  expect(await semantic(value, "operation_get", { reference })).toEqual(collected);
+  const retained = statSync(join(value.root, "lost.bin"));
+  expect([retained.dev, retained.ino, retained.mtimeMs]).toEqual([
+    original.dev,
+    original.ino,
+    original.mtimeMs,
+  ]);
+  expect(readFileSync(join(value.root, "lost.bin"))).toEqual(value.sourceBytes);
   expect(value.sourceRequests).toHaveLength(1);
+  assertNoSourceAuthority(value);
 });
 
 async function publish(value, extra = {}) {

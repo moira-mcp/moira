@@ -6,7 +6,10 @@ import {
   controllerRequestIdSchema,
   controllerGitHubLifecycleSchema,
   controllerOperationSchema,
-  githubControllerResourceSchema,
+  githubAssignmentSchema,
+  githubCreationSettingsSchema,
+  githubCreatePreflightSchema,
+  githubMachineOffersSchema,
   githubProviderActionSchema,
   githubResourceAuthoritySchema,
   getAccountAccessDenial,
@@ -15,6 +18,8 @@ import {
   type CodespaceConnectionService,
   type CodespaceSummaryView,
   type CodespaceResourceListView,
+  type CodespaceDiscoveryView,
+  selectCodespaceDiscoveryView,
   codespaceObservationErrorCode,
   type CodespaceProviderResource,
   type GitHubResourceIdentity,
@@ -152,6 +157,14 @@ export class GitHubResourceService {
       "github-codespaces",
     );
   }
+  private creationSettings(userId: string) {
+    const idle = new CodespaceRepositorySettings(this.db).idlePolicy(userId);
+    return githubCreationSettingsSchema.parse({
+      autoStopEnabled: idle.autoStopEnabled,
+      idleTimeoutMinutes: idle.idleTimeoutMinutes,
+      retentionMinutes: this.policy().persistentRetentionMs / 60_000,
+    });
+  }
   private exact(resource: GitHubResourceIdentity, observed: CodespaceProviderResource | null) {
     if (
       observed &&
@@ -191,7 +204,7 @@ export class GitHubResourceService {
     const identity = this.identities.getOwned(userId, id);
     if (!identity) throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Resource is not owned");
     const current = this.identities.hasCurrentAuthorization(userId, id),
-      owner = current ? await this.owner(identity) : null,
+      owner = current && identity.retirement !== "retired" ? await this.owner(identity) : null,
       observed =
         current && identity.retirement !== "retired"
           ? await this.observation(userId, identity)
@@ -204,6 +217,7 @@ export class GitHubResourceService {
       credential &&
       credential.resourceGeneration === identity.generation &&
       credential.authorizationGeneration === identity.authorizationGeneration &&
+      owner?.environmentIdentity === credential.environmentIdentity &&
       (credential.expiresAt === null || credential.expiresAt > Date.now())
     ) {
       try {
@@ -221,7 +235,28 @@ export class GitHubResourceService {
         guestLive = false;
       }
     }
-    const ownerRunning = owner?.state === "running" && observed?.state === "available";
+    const ownerCurrent =
+      owner?.resourceGeneration === identity.generation &&
+      owner.authorizationGeneration === identity.authorizationGeneration &&
+      owner.repositoryId === identity.repositoryId &&
+      owner.providerResourceName === identity.providerResourceName;
+    const ownerRunning =
+      ownerCurrent &&
+      owner.state === "running" &&
+      owner.environmentIdentity !== null &&
+      observed?.state === "available";
+    const remote =
+      current && identity.retirement !== "retired" && ownerRunning && owner.remote
+        ? {
+            state: guestLive
+              ? ("connected" as const)
+              : owner.remote.state === "connected"
+                ? ("unavailable" as const)
+                : owner.remote.state,
+          }
+        : undefined;
+    const setupIncomplete =
+      remote?.state === "unconfigured" || remote?.state === "enrollment_unavailable";
     const state =
       identity.retirement === "retired"
         ? "deleted"
@@ -271,15 +306,18 @@ export class GitHubResourceService {
           ? null
           : !current
             ? "CODESPACE_AUTHORIZATION_REQUIRED"
-            : ownerRunning && !guestLive
-              ? "CODESPACE_PROVIDER_UNAVAILABLE"
-              : owner
-                ? null
-                : "CODESPACE_PROVIDER_UNAVAILABLE",
+            : setupIncomplete
+              ? "CODESPACE_LOCAL_SETUP_INCOMPLETE"
+              : ownerRunning && !guestLive && !remote
+                ? "CODESPACE_PROVIDER_UNAVAILABLE"
+                : owner
+                  ? null
+                  : "CODESPACE_PROVIDER_UNAVAILABLE",
       generation: owner?.resourceGeneration ?? identity.generation,
       created_at: identity.createdAt,
       updated_at: owner?.observedAt ?? identity.createdAt,
       pending_request_ids: owner?.pendingRequestIds ?? [],
+      ...(remote ? { remote } : {}),
       ...(identity.deviceId ? { device_id: identity.deviceId } : {}),
       ...(identity.providerResourceName
         ? {
@@ -288,10 +326,17 @@ export class GitHubResourceService {
         : {}),
     };
   }
-  async listResources(userId: string): Promise<CodespaceResourceListView> {
+  async listResources(
+    userId: string,
+    options: { view?: CodespaceDiscoveryView } = {},
+  ): Promise<CodespaceResourceListView> {
     const identities = this.identities
       .listOwned(userId)
-      .filter((resource) => resource.retirement !== "retired");
+      .filter((resource) =>
+        options.view === "history"
+          ? resource.retirement === "retired"
+          : resource.retirement !== "retired",
+      );
     const observations = await Promise.allSettled(
       identities.map((resource) => this.getCodespace(userId, resource.id)),
     );
@@ -313,11 +358,7 @@ export class GitHubResourceService {
         error: { code: codespaceObservationErrorCode(observation.reason) },
       });
     });
-    return result;
-  }
-  async refreshProviderState(userId: string) {
-    const resources = await this.listResources(userId);
-    return { stale: resources.unavailable.length > 0 };
+    return selectCodespaceDiscoveryView(result, options.view);
   }
   private uncertainty(
     resource: GitHubResourceIdentity,
@@ -708,7 +749,7 @@ export class GitHubResourceService {
         }
       : this.authority(auth.userId, id, true);
     this.assigned(resource, auth);
-    return githubControllerResourceSchema.parse({
+    return githubAssignmentSchema.parse({
       resourceId: id,
       resourceGeneration: resource.generation,
       authorizationGeneration: resource.authorizationGeneration,
@@ -725,6 +766,8 @@ export class GitHubResourceService {
       pendingRequestIds: [],
       observedAt: preview?.observed ? Date.now() : null,
       providerResource: preview?.observed ?? null,
+      billableOwnerId: resource.billableOwnerId,
+      creationSettings: this.creationSettings(auth.userId),
     });
   }
   private remoteCredential(
@@ -948,6 +991,9 @@ export class GitHubResourceService {
   async stopCodespace(userId: string, id: string, requestId?: string, expectedGeneration?: number) {
     return this.lifecycle(userId, id, "stop", requestId, expectedGeneration);
   }
+  async resumeSetup(userId: string, id: string, requestId?: string, expectedGeneration?: number) {
+    return this.lifecycle(userId, id, "resume_setup", requestId, expectedGeneration);
+  }
   async deleteCodespace(
     userId: string,
     id: string,
@@ -975,7 +1021,7 @@ export class GitHubResourceService {
   private async lifecycle(
     userId: string,
     id: string,
-    action: "start" | "stop" | "delete" | "adopt",
+    action: "start" | "stop" | "delete" | "adopt" | "resume_setup",
     requestId?: string,
     expectedGeneration?: number,
   ) {
@@ -1120,9 +1166,9 @@ export class GitHubResourceService {
         "CODESPACE_GENERATION_CONFLICT",
         "Resource authority generation changed",
       );
-    if (input.action !== "get" && resource.generation > 1)
+    if (["create", "start", "stop", "delete"].includes(input.action) && resource.generation > 1)
       await this.retire(auth.userId, id, resource.generation - 1);
-    if (input.action === "create" || input.action === "start") this.enabled();
+    if (["create", "start", "preflight", "machines"].includes(input.action)) this.enabled();
     const token = await this.connection.getAccessToken(auth.userId);
     this.assigned(this.current(resource), auth);
     if (input.action === "get") {
@@ -1154,6 +1200,25 @@ export class GitHubResourceService {
         );
       return observed;
     }
+    const repository = {
+      id: resource.repositoryId,
+      fullName: resource.repositoryFullName,
+      private: true,
+    };
+    if (input.action === "preflight") {
+      const result = githubCreatePreflightSchema.parse(
+        await this.client.preflightCreate(token, repository, resource.requestedRef),
+      );
+      this.assigned(this.current(resource), auth);
+      return result;
+    }
+    if (input.action === "machines") {
+      const result = githubMachineOffersSchema.parse(
+        await this.client.listMachines(token, repository, resource.requestedRef),
+      );
+      this.assigned(this.current(resource), auth);
+      return result;
+    }
     if (input.action === "create") {
       if (resource.providerResourceName)
         throw new CodespaceResourceError(
@@ -1165,36 +1230,34 @@ export class GitHubResourceService {
           "WORKSPACE_OUTCOME_UNCONFIRMED",
           "Original creation may already have been dispatched; collect its owner receipt",
         );
-      const repository = {
-          id: resource.repositoryId,
-          fullName: resource.repositoryFullName,
-          private: true,
-        },
-        preflight = await this.client.preflightCreate(token, repository, resource.requestedRef);
+      // The owner chooses progression; the secret-bearing broker still fences actual billing.
+      const preflight = await this.client.preflightCreate(token, repository, resource.requestedRef);
       if (preflight.billableOwnerId !== resource.billableOwnerId)
         throw new CodespaceResourceError(
           "CODESPACE_BILLING_UNSUPPORTED",
           "Provider payer does not match current account",
         );
-      const machines = await this.client.listMachines(token, repository, resource.requestedRef),
-        machine = machines[0];
-      if (!machine)
+      const settings = this.creationSettings(auth.userId),
+        prepared = input.prepared;
+      if (
+        prepared.retentionMinutes !== settings.retentionMinutes ||
+        (settings.autoStopEnabled
+          ? prepared.idleTimeoutMinutes !== settings.idleTimeoutMinutes
+          : prepared.idleTimeoutMinutes !== CODESPACE_IDLE_TIMEOUT_MINUTES.maximum)
+      )
         throw new CodespaceResourceError(
-          "CODESPACE_RESOURCE_INVALID",
-          "Provider offers no machine for this ref",
+          "CODESPACE_GENERATION_CONFLICT",
+          "Account creation settings changed; inspect the original owner operation",
         );
-      const idle = new CodespaceRepositorySettings(this.db).idlePolicy(auth.userId);
       this.assigned(this.current(resource), auth);
       this.identities.markCreationSubmitted(auth.userId, id, resource.generation);
       const result = await this.client.create(token, {
         repository,
         ref: resource.requestedRef,
-        machine,
+        machine: prepared.machine,
         operationMarker: resource.operationMarker,
-        idleTimeoutMinutes: idle.autoStopEnabled
-          ? idle.idleTimeoutMinutes
-          : CODESPACE_IDLE_TIMEOUT_MINUTES.maximum,
-        retentionMinutes: this.policy().persistentRetentionMs / 60_000,
+        idleTimeoutMinutes: prepared.idleTimeoutMinutes,
+        retentionMinutes: prepared.retentionMinutes,
         ...(resource.devcontainerPath ? { devcontainerPath: resource.devcontainerPath } : {}),
       });
       try {
@@ -1240,11 +1303,14 @@ export class GitHubResourceService {
     const observed = await this.observation(auth.userId, resource);
     this.assigned(this.current(resource), auth);
     if (input.action === "delete" && observed === null) return "absent" as const;
-    return input.action === "start"
-      ? this.client.startExact(token, resource.providerResourceName)
-      : input.action === "stop"
-        ? this.client.stopExact(token, resource.providerResourceName)
-        : this.client.deleteExact(token, resource.providerResourceName);
+    switch (input.action) {
+      case "start":
+        return this.client.startExact(token, resource.providerResourceName);
+      case "stop":
+        return this.client.stopExact(token, resource.providerResourceName);
+      case "delete":
+        return this.client.deleteExact(token, resource.providerResourceName);
+    }
   }
   async setupSituation(userId: string, repositoryId?: string): Promise<CodespaceGuidanceSituation> {
     if (!this.policy().enabled) return "instance_disabled";

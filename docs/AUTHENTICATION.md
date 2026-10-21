@@ -415,9 +415,41 @@ through `/api/local-devices`; they cannot act as another device or user.
 Repository, resource, connection and generation checks remain additional authority
 boundaries. Device revocation invalidates its requests without revoking other
 devices. It does not promise instantaneous physical stop on an offline host:
-the independent companion guard enforces the locally granted finite work lease
-and disable state. Local SDK sign-in remains in the machine's owned credential
+the independent companion guard enforces explicit local disable. Work permission has
+no automatic deadline. Local SDK sign-in remains in the machine's owned credential
 store and is not sent as enrollment policy or forwarded into guest environment.
+
+Ordinary workspace, target, controller, operation, process and file references are
+typed addresses and captured preconditions, not credentials or authorization grants.
+The authenticated user still needs current account, device/connection, resource and
+repository authority. Workspace mutations consume the generation captured by the
+returned observation; they do not silently refresh it. A file reference retains its
+observed identity/version, so current permission cannot authorize replacing a different
+file that appeared later.
+
+For Local routing, an original owner selector binds device, retained space and original
+creation marker. The private controller resolves that selector or the exact resource
+binding from retained records without a native snapshot. Cloud checks current authority
+before and after asynchronous resolution; a new pairing connection cannot adopt an old
+controller reference. Discovery reads safe descriptors under the same current authority,
+including on exhausted cursor pages, and does not dispatch or collect each candidate.
+Discovery exposes references, state and safe metadata, while the original outcome
+requires explicit `operation_get` under current authority.
+Reference decoding alone never permits a foreign or stale-owner read.
+
+Workspace discovery views do not broaden authority. Diagnostic identities omit lifecycle
+generations and permit observation or collection of retained originals, not mutation with a
+guessed precondition. Request-local Local observations are rechecked against current device
+registration before reuse. Browser discovery and GitHub connection responses are fenced by
+the accepted private-read scope: a credential or capability change for the same account also
+retires obsolete responses. Late success or failure cannot replace the renewed observation.
+
+`operation_get` is pure original observation. `operation_resume` is an explicit
+continuation only of retained private-repository creation using its saved input and
+existing authority/claim checks. It is not a general retry command. Applied creation
+is proved from its exact original controller admission and applied grant; absence
+cannot reconstruct input. A lost first reply requires discovery and explicit candidate
+selection, not inference from matching command text or automatic resubmission.
 
 Owner web control requires a separate, explicit local `web-control --confirm`
 approval pinned to the server, user, device and connection, with finite ceilings.
@@ -432,21 +464,34 @@ policy, approved ceilings and settings revisions belong to the always-on control
 not cloud enrollment or heartbeat state. A settings write carries its caller-selected
 ws1 request ID and reaches the live owner; unavailable refuses before dispatch instead
 of queuing a request or authorizing from cached policy. Approved management access
-remains available while work is disabled or expired without authorizing jobs or Git.
+remains available while work is disabled without authorizing jobs or Git.
+CLI and web settings use the same private cross-process gate, and current policy,
+applied revision and delegated permission publish together. Ordinary settings apply
+live; enablement and shared-storage changes use explicit stopped control.
 Original operation collection does not repeat accepted or uncertain work. Observer
 disconnect does not revoke a previously admitted effect.
 
-The global cloud control is an additional remote admission gate: it can refuse Local
-create/start and workspace routing while the device remains paired and its local policy
-remains valid. It does not block the controller management route, request physical Local
-stop or revoke existing offline owner grants. Account/device revocation and the owner's
-finite lease remain separate authority boundaries.
+Current account, device, connection and resource authority gate cloud routing. Local
+create/start additionally require the current owner's enabled permission and exact
+repository grant. The GitHub provider's enabled flag is not a Local admission gate and
+does not override locally approved rights or request physical Local stop. Account/device
+revocation and explicit local enabled/disabled permission remain separate authority
+boundaries.
+
+Workspace/device credential fallback is limited to explicit typed mismatches:
+`CODESPACE_AUTHORIZATION_REQUIRED` for workspace credentials and `LOCAL_UNAUTHORIZED`
+for device credentials. A database or internal failure does not establish mismatch,
+revocation or permission to try another authority. The same rule applies to workspace
+routing, communication and scoped credential issuance. Upgrade endpoints return an
+empty-body 503 for temporary failures and 403 for typed authority, identity or protocol
+refusal. The remote adapter reconnects temporary CONTROL failures; CONTROL 401/403
+retires that remote authority without replaying accepted work or stopping a Local VM.
 
 An admitted browser session can confirm deletion of one owned local codespace at its current
 generation while the paired device and web-control approval remain active. The existing durable
 owner journal records this confirmation. Controller routing binds cleanup authority to the exact user,
 device, connection, resource and generation, and the companion rechecks local approval. Only exact
-observation and deletion are authorized; enabled agent work, its lease and agent deletion grants
+observation and deletion are authorized; enabled agent work and agent deletion grants
 are not prerequisites for this cleanup and are not changed by it. MCP callers and a bare request
 flag cannot grant owner cleanup authority.
 
@@ -458,11 +503,13 @@ verified HTTPS. The issuer checks current account, parent generation, App grant
 and device/resource authority; Local uses its stable route-authority generation,
 while the separately observed lifecycle generation guards start/stop/delete. Each Local phase
 returns one coherent owner observation of the repository grant, route/lifecycle generations,
-applied settings revision and finite lease. Issuer and identity consumers reuse it within that
+applied settings revision and current enabled permission. Issuer and identity consumers reuse it within that
 phase; asynchronous grant refresh and issuance still require fresh authorization.
 The original OAuth/refresh credential and Local device credential never reach
 project commands. Derived tokens remain broker-private memory and must not enter
-project files, argv, environment, logs or agent output. This is the existing
+project files, argv, project-command environment, logs or agent output. Fixed host
+SSH provisioning supplies only its scoped child to an isolated trusted `gh`
+subprocess environment. This is the existing
 trusted same-UID guest model, not an OS sandbox against an authorized agent.
 
 Local public read-only fetch needs no App grant only on its explicitly approved
@@ -477,12 +524,53 @@ does not mint or refresh, and even confirmed absence does not automatically
 reacquire. Custody/outcome/disposal uncertainty remains uncertain with the same
 identity. PR creation has its own original mutation receipt; credential failure
 before dispatch does not prove a PR effect. Known children are disposed after the
-physical upstream closes and on authority retirement. Local usage expiry is not
+physical upstream closes and on authority retirement. An unrelated settings revision
+does not revoke unchanged device/resource/exact-grant authority. Children retain finite
+provider and parent use bounds even though Local work permission has no deadline.
+Local credential usage expiry is not
 proof of GitHub expiry enforcement or parent-to-child revocation cascade.
 Existing owner-admitted VMs and direct local CLI access retain only their current
-local grants and finite lease when cloud transport is unavailable. A confirmed
+local grants and enabled permission when cloud transport is unavailable. A confirmed
 authorization refusal does not enable fallback; fresh creation needs cloud route
 registration and initial Git authority.
+
+Verified local Unix readiness is independent of remote enrollment and CONTROL
+availability. A local-only owner can later enroll through fixed configuration reload
+without replacing its command engine, journal or accepted commands. Reload requires
+the same principal and verified repository binding, guest life and packaged release.
+New publication and communication work capture current authority, while original
+delivery and security receipts retain their original binding. Git metadata calls use
+the current credential through the same broker and child-custody store. Disabling
+remote authority refuses new acquisition and delivery without discarding unresolved
+children or rewriting original outcomes. Current cloud authorization and genuine
+provider/credential expiry still apply.
+
+For GitHub provisioning, the selected controller journals its machine and captured
+account settings before creation. The cloud's fixed broker independently checks
+the exact assignment, current authority and personal payer before using parent
+authorization for create/delete. The host's repository-scoped provision child has
+Codespaces read and lifecycle-admin write; it does not inherit those parent write
+permissions or choose arbitrary provider endpoints.
+
+Initial GitHub setup saves the original measured repository/root, release, life and
+authority proof before publishing the binding pointer. Verified Unix readiness is
+published before optional enrollment, so a held or refused enrollment does not turn
+approved local work into failed VM setup. Explicit `resume_setup` uses that same
+proof and resource generation with fresh scoped SSH custody; it cannot regenerate
+proof for a changed life, install a replacement or replay provider startup. Current
+authority is checked across enrollment before applying a reply. An already enrolled
+guest can renew through its existing reconnect loop after a cold life change using
+its finite renewal authority and verified retained binding. A never-enrolled guest
+cannot use that path to manufacture initial enrollment. CONTROL and DATA for a
+connection use the same prepared credential; terminal authority refusal stops remote
+reconnection without stopping the local Unix owner.
+
+On Local, optional enrollment begins after verified Unix readiness and waits outside
+local lifecycle/work admission. A returned credential can configure only the captured
+runtime, repository and generation under the still-current grant and connection.
+Changed pairing authority, revocation, stop or observer release fences a late reply;
+it cannot restore remote access or change local desired state through stale authority.
+
 See [Local Device Enrollment and Controller API](API.md#local-device-enrollment-and-controller-api)
 for endpoints and [Codespaces](CODESPACES.md) for local setup and recovery.
 
@@ -585,7 +673,26 @@ pre-parsed value reaches the SDK's JSON-RPC, batch, media-type and protocol vali
 JSON returns a controlled 400. The HTTP gateway rate limiter counts requests per client IP,
 including authenticated requests; it is separate from owner operation lifetime or file size.
 
-MCP communication uses the caller's ordinary OAuth or persistent MCP credential and catalog admission. Its binary effect is assigned to the original workspace owner or an active registered paired controller. Private `/api/communication/owner` endpoints require that actor's existing device or workspace credential, not the caller's MCP token. Controller scope binds user/device/generation/connection; workspace scope binds resource/resource-generation/authorization-generation/measured-life. The current account and actor are authenticated before reading preparation JSON or framed control, then the complete scope and current configured channel are authorized and rechecked after configuration resolution. These credential and scope decisions do not consult a presence API; actual dispatch uses the backend router's current connection. A channel descriptor grants no caller-selected recipient, endpoint, header or secret. The cloud injects provider credentials only into its fixed authorized request; binary extension handlers and project commands receive none.
+MCP `communication_send`, `communication_deliver` and
+`communication_deliver_publication` use ordinary OAuth or persistent MCP credentials
+and catalog admission. Binary work is assigned to the publication's original workspace
+owner or a selected/sole eligible paired controller. Returned delivery operations use
+common `operation_get/find`; neither source acquisition nor a vendor effect is repeated
+by collection. Private `/api/communication/owner` endpoints require that actor's existing
+device or workspace credential, not the caller's MCP token. Controller scope binds
+user/device/generation/connection; workspace scope binds resource, route and authorization
+generations and measured life. Authentication precedes preparation JSON/framed control;
+complete scope and current channel authority are rechecked after configuration resolution.
+These checks do not consult a presence API: actual dispatch uses the backend router's
+current connection. A channel descriptor grants no caller-selected recipient, endpoint,
+header or secret. Preparation receives only scope, original identity, optional channel
+selection and workflow frame, and returns declared capabilities/constraints plus
+sanitized nonsecret handler settings. Recipient and endpoint runtime values remain
+at the broker. The owner validates the complete delivery plan against its owned bytes
+before any vendor stage; the cloud rechecks the prepared stage and current configured
+authority, then injects provider credentials and fixed recipient/framing. Project commands
+and binary handlers receive no provider secrets. Public publication URLs have their own current owner
+authorization and expiry contract; ordinary returned references do not replace it.
 
 Public progress-image grants remain run-bound authorization, distinct from both MCP identity and private owner credentials. Minting requires a selected or unique active registered controller; missing or ambiguous selection returns `COMMUNICATION_OWNER_UNAVAILABLE`. Rendering and publication require that owner's actual route. A route failure does not prove that an original request was never admitted. Existing task/context/step/version binding and response-finish consumption remain enforced.
 

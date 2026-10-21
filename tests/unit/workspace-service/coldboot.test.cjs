@@ -52,6 +52,10 @@ function config(f) {
 test("cold boot retains a token-free original enrollment request across lost reply and restart without touching workspace data", async () => {
   const f = createFixture(),
     input = config(f);
+  const configuration = join(f.directory, ".local/share/moira-workspace/config.json");
+  const installed = JSON.stringify(input);
+  mkdirSync(join(f.directory, ".local/share/moira-workspace"), { recursive: true, mode: 0o700 });
+  writeFileSync(configuration, installed, { mode: 0o600 });
   writeFileSync(join(f.root, "sentinel"), "owned workspace data");
   try {
     const lost = await child(
@@ -60,11 +64,11 @@ test("cold boot retains a token-free original enrollment request across lost rep
       `let submitted=false,original;
       globalThis.fetch=async(url,options)=>{submitted=true;original=JSON.parse(options.body);const durable=JSON.parse(fs.readFileSync(path.join(state,'renewal-'+currentLife+'.json'),'utf8'));if(JSON.stringify(durable)!==JSON.stringify(original))throw Error('not durable');throw Error('lost reply')};
       let refused=false;try{await renewWorkspaceConfiguration(config,config.releaseIdentity)}catch{refused=true}
-      console.log(JSON.stringify({submitted,refused,requestId:original.requestId,configurationPublished:fs.existsSync(path.join(process.env.HOME,'.local/share/moira-workspace/config.json'))}));`,
+      console.log(JSON.stringify({submitted,refused,requestId:original.requestId}));`,
     );
     expect(lost.submitted).toBe(true);
     expect(lost.refused).toBe(true);
-    expect(lost.configurationPublished).toBe(false);
+    expect(readFileSync(configuration, "utf8")).toBe(installed);
     const recovered = await child(
       f,
       input,

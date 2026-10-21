@@ -2,7 +2,7 @@
 
 This reference describes Moira's provider-neutral codespace control plane and
 the GitHub Codespaces and Moira Local providers. A codespace is a persistent,
-user-owned development environment addressed by an opaque codespace ID. It is
+user-owned development environment selected through a returned workspace reference. It is
 not a chat session: Moira does not receive or store a ChatGPT conversation ID,
 and different authorized clients may reuse the same codespace.
 
@@ -13,11 +13,11 @@ collaboration happens through version-control branches in the repository.
 GitHub authorization belongs to the authenticated website. Agents do not
 receive provider credentials, OAuth operations, SSH configuration or lifecycle
 capabilities. Agents reach codespaces through the authenticated MCP
-`codespace` and `codespace_process` tools and the direct workspace CLI described below; the website owns the GitHub connection and
+purpose-specific workspace, command, file and process tools and the direct workspace CLI described below; the website owns the GitHub connection and
 offers the same basic codespace management (list, create, start, stop, confirmed
 delete and GitHub adoption) over the same services. Cloud checks current account, repository and
 assigned-device authority. Physical lifecycle and its original-operation journal belong to the
-paired controller; existing Local work follows its owner grants and finite lease.
+paired controller; existing Local work follows current owner grants and permission enabled until explicit disable.
 
 ## Component boundary
 
@@ -66,14 +66,14 @@ See [System reference](SYSTEM.md#local-codespace-composition-and-ownership) and
 Local execution has four layers: the server control plane owns authenticated requests and
 repository authorization; `LocalDaemon` owns connection confirmation and reconnect; `LocalVmRuntime`
 owns exact VM lifecycle and its isolation boundary; the installed workspace service owns commands,
-sessions, output and guarded file operations. The CLI delegates persistent `run` to the
-daemon. The runtime factory currently selects only the supported SBX backend; no Lima backend
+sessions, output and guarded file operations. A login-started persistent host service holds the
+daemon, controller, native guard and VM egress; the CLI is its client. The runtime factory currently selects only the supported SBX backend; no Lima backend
 is implemented. Before each fixed guest attachment, that backend verifies configuration, exact
 identity, mounts and network receipt once, then rechecks the current local grant and runtime state
 after those asynchronous proofs and before dispatch.
 
 Moira Local uses outbound authenticated HTTPS to a locally selected Moira application URL.
-Local work requires the computer owner's current grant and lease. Remote work also checks the
+Local work requires the computer owner's current grant and enabled permission. Remote work also checks the
 current account, device and resource binding. No cloud control replaces physical owner rights. `CODESPACE_CODESPACES_ENABLED` gates GitHub only; GitHub App credentials and the
 GitHub provisioner are not required for public read-only Local work.
 Private Git, push and pull-request creation use the connected GitHub App user authorization.
@@ -105,7 +105,7 @@ npm run local -- init --sbx /absolute/path/to/Sbx.app/Contents/MacOS/sbx --label
 npm run local -- login
 npm run local -- setup
 npm run local -- approve OWNER/REPO
-npm run local -- enable --hours 8
+npm run local -- enable
 npm run local -- doctor
 ```
 
@@ -124,10 +124,11 @@ manual mounting; a missing image or unsafe binding remains a refusal. Startup ne
 replacement image, resets storage or substitutes an unbounded directory.
 
 `setup` initializes only an empty dedicated SDK profile. `doctor` checks storage, supported SDK,
-settings, global network policy and owned inventory under an enabled, unexpired lease. Its
+settings, global network policy and owned inventory under enabled work permission. Its
 `liveVmIsolationVerified: false` result is explicit: it does not execute a microVM isolation test.
-Work and `doctor` check current authority from the start of SDK startup. Disable, lease expiry,
-caller cancellation and parent loss remain effective while startup or guest registration is pending.
+Work and `doctor` check current authority from the start of SDK startup. Explicit disable
+retains its physical-stop authority; caller cancellation fences its affected startup request. Observer or parent loss releases
+native observation without manufacturing a VM stop or physical settlement receipt.
 Installation, bootstrap and registration wait for actual completion rather than a general work
 deadline; fixed metadata observations and the bounded `doctor` diagnostic remain distinct.
 The SDK profile has its own HOME, namespace and encrypted credential store; it does not select
@@ -136,8 +137,12 @@ The bundled native helper prepares and unlocks only the owned store without inte
 prompts. `login --new-store` is an explicit recovery operation: it requires disabled work,
 the runner lock and confirmed shutdown, creates a separate store, and preserves existing stores.
 An unreadable store never causes automatic rotation or personal credential adoption.
-The machine-only store uses an owner-readable generated password file and disables sleep/interval
-auto-lock only for that owned SDK store. It trusts the host user account; it is not protection
+The machine-only store uses an owner-readable generated password file. The native helper sets and
+checks the effective no-idle-timeout interval and disables sleep locking for that owned SDK store,
+including after unlocking an existing store with its saved password. The persistent owner's launchd
+registration creates a dedicated security session for its SDK children. This does not remove genuine
+vendor sign-in requirements or guarantee that every SDK authentication failure can recover unattended.
+It trusts the host user account; it is not protection
 against another process already acting as that same user. Personal Keychain lock policy is unchanged.
 
 `approve OWNER/REPO` grants repository read access;
@@ -145,7 +150,7 @@ against another process already acting as that same user. Personal Keychain lock
 An enrolled private/write repository uses the server's GitHub connection and
 repository grant; the guest receives no original OAuth token. Public read-only Git is direct
 and needs no App grant. Controller operations cannot expand local authority.
-`enable --hours N` grants at most 168 hours (8 by default), not indefinite permission.
+`enable` permits work until explicit `disable`; no work-duration or renewal parameter is required.
 
 Open **Settings → Development → Local computers** (`/settings#integrations-local`, under the app's
 configured prefix), choose **Connect a computer**, and copy the enrollment command and token
@@ -157,28 +162,38 @@ current rights are read from the reachable owner after connection. Only then run
 
 ```bash
 npm run local -- run
+npm run local -- service-status
 ```
 
-Keep that foreground process running to serve the account; Ctrl+C settles owned work. Reconnection
-uses the owner's durable original request journal, so a lost response does not authorize redispatch.
+`run` starts or connects to the persistent owner and returns; closing the CLI does not stop VMs.
+The owner starts through the user's macOS login registration, with its own copied Node executable,
+private state and broker/tunnel. `service-status` reports its running release, readiness, failure,
+control-plane state and active/staged installation selection. Local service readiness is not proof
+that every VM or the remote route is available. Reconnection uses the owner's durable original
+request journal, so a lost response does not authorize redispatch.
 
-Before Local create/start/stop/delete, the caller chooses a `request_id` in
-`ws1-<lowercase UUID>` form. Start/stop/delete also send the generation observed for that
-resource. This lifecycle generation is distinct from its stable Git routing generation.
-Collect the original receipt through `codespace({ action: "operation", device_id,
-request_id })`, including when create returned no codespace ID. The owner reports `absent`,
-`accepted`, `completed` or `unconfirmed`; collection never repeats the effect. Neither
-`absent` nor a newer resource snapshot authorizes automatic replay. A new explicit action
-uses a new identity after the original outcome and current state have been inspected.
+Select a provider with `workspace_targets({provider:"local-sandboxes"})` or
+`workspace_targets({provider:"github-codespaces"})` and use a returned target for creation.
+`workspace_list` also requires `provider`; `workspace_observe` addresses a returned observation.
+Use its captured workspace reference for lifecycle work. `workspace_lifecycle` and
+`workspace_delete` consume that captured workspace reference; they do not refresh its comparison
+generation before admission. Internal request identities are minted before effects and returned as
+operation references. Use `operation_get` to collect an original, including creation before a
+workspace reference is available. After a lost first reply, `operation_find` searches the selected
+controller's originals; choose a candidate explicitly. An absent or unavailable result does not
+prove the action never happened and does not authorize automatic replay. A deliberate new call is
+a distinct intent. References grant no authority, and lifecycle generations remain separate from
+stable Git routing generations.
 
 Network failures and server 5xx responses make remote owner state unavailable without
 stopping already admitted work. Offline settings and lifecycle mutations are refused;
 there is no cloud or browser dispatch queue. A failed response to an accepted operation
 requires collection of its original identity after connection returns.
 Only device-endpoint unauthorized responses or confirmed device identity/revocation failures
-invalidate device authority and make the daemon stop work. Local disable, lease expiry and explicit
-shutdown retain their independent stop boundaries. Existing work remains bounded by its current
-local grant and finite lease without extension. Reconnection may return retained receipts, but
+invalidate remote device authority. They fence the remote controller route without converting
+local intended-running state into a physical stop. Local disable and explicit
+physical maintenance retain their independent stop boundaries. Existing work remains bounded by its current
+local grant and enabled permission. Reconnection may return retained receipts, but
 their effects are not redispatched.
 The browser can revoke a specific device; revocation invalidates its generation and denies new
 work. Local `disable` independently stops owned SDK/VM processes and preserves data, including when
@@ -189,21 +204,38 @@ closure and connection-capacity reservation/release. A CONNECT reservation finis
 shutdown is released without destination lookup or connection, so closed service ownership does
 not leave an upstream connection running after shutdown.
 
-The host CLI supports `create OWNER/REPO --ref BRANCH`, `start SPACE_ID`, `stop SPACE_ID`,
-`remove SPACE_ID --confirm` and `collect REQUEST_ID` through the running private controller.
-Choose `--request-id` before mutation; the CLI prints the identity before observing its outcome.
+The host CLI supports `create OWNER/REPO --ref BRANCH`, `workspaces`, `observe WORKSPACE_REF`,
+`start WORKSPACE_REF`, `resume-setup WORKSPACE_REF`, `stop WORKSPACE_REF`,
+`remove WORKSPACE_REF --confirm` and `collect OPERATION_REF` through the running private controller.
+Copy references from its output unchanged. `operations CONTROLLER_REF` discovers original work,
+with optional `--kind`, `--query` and `--cursor` filters. Ordinary lifecycle calls mint their own
+identity and return the original operation reference; caller `--request-id` is reserved for explicit
+maintenance. A stale workspace observation is refused rather than silently refreshed.
+Discovery returns only safe intent metadata and operation references; use `collect` for the full
+original outcome. `collect MAINTENANCE_OR_SECURITY_REQUEST_ID` separately accepts the privileged
+identifiers printed by maintenance or reported in `status.credentialRequests`. It reads the original
+maintenance receipt or observes the original issuer request, including existing recovered-child
+cleanup. It never submits maintenance, issues another credential or collects raw lifecycle IDs;
+an unknown privileged ID is locally absent without requiring pairing.
 Fresh create requires live cloud route registration and initial Git authority. Already admitted
 VMs can start, stop or be cleaned up offline under applicable current owner authority.
-Starting requires the finite work lease; owner-confirmed cleanup does not renew it.
+Starting requires enabled work permission; owner-confirmed cleanup does not enable it.
 Raw host execution is unsupported; commands/files use the guest `moira-workspace` CLI.
-`status` and `recover SPACE_ID --confirm` retain their custody/recovery roles. Paired `run` owns the VM lifetime.
-Closing it settles owned processes while preserving disks and receipts.
+`status` and `recover SPACE_ID --confirm` retain their custody/recovery roles. Native observation
+release is distinct from physical settlement: helper EOF, failed partial capture or a client exit
+does not signal previously observed peers. Explicit stop still targets their original kernel-held
+identity and waits for positive settlement. A missing listener or exited observer is not stop proof.
 
-After abrupt termination or reboot, restart `run` with the same state. The runner
-gate permits stale-marker reclamation only after proving the former runner and guard
-absent. Unverifiable ownership remains refused; do not unlink locks, clear journals
-or adopt a VM by name. Explicit disabled-device recovery proves physical settlement
-without enabling work or replaying unknown commands.
+After host-owner termination, the same login registration restarts its selected immutable release.
+Recovery retains the same state, SDK profile, known VM identities/disks and intended-running records;
+it observes surviving workers or starts a verified stopped known VM, without replaying commands.
+After a Mac reboot, startup requires user login, the original bounded storage and actual runtime and
+credential availability. Guest boot/process identity can change; pre-reboot commands are not replayed.
+Kernel boot identity prevents an old-boot PID from being mistaken for a current owner, but grants no
+custody by itself. The runner gate and exact profile/owner checks still exclude a competing owner.
+Unverifiable ownership remains refused; do not unlink locks, clear journals or adopt a VM by name.
+Explicit disabled-device recovery proves physical settlement without enabling work or replaying
+unknown commands.
 
 The cloud routes authenticated controller metadata to the live owner. Lifecycle/settings
 effects and original receipts belong to the controller journal, not a cloud claim/ACK queue.
@@ -217,66 +249,98 @@ edition, including the shared scoped snapshot and typed management-result schema
 registration identity rather than policy; live controller snapshots carry current owner state.
 The controller and local `web-control.json` schemas are not compatible
 with an older reader, even when delegation is disabled. Rebuilding the CLI does not replace an
-already running guard. Mixed-edition rolling upgrades and uninterrupted management during an
-upgrade are not supported.
+already running guard. An incompatible client reports `LOCAL_SERVICE_MAINTENANCE_REQUIRED`
+instead of replacing that owner. Coordinate server/control-contract changes without claiming
+uninterrupted management across incompatible editions.
 
-Arrange a controlled owner-managed stop before changing editions: use the companion's ordinary
-shutdown/settlement path and confirm that its owned work and guards have stopped. Then update the
-server and local checkout only after taking a cold backup while both sides are stopped: retain
-the server database, complete private companion state and SDK backing storage, including VM disks,
-with their matching bundles. Run `npm ci` and `npm run local:build`, and
-restart the companion through its ordinary owner-managed path. Preserve the same `--state`, disk
-image, SDK profile, credential store and connection; do not initialize replacement state, erase
-journals or terminate guards by arbitrary PID. A stopped VM retains its data, but active processes
-can be interrupted and management may be unavailable during this coordinated update. This update
-prerequisite is distinct from live repository append inside a coordinated running edition, which
-preserves existing VMs and grants. A device without the control capability must use the rebuilt
-companion before the website can apply owner settings.
+Build a complete release and stage it without interrupting the running owner:
+
+```bash
+npm run local:build
+npm run local -- install
+npm run local -- service-status
+```
+
+The installer seals the complete executable closure under `STATE/service-releases/`, with its own
+Node and assets. It publishes a staged selection, leaving the running release and egress services
+unchanged. Only first registration selects an initial release. Do not edit sealed files, copy a
+single JavaScript entry, or rewrite selection pointers by hand.
+
+Updating the physical owner requires a separately approved interruption and coherent backup of
+the complete private state, SDK storage/disks and matching bundles. Use the same `--state` throughout:
+
+```bash
+npm run local -- maintenance --confirm
+# Keep the printed original requestId; collect after a lost reply:
+npm run local -- collect ORIGINAL_REQUEST_ID
+```
+
+Maintenance records intended-running identities, fences admission and settles the exact old native
+owner before selecting the staged release. The successor recovers each known VM independently;
+inspect `recovery.restored` and `recovery.unavailable`, not just `phase: completed`. Disabled
+work permission still refuses VM start. Interruption can change guest boot and interrupt
+commands; original receipts remain collectable and are never replayed. Unconfirmed custody blocks
+replacement. After an explicit local recovery, continue maintenance with its original `--request-id`
+rather than creating another interruption. A missing legacy service registration or retained old
+endpoint requires a controlled initial cutover with actual old-owner settlement; routine install
+does not adopt a live legacy owner or promise hot custody handoff.
+
+Commands requiring exclusive native setup/credential/recovery access can use
+`maintenance --pause --confirm`, followed by the required operation and
+`maintenance --resume --request-id ORIGINAL_REQUEST_ID --confirm`. Collect until the original pause
+is actually `paused` before using the released runner gate. Preserve state, disk image, SDK profile,
+credential store and connection; do not initialize replacement state or erase journals to bypass a
+refusal. `login --new-store` and device recovery additionally require disabled work.
 
 Persisted policy/control shapes must match their installed reader. An unsupported
 shape is a refusal, not permission to clear journals or adopt replacement state.
+The current private policy is version 2. Its guarded, one-way conversion from the recognized
+version 1 policy requires the physical runner gate and exact previous-owner settlement. It preserves
+disabled or expired permission as disabled, retains original receipts and publishes settings revision
+and delegation with policy. An unresolved physical settings effect must settle before conversion.
 Migration 0061 archives old cloud Local policy/control/relay/grant and operational records;
 the archived rows are not dispatchable authority. The owner imports only verified existing
 native bindings, preserving VM/profile/disk identity and unknown receipts. Do not reconstruct
 cloud policy or clear unknown state to bypass a refusal. Rollback must retain matching bundles
 and coherent state rather than resetting the SDK.
 
-After pairing confirmation, approve web control on the local machine:
+After pairing confirmation, approve web control on the local machine. If the persistent owner is
+already running, first request `maintenance --pause --confirm` and collect its printed request ID
+until the receipt is `paused`; `web-control` requires that released runner gate. Then run:
 
 ```bash
-npm run local -- web-control --confirm --max-lease-hours 168
-npm run local -- run
+npm run local -- web-control --confirm
+# When paused, resume using the SAME original maintenance request ID:
+npm run local -- maintenance --resume --request-id ORIGINAL_REQUEST_ID --confirm
 ```
 
 Use the same `--state` argument when configured. On first approval, omitted resource
-ceilings use the current local policy and the lease ceiling defaults to seven days.
+ceilings use the current local policy.
 Repeat `web-control --confirm` to revise an existing approval; omitted options then retain
-the previously approved ceilings, including the lease ceiling. The exact server, user,
+the previously approved resource ceilings. The exact server, user,
 device and connection must match. Applied and rejected revisions, delegation, repository
 receipts and pending recovery records are preserved. Web or agent settings requests cannot
 change these locally approved maxima. Applied resources must still fit them; a pending
 request is retained and its ordinary application can reject values outside a revised maximum.
 
-For example, to approve a shared storage maximum of 50 GiB, stop the foreground companion
-through Ctrl+C or its ordinary owner-managed shutdown, then run:
+For example, to approve a shared storage maximum of 50 GiB, run:
 
 ```bash
 npm run local -- web-control --confirm --storage-gib 50
-npm run local -- run
 ```
 
-Repeat the same `--state PATH` on both commands when configured. Stopping the companion
-releases its state lock; do not use `disable` to change only a maximum, because that also
-changes work enablement and its lease. Refresh Local computers after the companion reports
+Use the same `--state PATH` when configured and the pause/resume procedure above if an owner is
+running. Closing its CLI does not release the runner gate; do not use `disable` to change only a maximum, because that also
+changes work enablement and stops owned work. Refresh Local computers after the companion reports
 the approval, then request Storage 50 in that computer's existing settings editor. Raising
-the maximum alone neither resizes storage nor renews work permission. Physical resizing
+the maximum alone neither resizes storage nor enables work. Physical resizing
 happens only when the companion applies that settings revision through its existing
 stopped-runtime path. Read the applied policy rather than treating a pending request as success.
-Management reports remain available after a work lease expires without authorizing guest work.
+Management reports remain available while work is disabled without authorizing guest work.
 A lost approval-report reply is resolved by reporting the same saved approval again; do not
 erase local approval or recovery records or enroll a replacement computer.
 
-The Local computers editor controls enablement, finite lease, defaults, storage,
+The Local computers editor controls persistent enablement, defaults, storage,
 repository grants and permissions and optional Git author identity.
 Saving creates a requested revision. Applied means the companion confirmed that
 revision; pending or rejected settings are distinct from the applied device policy.
@@ -284,25 +348,31 @@ Browser settings admission checks the session and matching Origin before increme
 parsing, then revalidates the session and unchanged account before owner submission. Variable
 repository policy does not pass through the ordinary web API body ceiling. Native enrollment
 and bootstrap use a separate bounded parser for their closed identity metadata.
-Successful settings responses and original-request collection project the checked snapshot
-stored in that owner operation, with current cloud device registration revalidated. They do not
-perform another discovery or report a newer policy as the original operation's result.
+Successful settings responses project the checked snapshot stored in that owner operation,
+with current cloud device registration revalidated. Collection preserves the original outcome;
+a typed device result is added only when that original snapshot matches the current contract.
+A historical success can lack that projection. Refresh current owner state separately rather
+than treating historical permission as current authority or resubmitting the settings effect.
 Offline contact does not imply application: saving is refused and the editor retains its draft.
 Reconnect and refresh before explicitly saving. The live controller can receive management
-changes while work is disabled or expired, without authorizing guest work. Offline revocation cannot promise
+changes while work is disabled, without authorizing guest work. Offline revocation cannot promise
 instant physical shutdown.
 
 An admitted owner can confirm deletion of one owned local codespace in Settings while the
 paired computer remains active and local web control is approved. This cleanup does not require
-enabled agent work, an unexpired work lease or the repository's agent `allowDelete` permission.
+enabled agent work or the repository's agent `allowDelete` permission.
 It authorizes only observation and deletion of that exact codespace at its current generation;
-it does not extend the lease, change grants or permit creation, start or guest commands. The
+it does not enable work, change grants or permit creation, start or guest commands. The
 companion must be running and reachable to complete the removal.
 
-Ordinary settings changes settle owned work before changing policy. A consent-only revision or
-verified delegated repository append that preserves all other settings applies live without stopping
-existing VMs or changing their grants, generation, runtime, Git identity or lease. A refusal before
-that append preserves the effective policy; an uncertain transition retains its durable intent.
+Settings that preserve enablement and shared storage capacity apply live: labels, repository rights,
+Git identity, delegation and new-VM defaults do not stop unrelated VMs. Current grants still gate
+affected access. A Git author change updates policy immediately; workspace preparation uses that
+value to configure repository-local Git identity. Saving the setting does not force a rewrite in an already running checkout.
+A delegated repository request can only append its separately authorized exact grant.
+Changing enablement or shared storage uses the stopped-runtime transition. CLI and browser settings
+share the owner settings gate; applied revision and delegation publish with policy. Interrupted
+conversion or application preserves newer explicit decisions and original uncertain evidence.
 CPU, RAM and Docker disk
 defaults apply to new VMs; existing VMs restart with their admitted machine and
 repository identity. The storage setting bounds the computer's SDK backing filesystem, while
@@ -312,7 +382,7 @@ image creation and growth do not require the entire logical capacity plus a fixe
 to be free in advance; actual filesystem failures still refuse the operation. Storage and Docker byte
 values must be positive safe integers, storage must exceed Docker capacity, and native
 sector alignment and usable filesystem capacity remain authoritative. Unknown physical changes retain their journal
-and keep work fenced. Collecting the original settings receipt cannot renew a lease or
+and keep work fenced. Collecting the original settings receipt cannot enable work or
 repeat a resize; an unrelated request cannot erase an uncertain resize.
 
 ### Delegated repository additions
@@ -323,46 +393,52 @@ account, separate permissions for existing and new private repositories and opti
 There is no repository-count quota or technology-specific network profile.
 Saving requests a revision; only confirmed owner application makes its delegation effective.
 The MCP caller cannot enable that consent, change
-its account, supply rights, or extend the computer's lease. New-private consent authorizes the
+its account or supply rights. New-private consent authorizes the
 separate `repository_create` action; it does not authorize adding unrelated existing repositories.
 
-`codespace({ action: "local_devices" })` returns owned device IDs, labels, contact status and
-`owner_available`, plus eligible personal GitHub App installations with `installation_id` and owner.
-A warning asks for missing GitHub setup while devices remain discoverable. Applied delegation
+`workspace_targets({provider:"local-sandboxes"})` returns approved Local repository targets
+and controllers with observed contact status, without awaiting GitHub installations.
+`workspace_targets({provider:"github-codespaces"})` returns GitHub repository targets,
+registered controller choices and eligible personal GitHub App installation references.
+GitHub controller registration does not prove reachability; dispatch still requires the selected
+live owner. A warning asks for missing GitHub setup while registered devices remain discoverable. Applied delegation
 and detailed owner permissions are inspected in Settings, not returned in this compact discovery.
-`repository_add` takes that `device_id`, the existing GitHub numeric `repository_id` and a caller-chosen
-UUID `request_id`. It verifies the current GitHub App installation grant, repository ID, owner,
+`repository_admit` takes that `controller` reference and the existing GitHub numeric `repository` ID.
+Its adapter mints the internal admission identity. It verifies the current GitHub App installation grant, repository ID, owner,
 private visibility and required read/push rights. It adds only a private repository owned by the
-connected personal account. Its receipt is `pending`, `applied` or `rejected`; `local_repository_id`
-is null until the exact grant is confirmed by the owner. MCP calls live owner admission and
-returns the usable ID as `repository_id`. Reuse the same request identity and payload after an
-unconfirmed outcome. An existing local grant is reused through discovery rather than added again. Requests
+connected personal account. The retained admission records distinguish pending, applied and rejected
+grants. MCP returns a usable target only after exact owner admission, together with its original
+operation reference. Inspect that reference after uncertainty; do not submit the payload again.
+An existing local grant is reused through discovery rather than added again. Requests
 racing unapplied owner settings are refused.
 Admission reuses its post-GitHub owner observation for the current decision and checks cloud
 registration again. Completion requires the original owner result and its actually applied grant;
 admission metadata alone cannot release a repository-creation reservation.
 
-`repository_create` takes `device_id`, a stable UUID `request_id`, `repository_name` and the personal
-`installation_id` from discovery. The name is 1–100 ASCII letters, digits, underscores, dots or
+`repository_create` takes `controller`, the personal `installation` reference from discovery and
+`name`. The name is 1–100 ASCII letters, digits, underscores, dots or
 hyphens, excluding `.`/`..` and a `.git` suffix. The server creates only an empty private repository
 in the connected user's personal account through fixed GitHub API endpoints; callers cannot select
-another owner or visibility. Current applied new-private consent, device/account identity, finite
-lease are checked before the durable submit fence permits an external create.
+another owner or visibility. Current applied new-private consent, enabled work permission and
+device/account identity are checked before the durable submit fence permits an external create.
 
-Resume using the same complete payload. `pending`, `unknown`, `setup_required` and `rejected` are
+Inspect the returned operation with `operation_get`. After repairing a confirmed setup prerequisite,
+`operation_resume` explicitly continues that retained private-repository creation; it reconstructs
+the original input from its existing record rather than accepting another create payload.
+It does not resume commands or repeat an unknown provider create. `pending`, `unknown`, `setup_required` and `rejected` are
 not local authority. A confirmed `github_repository_id` and `full_name` may remain available while
-installation setup is incomplete internally; MCP returns `repository_id` only after confirmed owner admission.
+installation setup is incomplete internally; MCP returns a usable `target` reference only after confirmed owner admission.
 A selected installation receives only that confirmed new repository, then the refreshed actual App
 grant is checked; a successful installation PUT alone does not grant access. Missing permissions
 return Settings/install guidance and preserve the confirmed result for continuation.
 In the owner admission API, `error.stage` names the failed setup step when present (`github_connection`, `device_delegation`,
 `authority_validation`, `repository_lookup`, `repository_create`, `installation_access` or
 `local_admission`); `error.provider_status` carries the GitHub HTTP status. Compact MCP errors carry
-the safe cause and `request_id` for continuation. The returned
+the safe cause and original operation reference for collection or explicit continuation. The returned
 `instruction` describes the applicable repair. A returned rejected local admission preserves
 the already-created repository identity. An unchanged rejected receipt remains rejected: restore
-its original grant in Settings, or use `repository_add` with the retained GitHub ID and a fresh
-`request_id` if existing-private consent permits it. Do not submit another repository creation.
+its original grant in Settings, or explicitly use `repository_admit` with the retained GitHub ID
+if existing-private consent permits it. Do not submit another repository creation.
 
 A lost create response is inspected rather than blindly submitted again. Recovery requires the
 exact saved owner, name, private visibility and server-generated marker in the repository description;
@@ -391,13 +467,13 @@ Ordinary `git fetch` and `git push` use the installed private broker. The Local 
 and GitHub guest use the same fixed HTTPS Git and pull-request implementation;
 cloud Moira authorizes scoped credential issuance and retains verified author metadata,
 without forwarding Git packfiles or executing pull-request requests. The broker holds
-the child token in memory, checks finite authority and disposes it after the upstream
+the child token in memory, checks its finite credential authority and disposes it after the upstream
 transport physically closes. Its same-UID trust boundary is not an OS sandbox against
 authorized project commands. Explicitly approved public read-only Local fetch can use
 anonymous access; failed scoped issuance never enables that branch.
 
 Each Local Git authorization phase returns one coherent owner observation: repository rights,
-stable route generation, owner lifecycle generation, applied settings revision and finite lease.
+stable route generation, owner lifecycle generation and applied settings revision.
 The issuer and author-identity resolver reuse that observation within the phase. They reauthorize
 after asynchronous GitHub grant refresh and credential issuance; an earlier observation cannot
 authorize use after those rights change.
@@ -407,28 +483,29 @@ verified GitHub login and numeric-account noreply address. Host Git configuratio
 and secrets are not forwarded. An existing empty remote can open an unborn
 requested branch: the agent creates files, commits and pushes the first branch,
 then pushes a feature branch. A nonempty remote with an absent ref is refused.
-The MCP `pull_request_create`, `pull_request_get` and `pull_request_find` actions
+The MCP `pull_request_create` and `pull_request_read` tools
 use the owned codespace and approved repository. Only creation requires the
 pull-request permission; reads and exact head/base lookup use read authority.
-Choose a fresh `ws1-<lowercase UUID>` `request_id` before PR creation. After an uncertain
-create, call `pull_request_create` with only `codespace_id` and that original
-`request_id` to collect its receipt, then find by exact head/base before considering
-another create. Collection never creates a PR. Unknown creation is an error and retains
-both its original PR identity and any `security_request_id`; the security identity
-addresses credential issuance/disposal, separately from the PR effect. PR reads require
-no mutation identity. There is no atomic exactly-once guarantee across the owner and GitHub.
+Creation returns an original operation reference. After uncertainty, use `operation_get` on that
+reference, then `pull_request_read` with an exact head/base query before considering another create.
+If the first reply was lost, use `operation_find` on the selected workspace and explicitly inspect
+the matching candidate. Collection never creates a PR. Unknown creation retains its original PR
+reference and any `security_operation` reference; the latter addresses credential issuance/disposal
+separately from the PR effect. Reads take either a PR number or head/base query. There is no atomic
+exactly-once guarantee across the owner and GitHub.
 
 The installed CLI uses the same owner:
 
 ```bash
-moira-workspace pull-request-create --request-id ws1-00000000-0000-4000-8000-000000000001 pr.json
-moira-workspace pull-request-create --request-id ws1-00000000-0000-4000-8000-000000000001
-moira-workspace pull-request-get 7
-moira-workspace pull-request-find feature/change main
+moira-workspace pr-create feature/change main "Describe the change" --body description.md
+moira-workspace get "$OPERATION_REF"
+moira-workspace find --kind pull-request --query "feature/change"
+moira-workspace pr-get 7
+moira-workspace pr-find feature/change main
 ```
 
-`pr.json` supplies `head`, `base`, `title`, and optional `body`/`draft`. The second
-command only collects the first create. CLI errors preserve the owner result;
+Set `OPERATION_REF` to the reference returned by creation; discovery returns candidates when that
+reply was lost. `--body` reads a file or `-` for stdin; `--draft` is optional. CLI errors preserve the owner result;
 credential custody/disposal uncertainty is never reported as confirmed refusal.
 
 ### Local isolation boundary
@@ -447,15 +524,15 @@ The broker admits public DNS destinations and verifies connected addresses.
 SDK network-user prompts are disabled rather than allowed to expand access.
 When internal socket capacity is busy, a bounded FIFO queue applies backpressure rather than an
 authorization refusal. Closed consumers and broker shutdown cancel their wait; admission refreshes
-the bound authority after waiting. Revoked grants and expired leases remain refusals.
+the bound authority after waiting. Revoked grants and disabled work remain refusals.
 The guest loopback proxy authenticates CONNECT and absolute-HTTP requests to the host broker with
 its installed per-space broker credential, so clients such as npm need not send a proxy-auth header.
 A client-supplied proxy credential cannot select another space. Repository Git authorization remains
-separate. The host still checks the current lease, grant, destination and public network address;
+separate. The host still checks enabled permission, current grant, destination and public network address;
 this credential is neither a GitHub token nor a forwarded host credential.
 The fixed tunnel's five-second framing guard ends when its broker connection is established.
 The broker's 15-second CONNECT guard ends after the connected peer passes address verification.
-These guards do not impose an idle deadline on an established tunnel. Current leases, revocation,
+These guards do not impose an idle deadline on an established tunnel. Current permission, revocation,
 socket closure and broker shutdown still govern its lifetime.
 The guest may contain public SDK credential placeholders: API sentinel values and the pinned SDK's
 public GitHub sentinel are not forwarded user tokens. Their presence alone neither proves forwarding
@@ -502,17 +579,21 @@ retirement witness. It is not a cloud lifecycle journal or desired-state cache. 
 retains the create marker, requested ref, native provisioning custody, measured guest root/life,
 lifecycle generation and pending original request IDs.
 
-Create requires a caller-selected ws1 request ID and an explicit active registered controller, or the
-sole active registered one. Selection does not probe controller snapshots. If several controllers
-are registered, choose one even when only one is reachable; the gateway never substitutes another
-owner. The actual route reports whether the selected controller can receive the request.
+Creation consumes a returned target that binds its repository, provider and selected registered
+controller. Selection never substitutes a different owner. The actual route reports whether that
+selected controller can receive the request; discovery availability is not dispatch authority.
 The controller admits the original operation before invoking fixed provider
-actions. Cloud rechecks account, App grant, numeric repository, personal payer and assignment at
+actions. It reads payer preflight and offered machines, chooses the machine and saves that choice
+with the applicable idle and retention settings before create. Cloud rechecks account, App grant,
+numeric repository, personal payer, settings and assignment at
 those boundaries; parent authorization never leaves cloud. The controller receives narrowly scoped
-provisioning authority, installs the packaged service, measures repository/root/release and enrolls
-the outbound guest. Caller commands, SSH configuration or bootstrap URLs cannot select this work.
+provisioning authority, installs the packaged service and retains measured repository/root,
+guest-life and release proof in its original journal. It configures and verifies the Unix owner
+before requesting outbound enrollment. Caller commands, SSH configuration or bootstrap URLs cannot
+select this work.
 
-Start, stop, delete and adopt require the observed owner generation and original ws1 identity.
+Start, stop and delete consume the observed workspace reference; adoption also selects its controller.
+Their adapters retain the internal original identity and the generation captured in that reference.
 The owner journal checks comparison-and-set before admission. Cloud security registration accepts
 monotonic authority only from the same assigned actor and retires old guest/renewal/child authority
 before publication; it has no second operational CAS or replay queue. Stop preserves the disk.
@@ -525,15 +606,37 @@ epoch and reproving the guest. Another device cannot silently replace that custo
 identities with no assignment stay fenced until earlier custody can actually be proved settled.
 
 A lost create reply retains the original unknown marker and receipt. Pure collection can discover
-that exact Codespace, but never repeats create, start or SSH. A found environment with incomplete
-provisioning requires explicit adopt. No match does not prove create was never dispatched.
+that exact Codespace, but never repeats create, start or SSH. A found environment without retained
+setup proof requires explicit adopt. A known environment with matching proof can instead continue
+initial enrollment through explicit `resume_setup`. No match does not prove create was never dispatched.
 An explicit delete can retire an exact known provider name after a currently authorized GET
 confirms 404; ordinary list/get does not perform retirement.
 
-Command/file calls require the already enrolled live guest. They never implicitly start a stopped
+Remote command/file calls require the already enrolled live guest. They never implicitly start a stopped
 Codespace or bootstrap from cloud. Owner `running` and provider `available` alone are insufficient:
 the router must have the current resource/authorization/life connection. Explicit registration
-401/403 rejects startup readiness; temporary transport loss reconnects observation without replay.
+401/403 retires that remote authority; temporary transport or authority-store failure reconnects
+observation without replay. Unix readiness for either provider does not wait for cloud registration.
+
+For GitHub, verified local readiness and remote availability are separate observations. The guest
+CLI can work while initial enrollment is unavailable; remote tools still require the live route.
+After the initial operation and its scoped SSH custody settle, **Resume setup** or
+`workspace_lifecycle({ workspace, action: "resume_setup" })` asks the selected controller to
+continue that same known environment. It compares the original repository/root, guest life,
+installed release and current assignment before fixed configuration, health checks and enrollment.
+It does not install a payload, start the provider, adopt another environment or create a VM.
+The original proof and create result remain unchanged. A changed life, generation or authority
+refuses this continuation; ordinary collection never performs enrollment. A guest that has never
+enrolled has no authority to enroll itself after a life change.
+
+An enrolled GitHub guest with installed renewal authority can recover from a genuine cold life
+change on its preserved root. It verifies the local binding and opens the Unix API first, while
+withholding the previous life's remote authority. Its existing reconnect loop renews with one
+durable original renewal request before opening CONTROL or DATA connections. Temporary network or
+store failure leaves local work available and retries renewal; confirmed refusal closes remote
+authority. Successful enrollment or renewal attaches to the same running Unix owner without
+replaying commands. A cold restart itself can interrupt processes; it does not promise command
+continuity across the restart.
 
 Disconnect revokes guest/renewal routes, retires known scoped children and parent authorization.
 It neither stops nor deletes a VM or disk. Explicitly stop a running VM to end compute use;
@@ -551,7 +654,7 @@ Collect the original owner/request before deciding on another mutation.
 For Local browser deletion, the controller binds explicit owner confirmation to the exact
 device/resource, observed generation and original request identity. Its durable lifecycle journal
 retains that authority; cloud storage does not queue the mutation. MCP deletion retains the agent's
-repository permission and work-lease requirements; a preflight refusal records no new delete intent.
+repository permission and enabled-work requirements; a preflight refusal records no new delete intent.
 
 The local provider reports `created` separately from provisioning. It is an actionable
 observation, so a stop can address the exact existing VM without starting it. It does not
@@ -566,9 +669,42 @@ only when its durable phase is `usable`, preparation has completed and no guest 
 Preparing guests stay pending without adoption or a new work generation. A failed preparation,
 including a retained stopped VM without completed first-use preparation, reports
 `CODESPACE_LOCAL_SETUP_INCOMPLETE`. A confirmed physical stop can settle stop intent while keeping
-that cause visible through both lifecycle settlement and read-only refresh. Start and guest work
-remain refused; delete and confirm removal before recreating. Recovery of an initialized clean
-stop never completes a failed initial preparation.
+that cause visible through both lifecycle settlement and read-only refresh. Ordinary start and
+guest work remain refused. After repairing the reported prerequisite, use Local `resume_setup`
+(host `resume-setup WORKSPACE_REF`) with the captured workspace observation to
+continue preparation on that same known runtime and disk. The original create result remains
+unchanged. Custody acknowledgement with `recover` is a separate operation.
+
+Repository preparation records an owned unpublished stage and publishes it exclusively: even an
+existing empty destination is preserved. A proved published root resumes without repeating
+checkout or overwriting its branch or user files. Git's effective worktree, Git directory, common
+directory and ordinary local configuration must remain within the proved repository. Unproved
+or redirected roots are preserved for inspection. Local exclusive publication requires Python3,
+libc `renameat2` and filesystem no-replace support; unsupported prerequisites have no unsafe fallback.
+The optional `setup_failure` gives a closed remedy: `repository_unproven` requires local inspection
+of preserved contents; `prerequisite_unavailable` requires the publication prerequisites;
+`repository_checkout_failed` requires repairing repository access or the requested ref;
+`configuration_failed` requires inspecting fixed guest-configuration diagnostics before resuming.
+Unknown creation remains original-operation collection, not setup permission or name-based adoption.
+For a known VM whose initial preparation has `LOCAL_GUEST_SETTLEMENT_UNKNOWN`, explicit custody
+acknowledgement first proves exact physical stop. It preserves the unknown operation and leaves
+preparation incomplete; only a subsequent `resume_setup` continues that same VM. Acknowledgement
+alone never marks it usable.
+
+A working local Unix API is ready before optional workspace-credential acquisition, not just before
+CONTROL connects. Warm preparation uses configured or exact repository/runtime-cached Git author
+data; public checkout does not wait for optional remote author lookup. Initial private checkout
+still requires genuine current authorization. Cloud credential acquisition runs outside local
+lifecycle and work lanes, so validation, stop and observation release do not wait for that response.
+Before applying it, the owner rechecks the original runtime, repository, generation, grant and
+connection; a stale response cannot configure another admission.
+Optional observed `remote.state`
+reports `unconfigured`, `enrollment_unavailable`, `connecting`, `connected`, `unavailable` or `refused`;
+an absent field means no observation. Unavailable enrollment can be retried by the host under current
+authority; an existing unavailable connection reconnects without reissuing credentials or replaying
+work. Confirmed refusal retires its remote authority, without declaring the VM unusable or stopping
+locally authorized work. Later enrollment reloads the same Unix owner's current configuration;
+accepted commands and their original results are retained.
 
 Local status inspection is scoped to the retained resource and its exact owned creation marker.
 It can recover the owned durable manifest after the create reply expires, without adopting an
@@ -578,14 +714,14 @@ state without synchronizing lifecycle counters or authorizing guest work. Each f
 while healthy peers refresh and run; the aggregate refresh reports stale data when any observation
 could not be confirmed.
 
-Local original receipts live in the controller journal. `pending_request_ids` in owner-backed
-resource summaries identifies accepted/unconfirmed work for collection after a page reload;
+Local original receipts live in the controller journal. Internal `pending_request_ids` are projected
+as `pending_operations` references for browser collection after a page reload;
 confirmed terminal receipts retire those pointers; retained uncertain errors remain collectable.
 Collection and read-only snapshots do not repeat an
-effect, advance a lifecycle generation or extend a lease. Ordinary work retains current
-account/device/connection/repository/lease checks. Owner cleanup instead requires the current
+effect or advance a lifecycle generation. Ordinary work retains current
+account/device/connection/repository and enabled-permission checks. Owner cleanup instead requires the current
 admitted account, active device, exact connection/resource binding and web-control approval,
-without extending repository grants or the work lease.
+without expanding repository grants or enabling work.
 Finishing a command, disconnecting an MCP client or ending a conversation never
 deletes a persistent codespace.
 
@@ -614,20 +750,24 @@ The installed `moira-workspace` terminal CLI calls its private Unix HTTP socket.
 MCP reaches the same owner through the cloud router; ordinary work uses neither
 GitHub SSH dispatch nor the Local controller.
 
-Choose a fresh `request_id` in `ws1-<lowercase UUID>` form before mutation.
-The owner durably binds it to immutable input before effects; changed input is refused.
-Historical bare UUIDs remain archival and are never translated, imported or dispatched.
-After reply loss inspect the original identity without resubmitting the command.
-Observer/service reconnect never authorizes launch replay.
+Each new ordinary call is a fresh intent. Its adapter mints an internal identity once, and the owner
+durably binds immutable input before effects. Copy the returned operation/process references for
+collection and output. After reply loss discover original candidates rather than resubmitting the
+command. Safe discovery labels contain executable basenames, explicit session names, paths or PR
+head/base, without command arguments, scripts, input, messages or source URLs. Candidate discovery
+returns metadata, not full outcomes; collect a chosen reference explicitly to inspect its result.
+Repeated identical new calls remain distinct intents; there is no hidden MCP invocation identity or durable CLI retry
+guarantee. Observer/service reconnect never authorizes launch replay.
 
 The owner admission record binds the original request to its operation. Collection
 reads the authoritative result for that operation: command execution uses the engine's
 physical launch/result evidence, while communication uses its original delivery receipt.
 Neither an observer failure nor collection creates a second logical outcome.
 
-Exec accepts argv, or a script in a named session. Sessions preserve working directory
+Exec accepts argv or a script. An explicitly named session preserves working directory
 and exported variables; opening/ending is explicit. Session context publication serializes
 within that session, while distinct sessions/stateless commands remain independent.
+An unnamed script uses a temporary session that closes after the command.
 `stdin_text` is inline text; `stdin_file` streams native attachment input before launch.
 Native descriptor identity and byte validation are shared with upload and communication;
 the transient signed URL is not part of durable input identity. Repository authority is
@@ -635,18 +775,30 @@ checked before source acquisition. Preparation can finish before the final locke
 session/repository gate rejects execution, so prepared input does not prove a command
 started. Collect the original no-start or uncertain outcome without fetching or launching again.
 
-Admission may return `starting`. Inspection distinguishes actual running, terminal
-receipts, proved `not_started` and `unknown`. Missing witnesses cannot manufacture
+The owner retains admission identity, input digest/metadata and the original result. A temporary
+native/stdin `input` file is removable only after a matching terminal result, settled input readers
+and exact file identity/content verification. The detached physical collector can complete this
+cleanup after its observer exits. Live or unknown work, conflicting file transactions, weak
+identity evidence, changed files and cleanup failures retain the input and recovery membership.
+Removing that temporary copy does not remove command stdout/stderr or make an original request
+eligible for execution again; collection and replay do not reacquire its source.
+
+The semantic projection reports `pending`, `completed`, `unconfirmed` or `absent`.
+Completed results contain `outcome: {ok,result/error}`; uncertainty retains the original observation.
+The engine separately retains actual running, terminal, proved `not_started` and unknown evidence.
+Credential custody/disposal and vendor uncertainty stay unconfirmed in discovery and exact collection;
+confirmed non-start refusals remain completed refusals. Missing witnesses cannot manufacture
 terminal success/failure/cancellation. Addressed cancellation requires actual execution
 evidence to settle. Observer disconnect does not cancel detached work. Output stays in
-the workspace and is read by stream/offset/length from the original request.
+the workspace. Ordinary text output uses returned process references and UTF-8 continuation cursors;
+private byte-range endpoints retain binary access.
 
 Only explicit `timeout_seconds` imposes an execution deadline. Observation windows
 and transport authentication checks do not stop commands. Moira imposes no aggregate
 command/session/stdin/output or implicit runtime ceiling. Caller output windows bound
 one response, not retained output. Actual disk/process failures, scoped authority and
-provider lifecycle still apply: GitHub may stop silent work; Local requires an enabled,
-unexpired owner lease.
+provider lifecycle still apply: GitHub may stop silent work; Local requires current owner grants
+and enabled work permission.
 
 The adapter opens outbound authenticated CONTROL carrying bounded call identities and
 per-call DATA carrying raw HTTP. Native backpressure bounds stream buffers. Offline
@@ -660,12 +812,21 @@ no-follow descriptors, link/inode identity and current preconditions remain enfo
 File sizes/range positions must be safely representable. Workspace files and native
 binary streams have no artificial Moira size ceiling.
 
-Stat returns metadata/version. Read streams selected bytes with offset and total size;
-complete binary reads use no whole-file transport buffer. Search accepts caller-selected
+`file_stat` returns metadata and an observed file reference. `file_read` returns text selected by
+line/window or an original file cursor, together with that same descriptor's content version and
+identity. File and command/output windows contain complete UTF-8 characters. An undersized window
+returns `minimum_bytes`; a live incomplete output suffix returns `pending_utf8` without advancing
+its cursor. A file changed since the cursor observation conflicts rather than refreshing it.
+Binary files use native download/publication; private binary reads retain streaming byte ranges.
+Search accepts caller-selected
 `max_matches`/`max_bytes` response windows rather than an execution quota.
 
-Write/upload and patches require namespaced identity and explicit `expected`.
-Writes stage bytes before guarded publication. Mutation journals retain original
+`file_create` requires an absent destination. `file_replace` requires full expected text or an
+observed file reference. `file_patch` matches old/new text against one immutable original per file:
+ambiguous default matches and overlapping replacements refuse; `occurrence: "all"` is explicit.
+Expected file references fence both content and inode identity. Native upload selects either a
+new path or replacement of an observed file. Internal writes stage bytes before guarded publication.
+Mutation journals retain original
 target/backup inode ownership across interruption. Recovery never overwrites a
 same-content foreign inode or replays a file effect; conflict preserves the uncertain
 transaction. Collect the original request after reply loss. Matching write replay
@@ -678,7 +839,7 @@ resource link. Optional `max_bytes` refuses an oversized complete file before pu
 never publishes a truncated prefix. An agent can create a file with the direct CLI
 and call MCP download without a separate stat.
 
-`preview_image` reads a complete owner file and validates PNG/JPEG container framing and
+`file_preview` reads a complete owner file and validates PNG/JPEG container framing and
 positive dimensions without decoding pixels. Explicit `max_bytes` is a caller-selected
 whole-file bound; no fixed Moira byte, dimension or pixel-count quota replaces it.
 
@@ -692,62 +853,96 @@ in-context fallback retains its 256 KiB UTF-8 budget and refuses instead of trun
 
 The workspace or paired controller owns immutable attachment publication and communication receipts. `owner-file://workspace/...` references retain their original guest; `owner-file://controller/...` references retain their original controller. Cloud publication routes authenticate current owner authority and forward the private immutable source. The owner must be reachable; expiry and revocation remain effective. Ordinary owner links are repeatable while authorized, unlike the separately single-use progress-image grant.
 
-The `communication` action `deliver-file` explicitly delivers a publication using `request_id`, `referenceId`, `message`, `kind` and optional `channelId`. It can instead accept a native `file` descriptor with the selected `device_id`, or use the sole active registered paired controller. Selection pins that identity without a health/snapshot probe; multiple registered controllers require an explicit choice. Choose and retain the original ws1 ID before submission. Collect with action `operation`, the original `request_id` and its assigned `device_id` or `codespace_id`; collection never downloads again or resends. An unavailable route refuses the current dispatch, with no cloud queue or fallback to a different source owner. It does not prove that a previous submission under the original ID never ran. Text communication remains independent of owner availability.
+`communication_deliver_publication` delivers a returned `publication` reference with `kind`
+(`image` or `document`), optional `message` and configured `channel`. `communication_deliver` accepts
+a native `file` and optional selected `owner` controller reference; otherwise it uses the sole
+active registered controller under the existing authority rules. Multiple registered controllers
+require an explicit selection, even if only one is reachable. Both return an original operation
+reference. `operation_get` collects that same receipt; collection never downloads again or resends.
+An unavailable route refuses the current dispatch, with no cloud queue or fallback to another source
+owner. It does not prove that a previous submission never ran. `communication_send` sends ordinary
+text independently of a file owner.
+
+Preparation supplies channel authority, declared text/image/document capabilities, allowed
+operation IDs and actual provider constraints. The owner validates the complete selected delivery
+plan before any vendor stage. An explicitly unsupported channel or no eligible implicit channel
+refuses delivery. The owner chooses caption and follow-up text stages without truncating content.
+Extension handlers receive declared nonsecret settings; secrets and settings used for recipients
+or endpoint addresses remain at the trusted transport. The cloud broker checks current authority,
+fixed destinations, secrets and HTTP framing without downloading the source or choosing the plan.
 
 ## MCP tools
 
-`codespace` exposes lifecycle, Git/pull requests, command collection and guarded files.
-`codespace_process` starts/inspects/reads/cancels background commands; its process
-identity is the namespaced workspace request identity. Mutations require that identity;
-reads/lifecycle calls keep their own contracts.
+Strict purpose-specific tools expose workspace discovery/lifecycle, commands, files, processes,
+repositories and communication. `command_run` and `command_run_native` return process/operation
+references; `process_output`, `process_stop` and `operation_get` consume them. `operation_find`
+lists retained safe intent metadata without returning full candidate outcomes, collecting candidates
+or issuing another effect. Exact collection uses the same uncertainty classification across the
+guest, host CLI and cloud adapters; a prior pending-control refusal remains a completed refusal.
 
 The typed registry owns fields, defaults, native metadata and examples; use the
 [public tool reference](../packages/docs/src/content/docs/docs/reference/tools.mdx).
 `files_setup`, `transfer_status` and scoped file-capability CLI are not actions.
 The installed `moira-workspace` CLI uses the same local owner independently of cloud
-connectivity for exec/status/cancel/output/stat/read/download/write/upload/search/patch.
-`moira-workspace action INPUT_JSON_FILE|-` forwards the complete `{action,request}`
-tool operation to that owner, including session, cwd, environment, explicit timeout,
-native descriptors and observation windows. Supply the original `request_id` or
-`process_id` in the JSON. `moira-workspace communication INPUT_JSON_FILE|-` submits
-the owner communication JSON with its camelCase `requestId`; `status REQUEST_ID`
-collects that same receipt. Put signed native descriptors in the input file or stdin,
-not command arguments. The command shortcuts generate and print an ID when their
-optional `--request-id` is omitted; the JSON adapters preserve the supplied identity.
+connectivity for `exec`, `get`, `find`, `output`, `stop`, `session-close`, `stat`, `read`, `search`,
+`create`, `replace`, `patch`, `upload`, `native-upload`, `download`, `preview`, PR and delivery commands.
+Run `moira-workspace --help` for their concrete arguments. The CLI implicitly selects its configured
+Unix owner and uses the same semantic contract as MCP. It prints returned references and accepts
+no ordinary raw control JSON or caller request IDs. Pass signed native descriptors to
+`native-upload`, `exec --native-stdin` or `deliver --native` on stdin. Local upload and raw command
+stdin use the existing framed byte stream. Download derives the path basename and MIME type when
+omitted, falling back to `application/octet-stream`. Put descriptor URLs on stdin, never argv.
 Known auth/provider/pre-dispatch failures remain bounded refusals. Unknown dispatched
 outcomes require collection of the original identity, not a fresh ID to bypass uncertainty.
 
 ## Website management
 
 Settings → Development separates environment management, GitHub connection and Local computers.
-The common management card retains provider/resource identity, live owner generation, pending
-original IDs and nullable machine observation. Local cards group by stable computer UUID rather
+The common management card retains provider/resource identity, captured workspace references,
+pending original operation references and nullable machine observation. Local cards group by stable computer UUID rather
 than label. A neutral controller can provision GitHub without fabricated Local VM settings.
 
 GitHub create selects an approved repository/ref and an active registered controller. Several
 registered controllers require a choice, irrespective of their observed availability; without one,
 creation is unavailable before admission. Explicit
-adopt accepts a provider name or managed resource and preserves its disk. Lifecycle actions use
-an original ws1 identity and observed owner generation. **Check state again** collects retained
-originals or refreshes when none is pending; newer metadata alone cannot settle an uncertain effect.
+adopt accepts a provider name or managed workspace reference and preserves its disk. Lifecycle
+actions retain the selected observation without refreshing its precondition. Delete confirmation
+keeps that same decision through background refresh; a different observation requires a new
+confirmation. **Check state again** collects retained originals or refreshes when none is pending;
+newer metadata alone cannot settle an uncertain effect. If a first reply was lost, the browser
+offers original discovery on the selected controller and explicit candidate selection, including
+when only one candidate is found. No match or an absent receipt leaves the action blocked.
 Errors remain scoped to their resource. Local browser deletion additionally needs explicit
 confirmation and current web-control approval, without broadening permanent agent permissions.
 
-Connection, repository, resource and billing reads retain independent error/refresh states.
-Management returns `providers`, minimal live `controllers` and `provider_billing`, with no Moira
-aggregate limit view. `CodespaceBillingPanel` shows personal monthly compute, storage, allowances,
-cost, payer and retrieval time, or unavailable. Missing `Plan: read` does not deny management.
+Each provider has independent discovery and error/refresh state. Both provider requests can start
+on mount, but Local results and their follow-up reads do not await GitHub or billing. The normal
+`actionable` view contains current useful environments, including known incomplete setup.
+Select `diagnostics` for unavailable, authority-lost or creation-unknown identities and their
+original-operation references; these identities have no fabricated lifecycle generation.
+Select `history` for confirmed retired environments. `has_diagnostics` signals preserved diagnostic
+identities even when the actionable list is empty. Selected-provider failures remain explicit.
+Changing views neither deletes retained records nor authorizes uncertain work to run again.
+
+Management returns one selected `provider` and its controllers. The website's view selectors and
+`workspace_list({provider:"local-sandboxes",view:"diagnostics"})` use the same separation.
+Environment Refresh reads only that provider/view. Billing has a separate authenticated read and
+loads when Settings → Development → GitHub is active. `CodespaceBillingPanel` shows personal
+monthly compute, storage, allowances, cost, payer and retrieval time, or unavailable, with its own
+retry. Missing `Plan: read` does not deny environment discovery or management.
 Automatic pause selects provider timeout for new resources, without a cloud idle timer.
 
-The shared `/api/integrations/github/codespaces` routes and MCP tools return
-`CodespaceSummaryView`. Local targets retain discovery's qualified `repository_id`.
-Original collection uses `GET /api/integrations/local/devices/:deviceId/operations/:requestId`
-or MCP `codespace` action `operation` with `device_id` and `request_id`, including create before
-a resource ID returns. See [Codespace Management API](API.md#codespace-management-api) for wire fields.
+The website's `/api/integrations/github/codespaces` management projection adds returned
+`workspace`, `controller` and `pending_operations` references instead of exposing raw lifecycle
+generation and request IDs. Purpose calls use
+`POST /api/integrations/github/codespaces/operations/:purpose` with the shared strict schema.
+MCP uses those same semantic operations, including `operation_get` before a workspace ID is known.
+The separate private settings/maintenance controller APIs retain their own original identities.
+See [Codespace Management API](API.md#codespace-management-api) for wire fields.
 
 Offline owners expose no cached policy/grants as current authority; settings drafts stay editable,
-but saves are refused. Existing admitted VM work can continue under its local grants and finite
-lease. Fresh create needs cloud registration and initial Git authority; confirmed authority refusal
+but saves are refused. Existing admitted VM work can continue under its current local grants and
+enabled permission. Fresh create needs cloud registration and initial Git authority; confirmed authority refusal
 does not allow offline fallback. Local diagnostic recovery is defined by
 `packages/shared/src/codespaces/local-failure-guidance.ts` and the
 [owner recovery guide](../packages/mcp-server/src/help/content/integration/troubleshooting.md#local-codespaces).
@@ -757,7 +952,7 @@ does not allow offline fallback. Local diagnostic recovery is defined by
 `CodespaceObservabilityService.readiness()` reports configuration only: `disabled`,
 `misconfigured` or `ready`, with `configuration`, `resources_enabled`, `reason` and `checked_at`.
 It performs no connector probe, SSH check, reconciliation or cached lifecycle observation.
-Ready configuration does not prove a controller/guest online; Local policy/device/grant/lease
+Ready configuration does not prove a controller/guest online; Local policy/device/grant
 checks remain independent of GitHub configuration.
 
 Authenticated management and `GET /api/admin/codespaces` expose this metadata. Public backend/MCP
@@ -802,6 +997,13 @@ approve the updated permission on GitHub and obtain a new App user token through
 | Repository: Metadata                   | read  | enumerate the installation's approved repositories                     |
 | Account: Plan                          | read  | read the connected personal account's monthly Codespaces billing usage |
 
+Fixed provider brokerage keeps these permissions tied to actions: preflight, machine offers and
+inspection are reads; create/delete use Codespaces write; start/stop use lifecycle admin write.
+The controller's provisioning child has only its declared Codespaces read and lifecycle-admin
+authority for trusted SSH, not the parent create/delete capability. Parent credentials stay in
+the server vault. Configured permission declarations and controlled fixtures do not establish
+that a live GitHub grant or scoped token is accepted; check actual provider refusal guidance.
+
 For local private repository creation, GitHub requires **Repository creation: write** or
 **Administration: write**. Adding the confirmed repository to a selected installation requires
 **GitHub App installation repository access: write**. These are the official
@@ -814,9 +1016,9 @@ source test does not establish that the live App has them. Original OAuth/refres
 Enable "Request user authorization (OAuth) during installation" and expiring user
 authorization tokens; the callback URL is the exact same-origin Moira path below.
 Adding `Account: Plan` does not by itself require reinstalling the App. The
-connection card's **Refresh** re-reads repository grants, while the Development environments
-card's **Refresh** also re-reads billing; both use the existing token and cannot add
-a permission to it. For organization repositories, an organization owner
+connection card's **Refresh** re-reads repository grants. Environment **Refresh** reads the
+selected provider/view without billing; the billing panel has its own read and retry.
+These reads use existing authority and cannot add a permission to it. For organization repositories, an organization owner
 must install or approve the App on that organization and grant the selected
 repositories; Moira's connected user account is still the only supported payer.
 
@@ -842,7 +1044,7 @@ The remaining environment defaults control provider lifecycle and billing, not c
 `CODESPACE_CODESPACES_ENABLED` defaults false and accepts only `true` or `false`.
 Local availability is independent. There are no cloud machine/count ceilings, create throttles,
 operation deadlines, claim leases, reconciliation intervals or command/file aggregate quotas.
-Provider constraints, actual storage and finite owner authority remain applicable.
+Provider constraints, actual storage, current owner authority and actual credential expiry remain applicable.
 
 ## Website authorization API
 
@@ -905,7 +1107,7 @@ until explicitly deleted.
 The **Refresh** button uses the forced endpoint, while ordinary page reads
 honor the ten-minute snapshot TTL, except while the connection is
 `installation_required`: then every read enumerates the grants afresh, so the
-Settings page, the website codespace list and the MCP `list` action show a new
+Settings page, the website codespace list and `workspace_targets` show a new
 installation at once. In that state the card offers **Install GitHub App** (when the
 installation URL is configured) and **Check installation**, which forces a grant
 refresh, instead of Reconnect; Reconnect remains for `refresh_failed` and
@@ -994,6 +1196,21 @@ only by fixed bootstrap. Command/input/output/file journals live in the workspac
 Token-free security acquisition receipts and PR receipts also belong to the owner;
 they retain original recovery IDs without persisting child tokens in project storage.
 
+The host controller's `controller-active-operations.json` tracks active or unresolved
+originals; a failed index removal can also retain a proved terminal member safely.
+Admission publishes membership before effects, and removes it only after durable terminal
+or custody-settlement proof. Initial guarded migration inventories retained originals once;
+routine pending-resource and custody checks read indexed originals, not the terminal archive.
+Missing or malformed indexed evidence refuses admission. Original receipts, prepared provider
+choices, enrollment proofs and unresolved archives remain retained; do not delete an index or
+journal to bypass a refusal. Guest recovery uses its own `active-requests/` membership and
+`active-requests.json` initialization marker with the same admission-before-effect ordering.
+
+Detached guest service diagnostics are separate from this evidence and command output. They live
+at `~/.local/state/moira/workspace-service/daemon.log`, `daemon.log.1` and `daemon.log.2`, each
+bounded to 1 MiB. See [LOGGING.md](LOGGING.md#guest-workspace-daemon-diagnostics) for ownership and
+rotation. Read full command streams through `process_output` or `moira-workspace output`.
+
 Historical SQL operation and transfer rows and companion receipts remain archival.
 They are not attached to execution, counted as active command work, imported into the
 new namespace or replayed. Resource observation timestamps advance only after verified
@@ -1012,6 +1229,7 @@ Use the root project commands; do not call Jest directly:
 ```bash
 npm run test:unit
 npm run test:integration
+npm run workspace:verify:guest
 docker compose config --quiet --no-env-resolution --no-path-resolution --no-interpolate
 ```
 
@@ -1021,6 +1239,7 @@ and configuration-readiness suites, including the ChatGPT-compatible client
 scenario over real services, the HTTP contracts against the local container
 (`npm run test:mcp-tools`, `npm run test:api`) and the Settings browser scenarios
 (`npm run test:e2e`). Deterministic tests and container fixtures do not establish live GitHub or ChatGPT
-compatibility, genuine native attachment transfer or physical SDK isolation. Report only
-the external acceptance actually performed; live GitHub validation is excluded from the
-current work.
+compatibility, genuine native attachment transfer or physical SDK isolation. Packaged Linux
+verification exercises Unix readiness before enrollment and cold-life renewal using disposable
+persistent guest storage; it does not provision a real GitHub Codespace. Live provider acceptance
+requires separately authorized external verification.

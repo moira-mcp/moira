@@ -87,6 +87,62 @@ export class LocalPrivateRepositoryCreationService {
   constructor(private readonly dependencies: LocalPrivateRepositoryCreationDependencies) {
     this.now = dependencies.now ?? Date.now;
   }
+  /** Read retained evidence only: no provider lookup, claim, admission or mutation. */
+  getSavedAdmission(userId: string, deviceId: string, connectionId: string, requestId: string) {
+    const record = this.dependencies.repository.getOwned(userId, requestId);
+    if (!record) return null;
+    if (record.deviceId !== deviceId || record.localConnectionId !== connectionId)
+      throw new LocalDeviceError(
+        "LOCAL_UNAUTHORIZED",
+        "The original repository request belongs to another computer connection.",
+      );
+    return record;
+  }
+  inspectOriginal(userId: string, deviceId: string, connectionId: string, requestId: string) {
+    const record = this.getSavedAdmission(userId, deviceId, connectionId, requestId);
+    if (!record) return { state: "absent" as const };
+    return {
+      state:
+        record.state === "submitted" || record.state === "unknown"
+          ? ("unconfirmed" as const)
+          : record.state === "rejected"
+            ? ("completed" as const)
+            : ("pending" as const),
+      descriptor: {
+        kind: "repository" as const,
+        description: `Create private repository ${record.owner}/${record.repositoryName}`,
+        createdAt: record.createdAt,
+      },
+      result: {
+        repository: record.fullName,
+        repository_id: record.repositoryId,
+        installation_verified: record.installationVerified === 1,
+        preparation: record.state,
+      },
+      ...(record.errorCode
+        ? {
+            error: {
+              code: record.errorCode,
+              message:
+                "Inspect the retained repository and its access before choosing further work; this read did not retry creation.",
+            },
+          }
+        : {}),
+    };
+  }
+  findOriginals(userId: string, deviceId: string, connectionId: string, after?: string) {
+    const records = this.dependencies.repository.listOwnedDevice(userId, deviceId, after);
+    const page = records.slice(0, 50);
+    return {
+      operations: page
+        .filter((record) => record.localConnectionId === connectionId)
+        .flatMap((record) => {
+          const original = this.inspectOriginal(userId, deviceId, connectionId, record.requestId);
+          return original.state === "absent" ? [] : [{ requestId: record.requestId, ...original }];
+        }),
+      ...(records.length > page.length ? { nextCursor: page.at(-1)!.requestId } : {}),
+    };
+  }
   private markerDescription(record: RepositoryCreationRecord): string {
     return `Created by Moira. Recovery marker: ${record.marker}`;
   }
@@ -115,7 +171,7 @@ export class LocalPrivateRepositoryCreationService {
       github_connection:
         "Refresh the GitHub connection and selected personal App installation in Moira Settings, then resume this same request.",
       device_delegation:
-        "Apply permission to create new private repositories on this local computer for the connected GitHub account and a valid work lease, then resume this same request.",
+        "Apply permission to create new private repositories on this local computer for the connected GitHub account and enable local work, then resume this same request.",
       authority_validation:
         "The saved repository request no longer matches the connected account or applied computer permission. Restore its original authority and resume this same request; do not create a replacement request.",
       repository_lookup:
@@ -180,7 +236,7 @@ export class LocalPrivateRepositoryCreationService {
         "LOCAL_UNAUTHORIZED",
         "GitHub credentials changed before repository mutation.",
       );
-    await this.dependencies.repository.assertCurrent(record, current, this.now());
+    await this.dependencies.repository.assertCurrent(record, current);
     return current;
   }
   async createRepository(
@@ -326,7 +382,7 @@ export class LocalPrivateRepositoryCreationService {
           record.repositoryId!,
         );
         // Refresh may legitimately rotate an expiring token; consent and pinned account still hold.
-        await ledger.assertCurrent(record, this.dependencies.currentAuthority(userId), this.now());
+        await ledger.assertCurrent(record, this.dependencies.currentAuthority(userId));
         ledger.confirmInstallation(record, this.now());
         record = ledger.getOwned(userId, input.requestId)!;
       }

@@ -18,7 +18,7 @@ export const LOCAL_CODESPACE_FAILURE_GUIDANCE: Readonly<
   CODESPACE_LOCAL_SETUP_INCOMPLETE: {
     status: 409,
     message:
-      "Guest preparation did not complete. Delete this codespace and confirm its removal before creating a replacement; restarting does not complete initial setup.",
+      "Guest preparation did not complete. Resume setup of this same known codespace after repairing its reported prerequisite. Preserve its files and collect the original create outcome; do not create a replacement.",
   },
   CODESPACE_LOCAL_PROTOCOL_ERROR: {
     status: 409,

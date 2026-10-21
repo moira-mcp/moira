@@ -9,19 +9,23 @@ This guide explains how AI agents use MCP Moira tools to execute workflows.
 
 ## MCP Tools Overview
 
-MCP Moira exposes these tools:
+Workflow and delivery tools include:
 
-| Tool            | Purpose                       |
-| --------------- | ----------------------------- |
-| `list`          | List available workflows      |
-| `start`         | Prepare or execute a start    |
-| `step`          | Advance workflow with input   |
-| `manage`        | CRUD operations on workflows  |
-| `session`       | User info and execution state |
-| `settings`      | User settings                 |
-| `communication` | Authenticated user delivery   |
-| `token`         | Upload/download tokens        |
-| `help`          | Documentation                 |
+| Tool                                | Purpose                                                  |
+| ----------------------------------- | -------------------------------------------------------- |
+| `list`                              | List available workflows                                 |
+| `start`                             | Prepare or execute a start                               |
+| `step`                              | Advance workflow with input                              |
+| `manage`                            | CRUD operations on workflows                             |
+| `session`                           | User info and execution state                            |
+| `settings`                          | User settings                                            |
+| `communication_send`                | Text through configured user channels                    |
+| `communication_deliver`             | Native attachment through its owner                      |
+| `communication_deliver_publication` | Existing immutable owner publication                     |
+| `operation_get`                     | Inspect an original operation by its returned reference  |
+| `operation_find`                    | Discover original owner operations and choose explicitly |
+| `token`                             | Upload/download tokens                                   |
+| `help`                              | Documentation                                            |
 
 ## Basic Workflow Execution
 

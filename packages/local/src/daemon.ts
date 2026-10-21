@@ -25,8 +25,19 @@ function wait(ms: number, signal: AbortSignal): Promise<void> {
 export class LocalDaemon {
   private current: LocalDaemonStatus = { controlPlane: "offline", code: null };
   private controller?: Awaited<ReturnType<typeof startLocalController>>;
-  private remote?: ReturnType<typeof startWorkspaceRemote>;
+  private controllerOwner?: LocalController;
+  private detached?: {
+    owner: LocalController;
+    endpoint: Awaited<ReturnType<typeof startLocalController>>;
+    settled: boolean;
+    failure?: unknown;
+    work: Promise<void>;
+  };
+  private remote?: Pick<ReturnType<typeof startWorkspaceRemote>, "close">;
   private authorityRefused = false;
+  private maintaining = false;
+  private cycling?: Promise<boolean>;
+  private enrollment?: Promise<void>;
   constructor(
     readonly manager: LocalManager,
     readonly relay: LocalRelay,
@@ -34,11 +45,19 @@ export class LocalDaemon {
       wait?: typeof wait;
       report?: (status: LocalDaemonStatus) => void;
       startController?: typeof startLocalController;
-      startRemote?: typeof startWorkspaceRemote;
+      startRemote?: (
+        ...args: Parameters<typeof startWorkspaceRemote>
+      ) => Pick<ReturnType<typeof startWorkspaceRemote>, "close">;
     } = {},
   ) {}
   get status(): Readonly<LocalDaemonStatus> {
     return { ...this.current };
+  }
+  async prepareMaintenance(): Promise<void> {
+    this.maintaining = true;
+    await this.cycling;
+    await this.controllerOwner?.prepareMaintenance();
+    await this.detached?.owner.prepareMaintenance();
   }
   private update(controlPlane: LocalDaemonStatus["controlPlane"], code: string | null) {
     const next = { controlPlane, code };
@@ -48,7 +67,22 @@ export class LocalDaemon {
     else process.stderr.write(`${JSON.stringify({ localDaemon: next })}\n`);
   }
   async cycle(signal?: AbortSignal): Promise<boolean> {
+    if (this.maintaining) return false;
+    const work = this.observe(signal);
+    this.cycling = work;
     try {
+      return await work;
+    } finally {
+      if (this.cycling === work) this.cycling = undefined;
+    }
+  }
+  private async observe(signal?: AbortSignal): Promise<boolean> {
+    try {
+      if (this.detached) {
+        if (this.detached.failure) throw this.detached.failure;
+        if (!this.detached.settled) return false;
+        this.detached = undefined;
+      }
       if (!this.controller) {
         const saved = await this.manager.records.state.read(
           "connection.json",
@@ -65,9 +99,11 @@ export class LocalDaemon {
             : await this.relay.confirmed(signal);
         if (connection.deviceId !== (await this.manager.records.deviceIdentity())?.deviceId)
           throw new LocalDeviceAuthorityFailure("LOCAL_IDENTITY_CHANGED");
+        if (this.maintaining) return false;
         this.authorityRefused = false;
+        this.controllerOwner = new LocalController(this.manager, connection);
         this.controller = await (this.dependencies.startController ?? startLocalController)(
-          new LocalController(this.manager, connection),
+          this.controllerOwner,
         );
         this.remote = (this.dependencies.startRemote ?? startWorkspaceRemote)({
           kind: "controller",
@@ -79,9 +115,25 @@ export class LocalDaemon {
       }
       await this.relay.confirmed(signal);
       const policy = await this.manager.records.policyOrNull();
-      if (policy && (!policy.enabled || policy.leaseUntil <= Date.now()))
-        await this.manager.stopWork();
+      if (policy && !policy.enabled) await this.manager.stopWork();
       this.update("connected", null);
+      if (!this.enrollment && this.manager.refreshWorkspaceEnrollments) {
+        const enrollment = this.manager
+          .refreshWorkspaceEnrollments()
+          .then((unavailable) => {
+            if (unavailable.length)
+              process.stderr.write(`${JSON.stringify({ workspaceEnrollment: unavailable })}\n`);
+          })
+          .catch((error: unknown) => {
+            process.stderr.write(
+              `${JSON.stringify({ workspaceEnrollment: { code: error instanceof LocalRefusal ? error.code : "LOCAL_OBSERVATION_UNKNOWN" } })}\n`,
+            );
+          });
+        this.enrollment = enrollment;
+        void enrollment.finally(() => {
+          if (this.enrollment === enrollment) this.enrollment = undefined;
+        });
+      }
       return true;
     } catch (error) {
       if (signal?.aborted) throw error;
@@ -100,14 +152,41 @@ export class LocalDaemon {
               authorityRefused: true,
             });
         } catch {
-          /* Native shutdown remains mandatory even when storage is unavailable. */
+          /* Authority remains refused even if its diagnostic cannot be persisted. */
         }
         await this.remote?.close();
         this.remote = undefined;
-        if (this.controller) await this.controller.retire();
-        else await this.manager.stopWork();
-        await this.controller?.close();
-        this.controller = undefined;
+        // Cloud authority fences the remote route, not locally owned physical intent.
+        if (this.controller && this.controllerOwner) {
+          await this.controller.detach();
+          const old = {
+            owner: this.controllerOwner,
+            endpoint: this.controller,
+            settled: false,
+            failure: undefined as unknown,
+            work: Promise.resolve(),
+          };
+          this.detached = old;
+          this.controller = undefined;
+          this.controllerOwner = undefined;
+          // Retain the original writer until it finishes. A new authority cannot
+          // race its late binding writes, and no accepted work is replayed.
+          old.work = old.owner.state
+            .drain()
+            .then(() => old.endpoint.close())
+            .then(
+              () => {
+                old.settled = true;
+              },
+              (error) => {
+                old.failure = error;
+                this.update(
+                  "faulted",
+                  error instanceof LocalRefusal ? error.code : "LOCAL_CONTROLLER_FAILED",
+                );
+              },
+            );
+        }
         this.update("disabled", error.code);
       } else
         this.update(
@@ -117,7 +196,11 @@ export class LocalDaemon {
       return false;
     }
   }
-  async run(signal: AbortSignal): Promise<void> {
+  async run(
+    signal: AbortSignal,
+    physicalStop: () => boolean = () => true,
+    retainGate = false,
+  ): Promise<void> {
     const failures: unknown[] = [];
     try {
       while (!signal.aborted) {
@@ -137,14 +220,27 @@ export class LocalDaemon {
     }
     let retired = false,
       endpointClosed = false;
+    const endpoints = [this.controller, this.detached?.endpoint].filter(
+      (endpoint): endpoint is NonNullable<typeof endpoint> => endpoint !== undefined,
+    );
     try {
-      await this.controller?.retire();
+      if (physicalStop()) {
+        for (const endpoint of endpoints) await endpoint.retire();
+      } else {
+        // Fence routes before dropping native observation. Draining the endpoint
+        // first would wait forever on a guest attachment whose owner is still held.
+        await this.controllerOwner?.prepareMaintenance();
+        await this.detached?.owner.prepareMaintenance();
+        await this.manager.release();
+      }
       retired = true;
     } catch (error) {
       failures.push(error);
     }
     try {
-      await this.controller?.close();
+      for (const endpoint of endpoints) await endpoint.close();
+      await this.detached?.work;
+      if (this.detached?.failure) throw this.detached.failure;
       endpointClosed = true;
     } catch (error) {
       failures.push(error);
@@ -153,7 +249,8 @@ export class LocalDaemon {
     // settled. Unknown physical retirement must not admit a replacement owner.
     if (retired && endpointClosed)
       try {
-        await this.manager.close();
+        if (physicalStop()) await this.manager.close(retainGate);
+        else await this.manager.release();
       } catch (error) {
         failures.push(error);
       }

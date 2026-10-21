@@ -142,11 +142,9 @@ function initializeCodespaceServices(): CodespaceServices {
             retirement.resourceId,
             retirement.throughGeneration,
           )
-        : getScopedCredentialService().disposeDevice(
-            userId,
-            deviceId,
-            retirement.kind === "settings" ? retirement.throughRevision : undefined,
-          ),
+        : retirement.kind === "settings"
+          ? getScopedCredentialService().revalidateDevice(userId, deviceId)
+          : getScopedCredentialService().disposeDevice(userId, deviceId),
   });
   const client = config.state === "available" ? new HttpGitHubCodespaceClient(config) : null;
   const resource = client

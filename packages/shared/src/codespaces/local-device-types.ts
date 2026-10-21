@@ -16,7 +16,6 @@ export function parseLocalRepositoryTargetId(value: string): {
   if (prefix !== "local" || extra !== undefined) throw new Error("Invalid local repository target");
   return { deviceId: identifier.parse(deviceId), repositoryId: identifier.parse(repositoryId) };
 }
-const integer = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 export const localDeviceLabelSchema = z
   .string()
   .trim()
@@ -46,7 +45,6 @@ export const localPublicPolicySchema = z
     deviceId: identifier,
     label: localDeviceLabelSchema,
     enabled: z.boolean(),
-    leaseUntil: integer,
     repositories: z.array(
       z
         .object({

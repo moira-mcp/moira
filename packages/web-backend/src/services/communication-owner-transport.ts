@@ -23,7 +23,10 @@ import {
   TELEGRAM_CAPTION_MAX_LENGTH,
   TELEGRAM_TEXT_MAX_LENGTH,
 } from "@mcp-moira/workflow-engine";
-import { binaryControlsSchema } from "@mcp-moira/workflow-engine/extensions/contract";
+import {
+  binaryControlsSchema,
+  binaryHandlerSettings,
+} from "@mcp-moira/workflow-engine/extensions/contract";
 import { fetchWork } from "@mcp-moira/shared/http/work-fetch";
 
 type ExtensionConfiguration = Awaited<
@@ -82,6 +85,20 @@ export class CommunicationOwnerTransport {
         public: {
           channelId,
           provider: "telegram",
+          capabilities: { text: true, image: true, document: true },
+          operations: ["send_message"],
+          constraints: {
+            text: { maxLength: TELEGRAM_TEXT_MAX_LENGTH },
+            caption: { maxLength: TELEGRAM_CAPTION_MAX_LENGTH },
+            file: {
+              image: {
+                mimeTypes: ["image/png", "image/jpeg"],
+                minBytes: 1,
+                maxBytes: TELEGRAM_PHOTO_MAX_BYTES,
+              },
+              document: { minBytes: 1, maxBytes: TELEGRAM_DOCUMENT_MAX_BYTES },
+            },
+          },
           authorityDigest: this.digest({ channelId, token, recipient }),
         },
       };
@@ -98,7 +115,15 @@ export class CommunicationOwnerTransport {
         channelId,
         provider: "extension",
         bundleDigest: artifact.digest,
-        settings: resolved.settings,
+        capabilities: {
+          text: adapter.capabilities.text,
+          image: adapter.capabilities.image,
+          document: adapter.capabilities.document,
+        },
+        operations: resolved.declaration.binaryTransport!.operations.map(
+          (operation) => operation.id,
+        ),
+        settings: binaryHandlerSettings(resolved.declaration, resolved.settings),
         authorityDigest: this.digest({
           channelId,
           configuration: resolved,
@@ -133,10 +158,7 @@ export class CommunicationOwnerTransport {
     const channels: CommunicationOwnerChannel[] = [];
     for (const id of new Set(ids)) {
       try {
-        const adapter = this.registry.get(id);
-        if (!adapter || !adapter.capabilities[input.kind]) continue;
         const channel = await this.channel(userId, id);
-        if (channel.kind === "telegram") this.telegramFile(input);
         channels.push(channel.public);
       } catch (error) {
         if (
@@ -372,10 +394,10 @@ export class CommunicationOwnerTransport {
     return { url, method, headers, prefix, suffix };
   }
 
-  private telegramFile(input: CommunicationOwnerPrepare) {
+  private telegramFile(input: CommunicationOwnerSend) {
     if (input.kind === "image" && !["image/png", "image/jpeg"].includes(input.file.mimeType))
       throw new Error("invalid_image_type");
-    // Actual Telegram upload constraints apply before owner admission and again before dispatch.
+    // Validate the selected owner-prepared stage at the fixed vendor edge.
     const maximum = input.kind === "image" ? TELEGRAM_PHOTO_MAX_BYTES : TELEGRAM_DOCUMENT_MAX_BYTES;
     if (
       input.file.size <= 0 ||

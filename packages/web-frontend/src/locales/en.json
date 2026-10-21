@@ -832,7 +832,7 @@
       },
       "codespaces": {
         "title": "GitHub Codespaces",
-        "description": "Persistent Codespaces created by Moira for approved repositories. Agents work in them through the MCP codespace tools by codespace ID; the same codespace can be reused from any connected client.",
+        "description": "Persistent Codespaces created by Moira for approved repositories. Agents work in them through purpose-specific MCP tools using returned workspace references; the same codespace can be reused from any connected client.",
         "loadFailed": "Failed to load cloud codespaces",
         "loadFailedDescription": "Your other settings are still available. Retry this request.",
         "retry": "Retry",
@@ -869,7 +869,6 @@
         "list": "Your codespaces",
         "empty": "No codespaces yet.",
         "providerLine": "GitHub Codespaces · personal billing · {{machine}}",
-        "detailLine": "Desired {{desired}}, observed {{observed}} · generation {{generation}}",
         "states": {
           "create_pending": "Creating",
           "create_submitted": "Creating",
@@ -1270,7 +1269,7 @@
           "title": "Codespaces",
           "description": "Connect GitHub for cloud codespaces or your computer for locally approved repositories and sandboxes.",
           "helpTitle": "What agents can do in a codespace",
-          "helpBody": "A codespace is a cloud development machine for one of your repositories. Agents run commands and edit files in it through Moira's codespace tool; they never receive your GitHub credentials.",
+          "helpBody": "A codespace is a cloud development machine for one of your repositories. Agents run commands and edit files through Moira's purpose-specific MCP tools using returned workspace references; they never receive your GitHub credentials.",
           "helpAuthority": "Inside a codespace an agent has the same access as the codespace user: the repository, the network and any secrets configured for that codespace. Grant only repositories you are comfortable with."
         },
         "apps": {
@@ -3277,7 +3276,7 @@
       "CODESPACE_GENERATION_CONFLICT": "The codespace changed in the meantime. Refresh the list and try again.",
       "CODESPACE_RESOURCE_INVALID": "The codespace request could not be verified. Refresh its state before retrying.",
       "CODESPACE_LOCAL_CREATION_UNKNOWN": "The computer has not confirmed the creation outcome. Check this codespace again; do not create a replacement until its outcome is known.",
-      "CODESPACE_LOCAL_SETUP_INCOMPLETE": "Environment preparation did not finish. Delete this codespace; after deletion is confirmed, you can create a new one.",
+      "CODESPACE_LOCAL_SETUP_INCOMPLETE": "Environment preparation did not finish. Repair the reported prerequisite, then resume setup of this same codespace. Its files and original creation result are preserved.",
       "CODESPACE_LOCAL_PROTOCOL_ERROR": "Moira and the local companion could not exchange a valid response. Update them together and check this codespace again.",
       "CODESPACE_LOCAL_RUNTIME_ERROR": "The computer's VM runtime could not complete the operation. Check the local companion diagnostics, then retry this codespace.",
       "CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED": "Confirm deletion of this same codespace in Moira Settings → Development → Local computers.",
@@ -3716,9 +3715,13 @@
           "title": "Development environments",
           "body": "GitHub Codespaces are listed separately. Choose a repository and branch to create one; Stop keeps its files and Delete removes them. Refresh checks changes on GitHub. For local development, open Local computers and manage codespaces under the computer they belong to."
         },
+        "environment-views": {
+          "title": "Current environments, diagnostics and history",
+          "body": "Current environments shows environments you can work with. Diagnostics keeps unavailable or uncertain identities; History shows deleted environments. These views load separately for GitHub and local computers. Diagnostics and History let you check a returned original operation, without starting, stopping or deleting an environment or repeating its operation."
+        },
         "local-devices": {
           "title": "Connect your computer",
-          "body": "Connect your computer once and confirm its identity here. Its local service reports current permissions, settings and codespaces. Each codespace has its own repository, branch, state, CPU and memory; several may use the same repository. Create, start, stop or delete them here. Check state again reads the original operation's result and refreshes the computer's state; it does not repeat creation, start, stop or deletion. If the local service is unavailable, current permissions and settings cannot be confirmed and changes cannot be submitted. Your unsaved draft stays on this page; reconnect the service and refresh before saving. Computer settings control agent access and its expiry, CPU, memory and Docker storage defaults for new codespaces, and shared storage for all local codespaces on this computer. Approve web settings management and its maximum resources on the computer itself. Separately allow adding existing private repositories, creating new ones and pushing commits in your connected personal GitHub account. Access may last up to seven days and does not renew automatically. Public services for different technologies are available; agents cannot change computer settings or access the private network. The connected computer applies settings and confirms their result. If the result is uncertain, Check settings result reads the original request without applying it again. Disconnecting the computer blocks further agent work and preserves local files."
+          "body": "Connect your computer once and confirm its identity here. Its local service reports current permissions, settings and codespaces. Each codespace has its own repository, branch, state, CPU and memory; several may use the same repository. Create, start, stop or delete them in Current environments. Each computer also has Diagnostics for unavailable or uncertain identities and History for deleted codespaces; those views only collect original results. Check state again reads the original operation's result and refreshes the computer's state; it does not repeat creation, start, stop or deletion. If the local service is unavailable, current permissions and settings cannot be confirmed and changes cannot be submitted. Your unsaved draft stays on this page; reconnect the service and refresh before saving. Computer settings control agent access, CPU, memory and Docker storage defaults for new codespaces, and shared storage for all local codespaces on this computer. Approve web settings management and its maximum resources on the computer itself. Separately allow adding existing private repositories, creating new ones and pushing commits in your connected personal GitHub account. Work remains enabled until you explicitly disable it. Public services for different technologies are available; agents cannot change computer settings or access the private network. The connected computer applies settings and confirms their result. If the result is uncertain, Check settings result reads the original request without applying it again. Disconnecting the computer blocks further agent work and preserves local files."
         },
         "apps": {
           "title": "Connected apps",
@@ -3748,11 +3751,7 @@
         },
         "codespaces": {
           "title": "Create a codespace",
-          "body": "Open the GitHub Codespaces tab and pick a repository and branch to create a personally billed codespace. Agents find it by ID. Stop keeps its files; Delete removes them. Refresh checks GitHub for changes made outside Moira. Local codespaces are listed under their computer in Local computers."
-        },
-        "limits": {
-          "title": "Know your limits",
-          "body": "GitHub's monthly personal compute, storage and billed amount appear above Moira's own limits when the App has Plan: read access. Stopped codespaces still use Moira's held slots."
+          "body": "Open the GitHub Codespaces tab and pick a repository and branch to create a personally billed codespace. Agents choose GitHub Codespaces to find current environments and use the returned workspace reference. Stop keeps its files; Delete removes them. Refresh checks GitHub for changes made outside Moira. Local codespaces are listed under their computer in Local computers."
         },
         "autopause": {
           "title": "Pause idle codespaces",

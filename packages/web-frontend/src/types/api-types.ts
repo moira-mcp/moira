@@ -7,13 +7,35 @@ import type {
   CodespacePublicReadinessView,
   CodespaceReadinessView,
   CodespaceSummaryView,
-  CodespaceProviderBillingView,
   CodespaceUnavailableResourceView,
   CodespaceProviderErrorView,
+  CodespaceDiscoveryView,
 } from "@mcp-moira/shared";
+import type { WorkspaceReference } from "@mcp-moira/shared/workspace-references";
 
-/** Website codespace management view returned by GET /api/integrations/github/codespaces. */
+export interface ManagedWorkspaceView extends Omit<
+  CodespaceSummaryView,
+  "generation" | "pending_request_ids"
+> {
+  workspace: string;
+  controller?: string;
+  pending_operations: string[];
+}
+export interface WorkspaceOperationView {
+  operation: string;
+  state: "pending" | "accepted" | "completed" | "unconfirmed" | "absent";
+  original?: unknown;
+  descriptor?: { kind: string; description?: string; createdAt?: number };
+  outcome?:
+    { ok: true; result?: unknown } | { ok: false; error: { code: string; message: string } };
+  error?: { code: string; message: string };
+}
+
+export type WorkspaceDiscoveryProvider = WorkspaceReference["provider"];
+export type WorkspaceDiscoveryView = CodespaceDiscoveryView;
+/** One provider/view observation; billing has its own read boundary. */
 export interface CodespaceManagementView {
+  has_diagnostics: boolean;
   readiness?: CodespaceReadinessView;
   connection?: CodespaceConnectionView;
   repositories: Array<{
@@ -23,29 +45,28 @@ export interface CodespaceManagementView {
     provider?: string;
     device_id?: string;
     device_label?: string;
+    target: string;
+    controller: string;
   }>;
-  providers?: Array<
-    | CodespaceProviderErrorView
-    | {
-        provider: string;
-        readiness: CodespaceReadinessView;
-        connection: CodespaceConnectionView;
-        repositories: CodespaceManagementView["repositories"];
-        provider_billing?: CodespaceProviderBillingView;
-        repositories_stale: boolean;
-        resources_stale: boolean;
-      }
-  >;
   repositories_stale: boolean;
   resources_stale: boolean;
-  codespaces: CodespaceSummaryView[];
-  unavailable?: CodespaceUnavailableResourceView[];
+  codespaces: ManagedWorkspaceView[];
+  unavailable?: Array<
+    Omit<CodespaceUnavailableResourceView, "pending_request_ids"> & {
+      identity: string;
+      pending_operations: string[];
+    }
+  >;
   provider_errors?: CodespaceProviderErrorView[];
-  provider_billing?: CodespaceProviderBillingView;
-  controllers?: Array<{ device_id: string; label: string; available: boolean }>;
+  controllers?: Array<{
+    device_id: string;
+    label: string;
+    available?: boolean;
+    controller: string;
+  }>;
 }
-import { WorkflowValidationStatus } from "./react-flow-types";
-import { WorkflowGraph, ValidationResult, WorkflowFileInfo } from "./workflow-types";
+import { WorkflowValidationStatus } from "./react-flow-types.js";
+import { WorkflowGraph, ValidationResult, WorkflowFileInfo } from "./workflow-types.js";
 
 export interface ApiResponse<T = unknown> {
   success: boolean;

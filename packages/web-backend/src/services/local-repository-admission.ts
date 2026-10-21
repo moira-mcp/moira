@@ -6,6 +6,7 @@ import {
   type AgentRepositoryManagement,
   type LocalDeviceService,
   type LocalDeviceView,
+  type LocalDeviceObservation,
 } from "@mcp-moira/shared";
 
 export interface VerifiedLocalGitHubRepository {
@@ -64,15 +65,28 @@ export class LocalRepositoryAdmissionService {
       );
   }
 
-  async listDevices(userId: string) {
-    const owned = await this.dependencies.devices.listOwned(userId);
+  async listDevices(
+    userId: string,
+    options: {
+      includeInstallations?: boolean;
+      observeDevices?: boolean;
+      observation?: LocalDeviceObservation;
+    } = {},
+  ) {
+    if (options.observation && options.observation.userId !== userId)
+      throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "The observation belongs to another user.");
+    const owned = options.observation
+      ? await options.observation.listOwned()
+      : options.observeDevices === false
+        ? this.dependencies.devices.listRegistered(userId)
+        : await this.dependencies.devices.listOwned(userId);
     let installations: Array<{
       installation_id: string;
       owner: string;
       repository_selection: "all" | "selected";
     }> = [];
     let githubSetupRequired = false;
-    if (this.dependencies.listInstallations) {
+    if (this.dependencies.listInstallations && options.includeInstallations !== false) {
       try {
         installations = await this.dependencies.listInstallations(userId);
         githubSetupRequired = installations.length === 0;
@@ -97,7 +111,6 @@ export class LocalRepositoryAdmissionService {
               : {
                   state: "configured" as const,
                   enabled: device.owner.local.policy.enabled,
-                  lease_until: device.owner.local.policy.leaseUntil,
                   delegation: device.owner.local.control.appliedAgentRepositoryManagement ?? null,
                   control_status: device.owner.local.control.status,
                   revision: device.owner.local.control.revision,

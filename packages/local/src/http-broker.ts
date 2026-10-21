@@ -95,11 +95,6 @@ export function httpBroker(
       upstream.once("socket", (socket) => {
         socket.once("connect", () => upstream.setTimeout(0));
       });
-      const timer = setTimeout(
-        () => upstream.destroy(),
-        Math.max(1, grant.policy.leaseUntil - Date.now()),
-      );
-      upstream.once("close", () => clearTimeout(timer));
       upstream.once("timeout", () => upstream.destroy());
       upstream.once("error", () => {
         if (!response.headersSent) response.writeHead(502, { connection: "close" });

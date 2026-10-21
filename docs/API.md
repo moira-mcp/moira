@@ -1642,7 +1642,7 @@ Unavailable does not contain cached policy or imply an empty grant set. Contact 
 is registry metadata, not permission to dispatch. `LocalPairingView` contains `id`,
 `revision`, nullable `deviceId`, `state`
 (`waiting_local|waiting_confirmation|confirmed|expired`) and `expiresAt`.
-Timestamps are epoch milliseconds. Public policy exposes enabled state, finite lease,
+Timestamps are epoch milliseconds. Public policy exposes persistent enabled state,
 repository permissions and machine defaults; it contains no host paths or secrets.
 
 ### Owner settings control
@@ -1670,7 +1670,9 @@ interface LocalDeviceControlView {
 ```
 
 `revision` identifies the latest admitted settings revision; `appliedRevision`
-identifies the physically applied revision. A known rejection permits a corrected
+identifies the applied owner policy revision. CLI and web settings share a private
+cross-process settings gate; policy, applied revision and delegated permission publish
+together. A known rejection permits a corrected
 request against the next observed revision. A pending or uncertain physical change
 does not permit a replacement effect. `pendingRequestId` points to the original
 unfinished owner operation and clears on completion; collect it after a lost reply
@@ -1678,19 +1680,28 @@ or page reload without resubmitting settings. Collection returns `requestId`,
 `state: absent|accepted|completed|unconfirmed` and, when settled, an `outcome`
 discriminated by `ok` with `result` or `error`. An unconfirmed result is not proof
 that no effect occurred.
-The settings-specific collection route also returns the live device view in top-level
-`result` after a successful completed receipt.
+The settings-specific collection route preserves the original receipt unchanged. It
+adds top-level `result` only when the successful original result validates as a current
+device snapshot. A historical success can lack that projection: collect the original
+request, then read the current owner view rather than treating old permission as current.
 
 Settings and ceilings are defined by
 `packages/shared/src/codespaces/local-management-types.ts`. Settings include label,
-enabled state, epoch-ms lease, CPU/RAM/shared disk and guest Docker capacity, repository
+enabled state, CPU/RAM/shared disk and guest Docker capacity, repository
 read/push/PR/delete permissions, Git author and optional repository-management
 delegation. Numeric resources are positive safe integers; storage exceeds Docker
-capacity, and leases are finite and at most seven days. Settings cannot exceed the
+capacity. Enabled work permission lasts until explicit disable; current settings and
+policy schemas reject work-deadline fields. Settings cannot exceed the
 locally approved envelope. Physical disk alignment, capacity and SDK failures remain
 owner-enforced. CPU/RAM/Docker are new-VM defaults; existing VM profiles come from
 their actual admission. Human whole-settings replacement is distinct from delegated
 repository admission, which can append only the exactly authorized repository.
+Label, Git identity, grants/delegation and new-VM defaults apply live without stopping
+unrelated VMs. The Git author setting is used during workspace preparation; saving
+it does not rewrite Git configuration in an existing running checkout.
+Existing VM admission remains pinned; unresolved missing admission
+proof refuses a default change. Enablement and shared-storage changes use explicit
+stopped control, and uncertain physical effects retain their original recovery identity.
 
 ### Companion enrollment and routing
 
@@ -1713,13 +1724,13 @@ The companion pins its chosen HTTPS application URL and refuses redirects.
 | `POST /workspaces/bootstrap`                     | `{resourceId,environmentIdentity}`                                   | Scoped workspace agent configuration           |
 
 Heartbeat does not upload or retrieve operational policy/settings. Resource registration
-checks the authenticated device, live approved repository and finite work authority
+checks the authenticated device, current approved repository and enabled work permission
 before creating a minimal cloud route. Exact existing registration is idempotent;
 conflicting identity/ref/marker is refused. Host CLI create registers that route before
 Git/bootstrap or physical SDK work. Fresh creation therefore requires cloud route
 registration and initial Git credential authority.
 
-The always-on controller retains management access while work is disabled or expired;
+The always-on controller retains management access while work is disabled;
 that access does not authorize new jobs or Git. Browser-confirmed deletion requires
 the exact active owner/device/resource binding and local web-control approval. It
 does not require enabled agent work or agent delete permission; MCP cleanup retains
@@ -1740,7 +1751,7 @@ are excluded from request-context logging. There are no relay claim/renew/ACK en
 `GET /api/local-devices/github/:resourceId/:resourceGeneration/identity` is a
 device-authenticated metadata operation. It returns the verified GitHub login as
 `name` and numeric-account noreply `email` inside `{success:true,data:{name,email}}`.
-It checks the current device/resource binding, enabled finite lease, exact approved
+It checks the current device/resource binding, enabled permission, exact approved
 repository and current GitHub App grant. `resourceGeneration` is the stable
 route-authority generation, distinct from the Local lifecycle generation used for
 start/stop/delete. Invalid parameters return 400, device/domain authority refusals
@@ -1755,14 +1766,14 @@ and PR creation requires `allowPullRequests`. Local anonymous fetch is available
 for an explicitly approved public read-only repository. Private/write issuer failure
 never falls back to anonymous access, a host token or the original OAuth token.
 
-MCP `codespace` actions `pull_request_create`, `pull_request_get` and
-`pull_request_find` reach the live workspace owner. Creation requires a caller-chosen
-`request_id` in ws1 form, the codespace ID, `head`, `base`, `title`, and optional
-`body`/`draft`. To collect after a lost reply, call `pull_request_create` with only
-the same codespace ID and original `request_id`; omit create input. Collection does
-not submit another PR. Get takes `pull_request_number`; find takes exact `head` and `base` and
-helps inspect an uncertain provider creation. Credential acquisition uncertainty
-has a separate `security_request_id` and does not prove PR dispatch.
+MCP `pull_request_create` takes a returned `workspace` reference, `head`, `base`,
+`title` and optional `body`/`draft`. The adapter assigns the original mutation identity;
+the result returns its `operation` reference. `operation_get({reference})` reads that
+original without resubmitting. `pull_request_read` takes the workspace and a `query`
+containing either `{number}` or exact `{head,base}`. A lost first reply is resolved
+through `operation_find({owner: workspace,kind:"pull-request"})` and explicit candidate
+selection, not another create. Private credential acquisition retains its separate
+security request identity; credential uncertainty is not proof of PR dispatch.
 
 ### Private scoped GitHub credential issuer
 
@@ -1778,12 +1789,18 @@ they bypass generic request/body/error-context logging.
 | `POST /requests/:requestId`   | The same complete binding/action/original ID; pure collection, never issuance or parent refresh                        |
 | `POST /:credentialId/release` | `{resourceId,resourceGeneration}`; retires the exact child                                                             |
 
-`action` is `fetch`, `push`, `pull_request_read` or `pull_request_create`. The server
+`action` is `fetch`, `push`, `pull_request_read`, `pull_request_create` or
+`codespaces_provision`. The server
 derives the exact repository and permissions from current authority, not caller
 repository names, URLs or permission objects. Fetch receives contents read, push
 contents write, PR read receives pull-requests read, and PR create pull-requests write;
-each also receives metadata read. Parent generation, App repository grant, account,
-device/resource binding and finite owner authority are rechecked.
+each also receives metadata read. Host-only `codespaces_provision` receives metadata
+read, Codespaces read and Codespaces lifecycle-admin write for fixed SSH provisioning;
+it does not authorize provider creation or deletion. Parent generation, App repository grant, account,
+device/resource binding and current owner authority are rechecked. Local work permission
+has no deadline; child credentials retain finite vendor and parent use bounds.
+An unrelated settings revision does not retire unchanged child authority; actual
+device, resource or exact-grant revocation still does.
 
 The private acquire response contains `credentialId`, `token`, `expiresAt`,
 `useUntil` and `repositoryFullName`; only the trusted broker consumes it in memory.
@@ -1791,8 +1808,9 @@ Collection returns `state: absent|unconfirmed|disposed|refused`, or
 `{state:"live",credential:…}` with that private credential view. Release returns
 `{released:true}`. The original OAuth/refresh credential stays in the cloud vault;
 derived children are retained under separate encrypted custody before validation
-or delivery. Neither credential belongs in project files, argv, environment, logs
-or agent results.
+or delivery. Neither credential belongs in project files, project-command environment,
+argv, logs or agent results. The trusted host provisioner supplies its scoped child
+only to its isolated fixed `gh` subprocess environment, never the parent credential.
 
 The owner durably records token-free original security metadata before acquire.
 After an uncertain reply or restart, collect the original identity; even confirmed
@@ -1808,90 +1826,174 @@ The broker rechecks authority during work and disposes a known child after the
 upstream transport physically closes. `useUntil` is a local usage fence, not proof
 of GitHub expiry enforcement or automatic child revocation when a parent changes.
 
+### Private GitHub controller provider broker
+
+Paired controllers use `/api/codespaces/github/resources/:resourceId` with their
+device Bearer credential. `GET /assignment` returns the current exact assignment,
+including private `billableOwnerId` and `creationSettings` (auto-stop, idle timeout
+and retention). These captured account inputs are not public resource observations.
+`POST /register` advances verified controller authority; `POST /provider` accepts
+only the closed actions `preflight`, `machines`, `get`, `create`, `start`, `stop`
+and `delete`, with original `requestId` and `resourceGeneration`.
+
+The selected controller chooses and journals the machine, idle timeout and retention
+before dispatching `create` with `prepared: {machine,idleTimeoutMinutes,retentionMinutes}`.
+Repository, ref, operation marker and devcontainer path come from the verified
+assignment. The fixed broker rechecks current authority, assignment/settings and
+personal payer before the creation POST; it does not choose a machine or run setup.
+The original billable acceptance/unknown witness is retained across a lost reply.
+Creation/deletion use parent authorization inside the broker, not the read/provision
+child exported to the host.
+
+`POST /enroll` validates the original measured setup proof against current controller
+authority. The controller saves that proof in the original journal before publishing
+its binding pointer. `POST /renew-enrollment` uses the installed guest's finite
+renewal authority for the same known binding; it is not initial self-enrollment.
+Neither endpoint turns a stale or different guest life into the original setup.
+
 ## Codespace Management API
 
 Website resource management uses `/api/integrations/github/codespaces` behind ordinary
-admitted-user authentication. Both providers return `CodespaceSummaryView` directly:
-opaque `codespace_id`, provider, repository identity, requested and nullable current ref,
-nullable observed machine, state, retention policy, desired/observed state, observation
-time, lifecycle error, owner generation and timestamps. Assigned resources expose
-`device_id` and unfinished original `pending_request_ids`. Missing live observation
-does not manufacture a machine, current ref or lifecycle generation.
+admitted-user authentication. Observed resources carry a returned `workspace` reference
+containing the captured lifecycle precondition. Public projections include provider,
+repository, requested/current ref, nullable observed machine, state, retention,
+desired/observed state, observation time, lifecycle error and timestamps. The HTTP
+presentation also retains `codespace_id` as the display address. It does not expose a
+separate generation for callers to reconstruct. `pending_operations` contains original
+operation references rather than runnable replacement requests.
+
+Local summaries can include `remote: {state}` independently of local Unix readiness.
+Its states are `unconfigured`, `enrollment_unavailable`, `connecting`, `connected`,
+`unavailable` and `refused`; omission means no observation is available.
+Optional `setup_failure` reports `repository_unproven`, `prerequisite_unavailable`,
+`repository_checkout_failed` or `configuration_failed`, without Git output,
+host paths or credentials.
 
 ### GET /api/integrations/github/codespaces
 
-Returns `{success:true,data:{readiness,connection,repositories,repositories_stale,
-resources_stale,codespaces,providers,controllers,provider_billing?}}`. Repository targets
-retain their public `repository_id`; Local targets qualify the device and approved
-repository. `controllers` contains `{device_id,label,available}`. The provider entries
-contain their own connection, readiness, repositories and resources; top-level lists
-combine them. Readiness is a fresh configuration projection:
-`disabled|misconfigured|ready`, with provider, configuration status,
-`resources_enabled`, nullable reason and `checked_at`. It is not an SSH or guest probe.
+Requires the query parameter `provider=local-sandboxes|github-codespaces` and accepts
+`view=actionable|diagnostics|history`, defaulting to `actionable`. For example,
+`GET /api/integrations/github/codespaces?provider=local-sandboxes&view=diagnostics`.
+`POST /api/integrations/github/codespaces/refresh` accepts the same selection as a strict
+JSON body, such as `{"provider":"local-sandboxes","view":"actionable"}`.
 
-GitHub lists use current authorized provider reads and owner observations, rather than
-a cloud lifecycle cache. Local grants require an available current controller.
-`POST /refresh` forces repository-grant refresh. Both GET and Refresh make a current
-authorized monthly billing read; this composition has no billing cache.
-Stale flags distinguish failed grant/resource observations from an authoritative empty list.
-Optional `provider_billing` reports validated personal-account monthly compute/storage
-usage, included allowances and USD amounts, or `"unavailable"`. Billing requires GitHub
-Plan read permission. The result is accepted only if the same connected account and
-credential generation remain current after the provider read; a failed read or changed
-authority returns `"unavailable"`. No cloud resource-limit or lifecycle-queue view is returned.
+Returns `{success:true,data:…}` with the selected `provider`, readiness/connection,
+repository targets, `repositories_stale`, `resources_stale`, observed `codespaces`,
+`unavailable` owned identities, `controllers`, `provider_errors` and `has_diagnostics`.
+Repository choices include returned `target` and `controller` references. Failed
+observations never fabricate state, machine or lifecycle authority: unavailable entries
+carry an observation-only `identity`, a closed error code and any known original
+operation references, without a lifecycle generation. Use explicit original collection
+or `workspace_observe` for that identity; it cannot authorize a lifecycle mutation.
 
-### Creation and adoption
+The actionable view contains currently observed useful environments, including known
+incomplete setup. Diagnostics contains uncertain, unavailable or authority-lost identities;
+history contains confirmed retired environments. `has_diagnostics` signals that diagnostic
+identities exist. View selection never deletes identities or receipts.
+A failed selected-provider read stays explicit rather than becoming a healthy empty list.
+The request does not wait for another provider or billing.
 
-`POST /api/integrations/github/codespaces` accepts
-`{repository_id,ref,request_id,device_id?,devcontainer_path?}`. All mutations require
-a caller-selected `ws1-<lowercase UUID>` before submission. GitHub selects an explicit
-active registered paired controller or the sole eligible registered one; multiple choices require selection.
-The optional devcontainer path selects repository configuration, not commands or a host.
-Local repository targets already identify their device. Creation requires current
-account/repository authority and a controller reachable at actual dispatch; Local additionally checks
-owner-approved repository rights and finite work lease. Offline work is never queued.
+Readiness is a configuration projection `disabled|misconfigured|ready`, not an SSH
+or guest probe. Refresh reads the selected provider and view; GitHub refresh also forces
+its repository-grant refresh. Local discovery reuses one request-local owner observation
+for resources, repositories and device projection, rechecking current registration before
+reuse. This observation is not mutation authority. Registered GitHub controllers remain
+selectable without a Local owner probe; their metadata does not certify reachability.
 
-GitHub creation verifies personal billing; an organization payer is rejected with
-`422 CODESPACE_BILLING_UNSUPPORTED`. The controller owns admission, provider creation,
-fixed preparation and guest enrollment; cloud services retain only authorization,
-routing identity and billable/unknown retirement witnesses.
+### GET /api/integrations/github/codespaces/billing
 
-`POST /adopt` accepts `{provider_resource_name,request_id,device_id?}` for an unmanaged
-existing resource. `POST /:codespaceId/adopt` accepts
-`{request_id,expected_generation,device_id?}` for an existing route. Exact provider owner,
-billing, numeric repository and current grant are verified. Existing authority is
-rebound only through the same assigned controller after old physical custody settles;
-adoption preserves the VM and disk and does not create a replacement.
+Returns `{success:true,data:…}` with personal-account compute/storage usage and USD
+amounts, or `"unavailable"`. This separate read requires GitHub Plan read permission and
+the same current account/credential generation after the read. No cloud lifecycle queue
+or resource-limit view is returned. List and Refresh do not read billing.
 
-### Resource lifecycle and recovery
+### POST /api/integrations/github/codespaces/operations/:purpose
 
-`GET /:codespaceId` returns one owned summary; malformed, foreign and unknown IDs
-return `404 CODESPACE_NOT_FOUND`. `POST /:codespaceId/start` and `/stop` accept
-`{request_id,expected_generation}`. `DELETE /:codespaceId` additionally requires
-`confirm_delete:true`. The expected generation is the observed owner lifecycle CAS;
-stale admission returns `409 CODESPACE_GENERATION_CONFLICT`. Successful start/stop
-returns `{codespace,data_preserved:true}`; deletion returns
-`{codespace,data_preserved:false}` only after exact physical absence is established.
+This strict purpose route shares `WORKSPACE_TOOL_SCHEMAS` and the semantic service
+with MCP. The body contains semantic input, not `request_id`, `device_id` or
+`expected_generation`. Supported purposes are:
 
-Local browser deletion uses owner-approved web control for that exact generation,
-independently of agent delete permission or an enabled work lease. MCP retains agent
-permissions. Current account/device and binding authority remain mandatory.
+| Purpose                    | Body                                                                      |
+| -------------------------- | ------------------------------------------------------------------------- |
+| `workspace_create`         | `{target,branch,devcontainer_path?}`                                      |
+| `workspace_observe`        | `{workspace}`; accepts an observed workspace or observation-only identity |
+| `workspace_lifecycle`      | `{workspace,action}`; action is `start`, `stop` or `resume_setup`         |
+| `workspace_delete`         | `{workspace,confirm_delete:true}`                                         |
+| `workspace_adopt`          | `{workspace,controller}`                                                  |
+| `workspace_adopt_external` | `{controller,name}`                                                       |
+| `operation_get`            | `{reference}`                                                             |
+| `operation_find`           | `{owner,kind?,query?,cursor?}`                                            |
 
-After a lost reply, retain the original request and assigned device. Collect through
-`GET /api/integrations/local/devices/:deviceId/operations/:requestId` or MCP
-`codespace({action:"operation",device_id,request_id})`, including before a resource ID
-is known. Collection reads the original receipt and never repeats a mutation.
-`pending_request_ids` restore unfinished identities after reload. An uncertain
-creation cannot be replaced by another create merely because provider discovery is empty.
+For example, after selecting a target from the current management response:
 
-Known refusals retain their typed code and controlled message. Invalid input is 400;
-generation/authorization/state conflicts are 409; confirmed create/billing refusals
-are 422; provider unavailability and `WORKSPACE_OUTCOME_UNCONFIRMED` are 503.
-Validated `provider_failure` evidence distinguishes transport, HTTP and invalid-reply
-failures, with safe status/request ID/reason where available. It does not certify that
-an uncertain effect did not happen. Responses can retain original `request_id`,
-`device_id`, `codespace_id` and a separate `security_request_id`; credentials, raw
-provider bodies, URLs and command arguments are never returned.
+```typescript
+await fetch("/api/integrations/github/codespaces/operations/workspace_create", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ target: selected.target, branch: "main" }),
+});
+```
+
+A mutation mints one original identity inside the adapter and returns an `operation`
+reference. Settled results use `state:"completed"` and
+`outcome:{ok:true,result}|{ok:false,error}`; unfinished observations retain their
+original state/data. An uncertain retained credential or vendor result remains
+`unconfirmed`, even when its private receipt is terminal. HTTP success does not make
+an unsuccessful or uncertain owner outcome successful. Known boundary refusals retain
+their controlled HTTP status and code; malformed purpose/input is 400.
+
+Current account, repository, device, connection and resource authority are checked
+independently of reference decoding. A workspace reference captures its observation:
+a stale mutation refuses instead of refreshing generation and executing a different
+decision. Observe again before choosing a new intent. Browser deletion additionally
+uses current owner-approved web control; ordinary MCP deletion retains agent grants.
+Personal GitHub payer checks and original billable/unknown witnesses remain mandatory.
+Adoption preserves a verified existing VM/disk and never creates a replacement.
+
+Local `resume_setup` is explicit same-VM preparation after repairing the reported
+prerequisite. It retains the original creation receipt and admitted machine. An
+unknown creation requires original collection; unknown guest settlement requires
+separate exact local custody recovery. Custody acknowledgement preserves failed setup
+and does not authorize ordinary Start. None of these paths guesses a VM identity.
+
+GitHub `resume_setup` continues initial enrollment of the same known VM and
+resource generation using its retained original measured proof. It obtains fresh
+scoped SSH custody and performs fixed configuration/health work, without provider
+start, installation, adoption or replacement. Changed life, repository, release or
+authority refuses continuation. A verified local Unix owner can remain ready while
+remote enrollment is unavailable or refused; this does not certify a cloud route.
+An already enrolled owner's temporary transport or cold-renewal outage uses its
+existing reconnect loop, rather than initial-enrollment resume.
+
+### Original operation recovery
+
+MCP `operation_get({reference})` and the HTTP purpose above inspect the original
+owner/store without replaying an effect. `operation_find({owner,kind?,query?,cursor?})`
+reads admitted descriptors from that owner's retained journals, including controller
+repository and delivery receipts. Rows contain only references, state and safe metadata;
+the original outcome is returned by explicit `operation_get`, not discovery.
+Discovery does not collect every candidate, start
+work or infer absence from a failed route. Its cursor is opaque; each page still
+requires current authority. After a lost first reply, explicitly select the original
+candidate, even when only one is returned. Repeating identical input as a fresh call
+creates a distinct intention; command text or an RPC request counter is not a durable
+retry key. Unavailable or absent collection never authorizes automatic resubmission.
+
+MCP `repository_admit({controller,repository})` and
+`repository_create({controller,installation,name})` return an original operation and,
+once applied, a reusable target. `operation_resume({reference})` is an explicit
+continuation only for retained private-repository creation. It uses input saved in
+that original creation record and its existing progression/authority rules. Pure
+`operation_get` and discovery do not advance setup. An absent original cannot
+reconstruct input; a proved completed result returns without provider creation or
+native observation. Collection proves application through the exact original
+controller admission receipt and applied grant, rather than a second cloud result
+store. The HTTP management purpose route does not expose `operation_resume`.
+
+Returned references are typed addresses and captured preconditions, not bearer
+credentials. Publication links retain their separate capability/current-authority
+contract below. Private provider diagnostics, credentials and protocol request fields
+are excluded from ordinary semantic results.
 
 ### GET /api/admin/codespaces
 
@@ -1907,7 +2009,7 @@ The transport distinguishes `controller` and `workspace` endpoint kinds.
 A Local controller authenticates the paired user/device generation and pairing
 connection UUID without inventing a guest identity. Workspace credentials retain
 resource, stable route generation and measured guest-life bindings. Local workspace
-authority additionally checks device/repository grants and finite lease.
+authority additionally checks current device/repository grants and enabled permission.
 Current account, assigned actor and resource authority gate routing. A paired controller
 can remain available without Local VM configuration; no administrative cloud kill-switch
 is an operational authority.
@@ -1925,16 +2027,28 @@ versions of `x-moira-user-id`, `x-moira-device-id`, `x-moira-device-generation` 
 server-owned revalidation and exact expiry fence CONTROL and DATA independently of
 peer heartbeats. Observer loss does not cancel accepted work or replay an effect.
 
+The guest Unix API becomes ready after its repository binding, measured life and
+packaged release are verified; it does not wait for CONTROL registration. Remote
+enrollment and reachability are reported separately. A temporary authority-store or
+internal Upgrade failure returns an empty-body 503; explicit typed authority,
+identity and protocol refusals return 403. The remote adapter reconnects temporary
+failures without retaining or resubmitting operation payloads. A CONTROL handshake
+401/403 retires that remote authority. DATA rendezvous failure closes its transport
+epoch without replay. These outcomes do not change Local VM desired state.
+
 The Local controller's private API provides:
 
-| Method and path                            | Contract                                                                                   |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------ |
-| `GET /v1/controller/health`                | Pairing `connectionId` and live `incarnation`                                              |
-| `GET /v1/controller`                       | Current policy, control, resource observations and unfinished original IDs                 |
-| `PUT /v1/controller/settings`              | `{requestId,expectedGeneration,expectedRevision,settings}`                                 |
-| `POST /v1/controller/repositories`         | Exact delegated repository admission with identity/revision guards                         |
-| `POST /v1/resources/:resourceId/lifecycle` | Create/start/stop/delete/snapshot with original `requestId` and exact `expectedGeneration` |
-| `GET /v1/controller/operations/:requestId` | Inspect the original receipt; no effect dispatch                                           |
+| Method and path                                    | Contract                                                                                                                      |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `GET /v1/controller/health`                        | Pairing `connectionId` and live `incarnation`                                                                                 |
+| `GET /v1/controller`                               | Current policy, control, resource observations and unfinished original IDs                                                    |
+| `PUT /v1/controller/settings`                      | `{requestId,expectedGeneration,expectedRevision,settings}`                                                                    |
+| `POST /v1/controller/repositories`                 | Exact delegated repository admission with identity/revision guards                                                            |
+| `POST /v1/resources/:resourceId/lifecycle`         | Create/start/resume_setup/stop/delete/snapshot with original `requestId` and exact `expectedGeneration`                       |
+| `POST /v1/controller/github/resources/:resourceId` | GitHub create/start/stop/delete/adopt/resume_setup with original `requestId` and captured `expectedGeneration`                |
+| `GET /v1/controller/operations/:requestId`         | Inspect the original receipt; no effect dispatch                                                                              |
+| `POST /v1/controller/operations/find`              | Read retained admission/delivery descriptors with `{kind?,query?,cursor?}`; no effect collection                              |
+| `POST /v1/controller/workspaces/resolve`           | Resolve `{deviceId,resourceId}` or `{deviceId,spaceId,operationMarker}` from exact retained records, without native inventory |
 
 The device controller owns physical VM lifecycle, settings and their durable journals.
 Resource admission serializes validation, generation change and durable binding before
@@ -1942,10 +2056,23 @@ native execution; stop can retire an admitted start while preparation is pending
 A late start completion cannot replace newer admitted state. Existing VM bindings,
 disks and grants remain owned; archived uncertain receipts never enter active dispatch.
 
-The workspace service separately owns exec, collection/cancel/output, raw input,
-stat/search/read and guarded write/patch. Active mutation identities use
+The workspace service separately owns commands, sessions, raw input, output, files
+and their original results. `POST /v1/tools` validates the same strict public purpose
+schema as MCP and invokes the direct owner implementation; its private envelope
+contains `{action,request,requestId?}`. Internal raw streaming endpoints remain available
+for byte transport. Public file observations return a checked file reference; replacement
+accepts that reference or exact expected text. Creation requires absence. Patches apply
+text replacements against the immutable original, refusing ambiguous matches, overlapping
+edits or changed files. File and output cursors retain the original observation/stream
+and complete UTF-8 character boundaries; binary content uses native upload/download
+rather than text conversion. Optional caller bounds can refuse or window a response.
+Active private mutation identities use
 `ws1-<lowercase UUID>`; bare archived IDs are not translated or dispatched.
-Immutable input and receipts remain with the relevant owner. Cloud has no Local
+Immutable input identity, digest/metadata and original receipts remain with the relevant owner.
+Verified terminal native/stdin staging bytes may be retired after input-reader settlement;
+live, unknown or conflicting work retains them. Collection does not reacquire an accepted source
+or dispatch the effect again. Complete command stdout/stderr are retained independently of that
+cleanup and service diagnostic rotation. Cloud has no Local
 lifecycle/settings queue or command-result journal. A confirmed pre-dispatch refusal
 differs from an unconfirmed post-dispatch outcome; collect the original identity.
 
@@ -1955,6 +2082,30 @@ DATA streams have no inherited request-body timeout. An ingress idle-between-I/O
 still close an observer; this does not settle accepted owner work or authorize replay. Collect
 the original request identity after losing its response. Native attachment streaming and
 private download publication retain their separate contracts below.
+
+### Ordinary command and file purposes
+
+MCP and the guest `moira-workspace` CLI use the same owner purposes and returned
+references. `command_run` accepts a workspace and either `{argv}` or `{script}`,
+optional text stdin, cwd, environment, explicit timeout/output bounds and named session
+`{name,mode:"open"|"continue"}`. `command_run_native` takes native `stdin_file` instead
+of text stdin. `background:true` returns an addressed process rather than requiring
+client-supplied PID, runner state or start time. `operation_get` reads its original
+result; `process_output` uses the returned process, stdout/stderr and optional returned
+cursor; `process_stop` addresses that process. Two deliberate command calls, even with
+identical text, are separate intentions. Observer loss is not cancellation.
+
+`code_search`, `file_stat` and `file_read` return checked observations. `file_read`
+accepts an initial line window or its returned continuation cursor. `file_create`
+requires absence; `file_replace` requires expected full text or a returned file
+reference. `file_patch` takes path-based `old_text`/`new_text` replacements with an
+optional expected observation and explicit one/all occurrence selection. It does not
+require model-computed digests or byte offsets. Changed identity/content, ambiguous
+matches and overlapping edits refuse rather than silently rereading and overwriting.
+`file_upload` takes native input and an explicit create path or returned replacement
+file. `file_download` and `file_preview` return owner-native publication/image content;
+cloud presentation preserves those content objects without decoding or fetching them.
+Native metadata stays on the tool that owns its input; file bytes stream separately.
 
 ## Materialize Delivery API
 
@@ -2005,21 +2156,52 @@ authorization layered over an owner publication.
 
 ## Communication Owner API
 
-MCP `communication` authenticates the user through the ordinary MCP boundary. `send` delivers text without a file owner. `deliver-file` requires a caller-selected original `request_id` in `ws1-<lowercase UUID>` form and exactly one native `file` descriptor or immutable `referenceId`. A publication remains with the workspace or controller named by its `owner-file://` reference. Native and other nonworkspace sources use the explicit `device_id`, or the sole eligible active registered paired controller. Selection resolves identity, not availability; the router makes that decision at dispatch without a separate health or snapshot request. Multiple candidates require explicit selection, with no fallback to a different live owner. A refusal of the current dispatch or receipt observation does not prove that the original request was never admitted; collect using its original identity. The cloud does not queue delivery.
+MCP `communication_send({message,format?,silent?,channel?})` delivers text through
+the configured user service without a file owner. `communication_deliver` takes a
+native `file`, `kind`, optional message/presentation fields and optional returned
+controller `owner`. `communication_deliver_publication` takes the immutable
+`publication` reference and the same delivery fields. A channel identifies a configured
+adapter; callers cannot choose its recipient or credentials. A publication retains
+the workspace or controller named by its `owner-file://` reference.
 
-Collect with `communication({action:"operation",request_id,device_id})` or the original `codespace_id`, without source or message fields. Retain the assigned owner identity even after a lost reply. The owner returns its original `absent`, `accepted`, `completed` or `unconfirmed` receipt, immutable outcome and channel stages. Collection does not acquire the source again or resend a file. A completed receipt can retain an uncertain failure. Neither absence nor uncertainty authorizes automatic replay.
+Native nonworkspace sources use the selected controller or the sole eligible active
+registered one. Multiple choices require explicit selection. Selection resolves
+identity without a health/snapshot preflight; dispatch decides actual availability
+without falling back to another owner. The adapter mints the original identity and
+returns an `operation` reference. `operation_get({reference})` collects it without
+source/message input; `operation_find` discovers retained candidates at the selected
+owner after a lost first reply. Neither reads nor discovery acquire the source again
+or resend it. The semantic state preserves retained vendor or credential uncertainty,
+even when the private receipt is completed. A current route refusal or absent result
+cannot certify historical non-admission or authorize automatic replay. Cloud stores
+no delivery queue or replacement result journal.
+
+Owner-backed workflow notification results also return this `operation` on delivery
+success, refusal, uncertainty or malformed replies, including an optional-image
+fallback failure. Its original identity is derived internally from the execution and
+node visit before dispatch. The result does not expose raw communication request IDs
+or device/codespace routing coordinates; collect the returned reference to inspect
+the original without another send.
 
 The trusted owner uses private endpoints under `/api/communication/owner` with its existing device or workspace Bearer credential. User MCP tokens and browser cookies are not owner credentials. Workspace scope binds the resource, resource and authorization generations and measured environment identity; controller scope binds the user, device, device generation and pairing connection. Current account and actor authority are checked independently of the delivery journal.
 
-| Method and relative path            | Contract                                                                                                                                                                                                                       |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `POST /prepare`                     | Strict `communicationOwnerPrepareSchema`: scope, original `requestId`, optional `channelIds`, exact file metadata, kind/text/format/silent and optional workflow frame; returns configured channel descriptors without secrets |
-| `POST /send`                        | Framed `communicationOwnerSendSchema` followed by the original opaque file stream; returns sanitized `delivered`, `refused` or `unconfirmed` vendor status                                                                     |
-| `GET /artifacts/:channelId/:digest` | Authenticated current channel and scope resolve the exact installed immutable binary-extension artifact; scope travels in `x-moira-communication-scope`                                                                        |
+| Method and relative path            | Contract                                                                                                                                                                                                         |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /prepare`                     | Strict authority-only `communicationOwnerPrepareSchema`: scope, original `requestId`, optional `channelIds` and optional workflow frame; returns authorized channel contracts without file or presentation input |
+| `POST /send`                        | Framed `communicationOwnerSendSchema` followed by the original opaque file stream; returns sanitized `delivered`, `refused` or `unconfirmed` vendor status                                                       |
+| `GET /artifacts/:channelId/:digest` | Authenticated current channel and scope resolve the exact installed immutable binary-extension artifact; scope travels in `x-moira-communication-scope`                                                          |
 
 `/send` uses `Content-Type: application/vnd.moira.owner-stream`. Its body is a four-byte unsigned big-endian JSON byte length, the UTF-8 JSON control and the opaque file bytes. `Content-Length` must equal four plus the JSON byte length plus the declared file size. `encodeOwnerFrame`, `readOwnerFrame` and `settleOwnerFrame` in `packages/workspace-service/src/stream-frame.mjs` own this format and response/ingress lifetime. Authentication happens before reading the metadata frame; typed scope authorization follows parsing. File bytes never enter the JSON parser, temporary cloud storage or a whole-file buffer. A known refusal is flushed before unread ingress is closed.
 
-The cloud resolves the current registered channel, configured recipient, fixed endpoint and granted secret. Owners cannot supply a destination, URL, arbitrary header or credential. Configuration and installed-artifact digests must still match at dispatch; workflow frame revision and task identity are rechecked before vendor submission. The cloud constructs fixed raw or multipart vendor framing around the stream. Provider refusal is distinct from a lost or incomplete dispatched result.
+Prepared channels declare `capabilities` for text/image/document, named `operations`,
+optional text/caption length and file MIME/size constraints, and any immutable
+`bundleDigest`. Declared nonsecret handler settings may cross this boundary;
+recipient, endpoint and secret settings remain at the broker. The owner checks its
+owned bytes and selected channels, then journals the complete upload/text plan before
+vendor effects. Explicit unsupported selection refuses; no eligible channel is not
+a successful delivery. Caption and follow-up text are owner decisions.
+
+The cloud resolves the current registered channel, configured recipient, fixed endpoint and granted secret. Owners cannot supply a destination, URL, arbitrary header or credential. Configuration and installed-artifact digests must still match at dispatch; workflow frame revision and task identity are rechecked before vendor submission. The fixed broker validates the owner-prepared stage and constructs raw or multipart vendor framing around the stream; it does not choose the delivery plan. Provider refusal is distinct from a lost or incomplete dispatched result.
 
 Work HTTP requests to vendors use a dedicated dispatcher without default response-header or
 body-idle work clocks. Connection establishment, caller cancellation and explicit deadlines remain

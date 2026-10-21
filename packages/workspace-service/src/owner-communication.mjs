@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, lstat, realpath } from "node:fs/promises";
+import { mkdir, lstat, realpath, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { Buffer } from "node:buffer";
 import process from "node:process";
@@ -15,6 +15,7 @@ import { WORKSPACE_REQUEST_ID_PATTERN } from "../../shared/src/codespaces/worksp
 import { writeDurableJson, persistDirectory } from "./file-primitives.mjs";
 import { readPrivateOwnerJson } from "./private-json.mjs";
 import { nativeFileBytes, nativeFileIdentity } from "./native-source.mjs";
+import { operationState } from "../../shared/src/codespaces/workspace-operation-state.mjs";
 
 function refused(code, status = 409) {
   return Object.assign(new Error(code), { publicCode: code, status });
@@ -23,6 +24,18 @@ function hash(value) {
   return createHash("sha256")
     .update(typeof value === "string" ? value : canonicalJson(value))
     .digest("hex");
+}
+function deliveryDescription(input, file) {
+  const name = file.fileName;
+  const safeName =
+    typeof name === "string" &&
+    name.length <= 255 &&
+    !/[\\/]/.test(name) &&
+    [...name].every((character) => character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127)
+      ? name
+      : undefined;
+  const label = input.action === "publish" ? "Publish file" : `Deliver ${input.kind}`;
+  return safeName ? `${label} ${safeName}` : label;
 }
 function immutableInput(input) {
   const source =
@@ -35,6 +48,63 @@ function immutableInput(input) {
         ? { ...input.source, data: undefined, dataDigest: hash(input.source.data) }
         : input.source;
   return { ...input, source };
+}
+
+/** Read retained admission metadata without creating an owner, collecting or contacting a vendor. */
+export async function findOwnerCommunication({ stateRoot, scope }, selection = {}) {
+  const root = join(stateRoot, "communication");
+  const info = await lstat(root).catch((error) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+  if (!info) return { operations: [] };
+  if (
+    !info.isDirectory() ||
+    info.isSymbolicLink() ||
+    info.uid !== process.getuid?.() ||
+    (info.mode & 0o077) !== 0 ||
+    (await realpath(root)) !== root
+  )
+    throw refused("UNSAFE_COMMUNICATION_STATE");
+  if (selection.cursor !== undefined && !WORKSPACE_REQUEST_ID_PATTERN.test(selection.cursor))
+    throw refused("INVALID_OPERATION_CURSOR", 400);
+  const entries = (await readdir(root))
+    .filter(
+      (name) => name.endsWith(".json") && WORKSPACE_REQUEST_ID_PATTERN.test(name.slice(0, -5)),
+    )
+    .sort();
+  const operations = [];
+  let last;
+  for (const name of entries) {
+    const requestId = name.slice(0, -5);
+    if (selection.cursor && requestId <= selection.cursor) continue;
+    const record = await readPrivateOwnerJson(join(root, name));
+    if (!record || record.version !== 1 || record.requestId !== requestId)
+      throw refused("UNSAFE_COMMUNICATION_STATE");
+    const same =
+      record.scope?.kind === scope?.kind &&
+      (scope?.kind === "workspace"
+        ? record.scope.resourceId === scope.resourceId
+        : canonicalJson(record.scope) === canonicalJson(scope));
+    if (!same) continue;
+    last = requestId;
+    const description = record.descriptor?.description ?? "Original owner delivery";
+    if (selection.kind && selection.kind !== "delivery") continue;
+    if (selection.query && !description.toLowerCase().includes(selection.query.toLowerCase()))
+      continue;
+    operations.push({
+      requestId,
+      kind: "delivery",
+      description,
+      ...(record.descriptor?.createdAt ? { createdAt: record.descriptor.createdAt } : {}),
+      state: operationState(record),
+    });
+    if (operations.length === 50) break;
+  }
+  return {
+    operations,
+    ...(last && entries.some((name) => name.slice(0, -5) > last) ? { nextCursor: last } : {}),
+  };
 }
 
 /** One immutable source and durable delivery journal, shared by workspace and controller owners. */
@@ -53,7 +123,25 @@ export async function createOwnerCommunication({
   extensionHelperPath,
   admit,
 }) {
-  scope = communicationOwnerScopeSchema.parse(scope);
+  scope = scope ? communicationOwnerScopeSchema.parse(scope) : undefined;
+  let enabled = Boolean(scope);
+  const samePrincipal = (left, right) =>
+    left &&
+    right &&
+    left.kind === right.kind &&
+    (left.kind === "workspace"
+      ? left.resourceId === right.resourceId &&
+        left.environmentIdentity === right.environmentIdentity
+      : canonicalJson(left) === canonicalJson(right));
+  const configure = (next = {}) => {
+    const selected = next.scope ? communicationOwnerScopeSchema.parse(next.scope) : undefined;
+    if (selected && scope && !samePrincipal(selected, scope))
+      throw refused("COMMUNICATION_SCOPE_REFUSED", 403);
+    if (selected) scope = selected;
+    enabled = Boolean(selected);
+    transport = next.transport;
+    extensionArtifact = next.extensionArtifact;
+  };
   const root = join(stateRoot, "communication");
   await mkdir(root, { recursive: true, mode: 0o700 });
   const info = await lstat(root);
@@ -69,21 +157,23 @@ export async function createOwnerCommunication({
   const active = new Map();
   const shutdown = new globalThis.AbortController();
   let closing = false;
-  const read = async (requestId) => {
+  const read = async (requestId, history = false) => {
     if (!WORKSPACE_REQUEST_ID_PATTERN.test(requestId ?? ""))
       throw refused("INVALID_REQUEST_ID", 400);
     const record = await readPrivateOwnerJson(join(root, requestId + ".json"));
     if (
       record &&
       (record.requestId !== requestId ||
-        canonicalJson(record.scope) !== canonicalJson(scope) ||
+        !(history && scope?.kind === "workspace" && record.scope?.kind === "workspace"
+          ? record.scope.resourceId === scope.resourceId
+          : samePrincipal(record.scope, scope)) ||
         record.version !== 1)
     )
       throw refused("COMMUNICATION_SCOPE_REFUSED", 403);
     return record;
   };
   const inspect = async (requestId) => {
-    const record = await read(requestId);
+    const record = await read(requestId, true);
     if (!record) return { requestId, state: "absent" };
     return {
       requestId,
@@ -92,7 +182,7 @@ export async function createOwnerCommunication({
       stages: record.stages,
     };
   };
-  const tokenFor = (reference) => {
+  const tokenFor = (reference, scope) => {
     const owner = scope.kind === "controller" ? scope.deviceId : scope.resourceId;
     const prefix = `owner-file://${scope.kind}/${owner}/`;
     if (
@@ -102,9 +192,12 @@ export async function createOwnerCommunication({
       throw refused("COMMUNICATION_SOURCE_REFUSED", 403);
     return reference.slice(prefix.length);
   };
-  const prepareSource = async (source, stream) => {
+  const prepareSource = async (source, stream, scope, publications) => {
     if (source.type === "publication") {
-      const opened = await publications.openSource(tokenFor(source.referenceId), shutdown.signal);
+      const opened = await publications.openSource(
+        tokenFor(source.referenceId, scope),
+        shutdown.signal,
+      );
       try {
         return Object.fromEntries(
           Object.entries(opened).filter(([key]) => !["settled", "close"].includes(key)),
@@ -128,10 +221,8 @@ export async function createOwnerCommunication({
         fileName = source.file.fileName ?? "attachment";
         mimeType = source.file.mimeType ?? opened.mimeType ?? "application/octet-stream";
       } else if (source.type === "inline") {
-        if (
-          source.data.length % 4 ||
-          !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(source.data)
-        )
+        const padding = source.data.indexOf("=");
+        if (source.data.length % 4 || (padding !== -1 && padding < source.data.length - 2))
           throw refused("SOURCE_REFUSED", 422);
         body = (async function* () {
           for (let offset = 0; offset < source.data.length; offset += 65536) {
@@ -192,6 +283,11 @@ export async function createOwnerCommunication({
   };
   const submit = async (value, { stream } = {}) => {
     const input = communicationOwnerSubmitSchema.parse(value);
+    const selectedScope = scope;
+    const selectedEnabled = enabled;
+    const selectedPublications = enabled ? publications.snapshot() : undefined;
+    const selectedTransport = transport;
+    const selectedArtifact = extensionArtifact;
     if (input.expectedScope && canonicalJson(input.expectedScope) !== canonicalJson(scope))
       throw refused("COMMUNICATION_SCOPE_REFUSED", 403);
     const inputDigest = hash(immutableInput(input));
@@ -206,34 +302,35 @@ export async function createOwnerCommunication({
       return running.work;
     }
     if (closing) throw refused("COMMUNICATION_OWNER_UNAVAILABLE", 503);
+    if (!selectedEnabled) throw refused("COMMUNICATION_OWNER_UNAVAILABLE", 503);
     const work = (async () => {
       // Acquisition is preparation: a refused source has no admitted vendor operation.
-      const file = await prepareSource(input.source, stream);
+      const file = await prepareSource(input.source, stream, selectedScope, selectedPublications);
       if (shutdown.signal.aborted || closing) throw refused("SOURCE_REFUSED", 422);
       const record = {
         version: 1,
-        scope,
+        scope: selectedScope,
         requestId: input.requestId,
         inputDigest,
+        descriptor: {
+          kind: "delivery",
+          description: deliveryDescription(input, file),
+          createdAt: Date.now(),
+        },
         file,
         stages: [],
       };
       const save = () => writeDurableJson(root, input.requestId + ".json", record);
       let channels = [];
       if (input.action === "deliver") {
-        if (!transport) throw refused("COMMUNICATION_TRANSPORT_UNAVAILABLE", 503);
+        if (!selectedTransport) throw refused("COMMUNICATION_TRANSPORT_UNAVAILABLE", 503);
         channels = communicationOwnerPreparationSchema.parse(
-          await transport.prepare(
+          await selectedTransport.prepare(
             {
-              scope,
+              scope: selectedScope,
               requestId: input.requestId,
               channelIds: input.channelIds,
-              kind: input.kind,
-              text: input.text,
-              format: input.format,
-              silent: input.silent,
               workflowFrame: input.workflowFrame,
-              file: { fileName: file.fileName, mimeType: file.mimeType, size: file.size },
             },
             shutdown.signal,
           ),
@@ -247,8 +344,50 @@ export async function createOwnerCommunication({
       const perform = async () => {
         await save();
         try {
+          if (input.action === "deliver") {
+            const eligible = (channel) => {
+              const constraints = channel.constraints?.file?.[input.kind];
+              return (
+                channel.capabilities[input.kind] &&
+                (!constraints?.mimeTypes || constraints.mimeTypes.includes(file.mimeType)) &&
+                (constraints?.minBytes === undefined || file.size >= constraints.minBytes) &&
+                (constraints?.maxBytes === undefined || file.size <= constraints.maxBytes)
+              );
+            };
+            if (
+              input.channelIds &&
+              (input.channelIds.some(
+                (id) => !channels.some((channel) => channel.channelId === id),
+              ) ||
+                channels.some((channel) => !eligible(channel)))
+            )
+              throw refused("COMMUNICATION_DELIVERY_REFUSED");
+            channels = channels.filter(eligible);
+            if (!channels.length) throw refused("COMMUNICATION_DELIVERY_REFUSED");
+            // Validate the complete plan before admitting any vendor stage.
+            for (const channel of channels) {
+              if (
+                channel.constraints?.text &&
+                input.text.length > channel.constraints.text.maxLength
+              )
+                throw refused("COMMUNICATION_DELIVERY_REFUSED");
+              if (
+                channel.provider === "telegram" &&
+                channel.constraints?.caption &&
+                input.text.length > channel.constraints.caption.maxLength &&
+                (!channel.capabilities.text || !channel.operations.includes("send_message"))
+              )
+                throw refused("COMMUNICATION_DELIVERY_REFUSED");
+            }
+          }
           for (const channel of channels) {
+            const followup =
+              channel.provider === "telegram" &&
+              channel.constraints?.caption !== undefined &&
+              input.text.length > channel.constraints.caption.maxLength;
             const send = async (operationId, controls, signal = shutdown.signal) => {
+              if (operationId !== undefined && !channel.operations.includes(operationId))
+                throw refused("COMMUNICATION_DELIVERY_REFUSED");
               const existing = record.stages.find(
                 (stage) =>
                   stage.channelId === channel.channelId && stage.operationId === operationId,
@@ -265,21 +404,21 @@ export async function createOwnerCommunication({
                     close: async () => {},
                     settled: Promise.resolve(),
                   }
-                : await publications.openSource(tokenFor(file.referenceId), signal);
+                : await selectedPublications.openSource(
+                    tokenFor(file.referenceId, selectedScope),
+                    signal,
+                  );
               const stage = { channelId: channel.channelId, operationId, status: "accepted" };
               try {
                 record.stages.push(stage);
                 await save();
                 const control = {
-                  scope,
+                  scope: selectedScope,
                   requestId: input.requestId,
                   channelId: channel.channelId,
                   authorityDigest: channel.authorityDigest,
                   kind: input.kind,
-                  text:
-                    channel.provider === "telegram" && !textStage && input.text.length > 1024
-                      ? ""
-                      : input.text,
+                  text: !textStage && followup ? "" : input.text,
                   format: input.format,
                   silent: input.silent,
                   workflowFrame: input.workflowFrame,
@@ -301,7 +440,7 @@ export async function createOwnerCommunication({
                   },
                 };
                 const result = communicationVendorResultSchema.parse(
-                  await transport.send(control, checkedSource, signal),
+                  await selectedTransport.send(control, checkedSource, signal),
                 );
                 if (result.status === "delivered" && !complete)
                   throw refused("WORKSPACE_OUTCOME_UNCONFIRMED", 503);
@@ -330,13 +469,13 @@ export async function createOwnerCommunication({
               }
             };
             if (channel.provider === "extension") {
-              if (!deliverExtension || !extensionArtifact || !channel.bundleDigest)
+              if (!deliverExtension || !selectedArtifact || !channel.bundleDigest)
                 throw refused("COMMUNICATION_EXTENSION_UNAVAILABLE", 503);
               await deliverExtension({
-                artifact: await extensionArtifact(
+                artifact: await selectedArtifact(
                   channel.channelId,
                   channel.bundleDigest,
-                  scope,
+                  selectedScope,
                   shutdown.signal,
                 ),
                 directory: join(root, "extensions"),
@@ -352,7 +491,10 @@ export async function createOwnerCommunication({
                     sha256: file.sha256,
                   },
                   open: async (signal) => {
-                    const value = await publications.openSource(tokenFor(file.referenceId), signal);
+                    const value = await selectedPublications.openSource(
+                      tokenFor(file.referenceId, selectedScope),
+                      signal,
+                    );
                     return { stream: value, close: value.close, settled: value.settled };
                   },
                 },
@@ -369,7 +511,7 @@ export async function createOwnerCommunication({
                 throw refused("COMMUNICATION_DELIVERY_REFUSED");
             } else {
               await send();
-              if (input.text.length > 1024) await send("send_message");
+              if (followup) await send("send_message");
             }
           }
           record.outcome = {
@@ -378,7 +520,7 @@ export async function createOwnerCommunication({
               file,
               ...(input.action === "deliver"
                 ? {
-                    status: channels.length ? "delivered" : "no_configured_channels",
+                    status: "delivered",
                     channels: record.stages,
                   }
                 : {}),
@@ -408,7 +550,9 @@ export async function createOwnerCommunication({
         return inspect(input.requestId);
       };
       return admit
-        ? communicationOwnerReceiptSchema.parse(await admit(input.requestId, inputDigest, perform))
+        ? communicationOwnerReceiptSchema.parse(
+            await admit(input.requestId, inputDigest, perform, record.descriptor),
+          )
         : perform();
     })();
     active.set(input.requestId, { inputDigest, work });
@@ -419,8 +563,10 @@ export async function createOwnerCommunication({
     }
   };
   return {
+    configure,
     submit,
     inspect,
+    find: (selection) => findOwnerCommunication({ stateRoot, scope }, selection),
     async close() {
       closing = true;
       shutdown.abort();

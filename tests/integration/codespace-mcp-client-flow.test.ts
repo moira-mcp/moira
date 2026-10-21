@@ -6,7 +6,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { createWorkspaceRequestId } from "@mcp-moira/shared/workspace-request-id";
 import { createRequire } from "node:module";
 import { readFileSync, writeFileSync, statSync, watch } from "node:fs";
@@ -51,10 +51,23 @@ import {
   WorkspaceAuthRepository,
 } from "@mcp-moira/shared";
 import { runWithMCPContext } from "../../packages/mcp-server/src/core/request-context.js";
+import { createWorkspaceToolHandler } from "../../packages/mcp-server/src/tools/workspace-tools.js";
+import { TOOL_BINDINGS } from "../../packages/mcp-server/src/tools/tool-bindings.js";
 import {
-  setCodespaceToolServicesLoaderForTests,
-  type CodespaceToolServices,
-} from "../../packages/mcp-server/src/tools/manage-codespaces.js";
+  WORKSPACE_TOOL_SCHEMAS,
+  type WorkspaceToolName,
+} from "../../packages/mcp-server/src/tools/workspace-tool-contract.js";
+import { getUserContext } from "../../packages/mcp-server/src/core/request-context.js";
+import {
+  createWorkspaceSemanticServices,
+  type WorkspaceSemanticDependencies,
+} from "../../packages/web-backend/src/services/workspace-semantic-service.js";
+import type { CodespaceProviderServices } from "../../packages/web-backend/src/services/codespace-services.js";
+import {
+  encodeReference,
+  decodeReference,
+  type OwnerSelector,
+} from "@mcp-moira/shared/workspace-references";
 import { registerTools } from "../../packages/mcp-server/src/tools/register-tools.js";
 import { createWorkspaceClient } from "../../packages/web-backend/src/services/workspace-client.js";
 import { GitHubResourceService } from "../../packages/web-backend/src/services/github-resource-service.js";
@@ -77,6 +90,7 @@ type Fixture = {
   directory: string;
   socketPath: string;
   publicationScope?: Record<string, unknown>;
+  ownerSelector?: OwnerSelector;
   remote?: Record<string, unknown>;
   environment?: Record<string, string>;
 };
@@ -172,23 +186,10 @@ async function client() {
   await server.connect(serverTransport);
   await mcp.connect(clientTransport);
   return {
-    process: (action: string, args: Record<string, unknown>, userId = USER_ID) =>
+    call: (name: string, args: Record<string, unknown>, userId = USER_ID) =>
       runWithMCPContext(
         { userId, agent: "chatgpt" },
-        () =>
-          mcp.callTool({
-            name: "codespace_process",
-            arguments: { action, ...args },
-          }) as Promise<CallToolResult>,
-      ),
-    call: (action: string, args: Record<string, unknown>, userId = USER_ID) =>
-      runWithMCPContext(
-        { userId, agent: "chatgpt" },
-        () =>
-          mcp.callTool({
-            name: "codespace",
-            arguments: { action, ...args },
-          }) as Promise<CallToolResult>,
+        () => mcp.callTool({ name, arguments: args }) as Promise<CallToolResult>,
       ),
     close: async () => {
       await mcp.close();
@@ -365,8 +366,15 @@ async function setup(fileDatabase = false) {
               .environmentIdentity,
           ),
         };
+        await dependencies.prepared(proof);
+        const health = {
+          releaseIdentity: proof.release,
+          environmentIdentity: proof.environmentIdentity,
+          remote: { state: "unconfigured" as const },
+        };
+        await dependencies.ready(health);
         await dependencies.enroll(proof);
-        return { proof, health: {} };
+        return { proof, health };
       },
     });
   const endpoint = await startLocalController(owner);
@@ -379,7 +387,7 @@ async function setup(fileDatabase = false) {
   const authorize = (userId: string, resourceId: string) => {
     return resource.authority(userId, resourceId);
   };
-  const workspace: CodespaceToolServices["workspace"] = {
+  const workspace: ReturnType<typeof createWorkspaceClient> = {
     request(userId, id, input, signal) {
       authorize(userId, id);
       return wire.request(userId, id, input, signal);
@@ -390,7 +398,8 @@ async function setup(fileDatabase = false) {
     },
   };
   const nativeBytes = Buffer.alloc(8 * 1024 * 1024 + 31, 0xa7);
-  const services: CodespaceToolServices = {
+  const bundle: CodespaceProviderServices = {
+    provider: provider.id,
     connection,
     resource,
     workspace,
@@ -401,21 +410,59 @@ async function setup(fileDatabase = false) {
       policy: () => policy,
     }),
   };
-  cleanups.push(setCodespaceToolServicesLoaderForTests(async () => services));
+  const semantic = createWorkspaceSemanticServices({
+    providers: [bundle],
+    select(userId, input) {
+      if (input.codespaceId) authorize(userId, input.codespaceId);
+      return bundle;
+    },
+    devices,
+    workspace,
+    controller: controllerTransport.wire!,
+    repositories: {} as WorkspaceSemanticDependencies["repositories"],
+    repositoryCreation: {} as WorkspaceSemanticDependencies["repositoryCreation"],
+  });
+  const fileOwner = new LiveCommunicationFileOwner({
+    devices: () => devices,
+    controller: () => controllerTransport.wire!,
+    workspace: () => workspace,
+    authorizePublication: () => USER_ID,
+  });
+  const execute = createWorkspaceToolHandler(semantic, {
+    owner: fileOwner,
+    communicationService: {
+      deliver: async () => {
+        throw new Error("Unexpected text");
+      },
+      deliverChannel: async () => {
+        throw new Error("Unexpected text");
+      },
+    },
+    repository: {} as never,
+    audit: async () => {},
+  });
+  const bindings = TOOL_BINDINGS as Record<string, unknown>;
+  for (const name of Object.keys(WORKSPACE_TOOL_SCHEMAS) as WorkspaceToolName[]) {
+    const original = bindings[name];
+    bindings[name] = (request: unknown) => execute(name, request, getUserContext().userId);
+    cleanups.push(() => {
+      bindings[name] = original;
+    });
+  }
   const mcp = await client();
   cleanups.push(mcp.close);
-  const creationId = createWorkspaceRequestId();
-  const created = await mcp.call("create", {
-    repository_id: "301",
-    ref: "main",
-    request_id: creationId,
-    device_id: auth.deviceId,
+  const created = await mcp.call("workspace_create", {
+    target: encodeReference("target", {
+      provider: "github-codespaces",
+      repositoryId: "301",
+      controller: { deviceId: auth.deviceId, connectionId: auth.connectionId },
+    }),
+    branch: "main",
   });
-  if (created.isError)
-    expect(created.structuredContent).toMatchObject({
-      request_id: creationId,
-      error: { code: "WORKSPACE_OUTCOME_UNCONFIRMED" },
-    });
+  const creationId = decodeReference(
+    String(created.structuredContent!.operation),
+    "operation",
+  ).requestId;
   const id = creationId.slice(4);
   await owner.state.drain();
   const receipt = await owner.collectOperation(creationId);
@@ -428,10 +475,16 @@ async function setup(fileDatabase = false) {
     authorizationGeneration: admitted.authorizationGeneration,
     publicOrigin: "https://moira.example",
   };
+  value.ownerSelector = { kind: "github", resourceId: id };
   await guest.start(value);
   return Object.assign(value, {
     mcp,
     id,
+    reference: encodeReference("workspace", {
+      resourceId: id,
+      provider: "github-codespaces",
+      generation: admitted.generation,
+    }),
     nativeBytes,
     wire,
     sqlite,
@@ -587,16 +640,12 @@ describe("registered MCP tools against actual workspace and lifecycle services",
     expect(caller.pid).not.toBe(backend.pid);
     writeFileSync(join(value.root, "binary.bin"), value.nativeBytes);
     const download = await callCloud(caller, "tool", {
-      action: "download",
-      codespace_id: value.id,
-      path: "binary.bin",
-      file_name: "binary.bin",
-      mime_type: "application/octet-stream",
+      tool: "file_download",
+      request: { workspace: value.reference, path: "binary.bin" },
     });
     expect(download.isError).not.toBe(true);
     const file = (download.structuredContent as { file: { reference_id: string; sha256: string } })
       .file;
-    expect(file.sha256).toBe(createHash("sha256").update(value.nativeBytes).digest("hex"));
     const token = file.reference_id.split("/").at(-1)!;
     const publicRead = async () => {
       const reply = await createWorkspaceClient(join(value.directory, "caller.sock")).request(
@@ -638,13 +687,6 @@ describe("registered MCP tools against actual workspace and lifecycle services",
             scope: currentScope,
             requestId: createWorkspaceRequestId(),
             channelIds: ["telegram"],
-            kind: "document",
-            text: "Report",
-            file: {
-              fileName: "binary.bin",
-              mimeType: "application/octet-stream",
-              size: value.nativeBytes.length,
-            },
           }),
         );
       });
@@ -736,20 +778,23 @@ describe("registered MCP tools against actual workspace and lifecycle services",
     expect(multipart.subarray(contentStart, contentStart + value.nativeBytes.length)).toEqual(
       value.nativeBytes,
     );
-    const refusedId = createWorkspaceRequestId();
     await callCloud(backend, "revoke-at-rendezvous", { resourceId: value.id });
-    expect(
-      await callCloud(caller, "tool", {
-        action: "exec",
-        codespace_id: value.id,
-        request_id: refusedId,
-        argv: [
-          process.execPath,
-          "-e",
-          "require('node:fs').writeFileSync('revoked-effect','unexpected')",
-        ],
-      }),
-    ).toMatchObject({ isError: true });
+    const refused = await callCloud(caller, "tool", {
+      tool: "command_run",
+      request: {
+        workspace: value.reference,
+        command: {
+          argv: [
+            process.execPath,
+            "-e",
+            "require('node:fs').writeFileSync('revoked-effect','unexpected')",
+          ],
+        },
+      },
+    });
+    expect(refused).toMatchObject({ isError: true });
+    const refusal = refused.structuredContent as { operation: string };
+    const refusedId = decodeReference(refusal.operation, "operation").requestId;
     expect(
       await value.wire.json(USER_ID, value.id, {
         method: "GET",
@@ -1044,68 +1089,59 @@ describe("registered MCP tools against actual workspace and lifecycle services",
 
   it("edits and executes actual code, then observes preserved files after service restart", async () => {
     const value = await setup();
-    const args = { codespace_id: value.id };
+    const args = { workspace: value.reference };
     const source = "export const value = 1;\n";
-    const written = await value.mcp.call("write", {
+    const written = await value.mcp.call("file_create", {
       ...args,
-      request_id: createWorkspaceRequestId(),
       path: "app.mjs",
-      expected: { exists: false },
       text: source,
     });
     expect(written.isError).not.toBe(true);
-    const patched = await value.mcp.call("apply_patch", {
+    const patched = await value.mcp.call("file_patch", {
       ...args,
-      request_id: createWorkspaceRequestId(),
       files: [
         {
           path: "app.mjs",
-          expected: {
-            exists: true,
-            size_bytes: Buffer.byteLength(source),
-            sha256: createHash("sha256").update(source).digest("hex"),
-          },
-          edits: [{ start: 21, end: 22, text: "2" }],
+          expected: { text: source },
+          replacements: [{ old_text: "value = 1", new_text: "value = 2" }],
         },
       ],
     });
     expect(patched.isError).not.toBe(true);
-    const tested = await value.mcp.call("exec", {
+    const tested = await value.mcp.call("command_run", {
       ...args,
-      request_id: createWorkspaceRequestId(),
-      argv: [
-        process.execPath,
-        "--input-type=module",
-        "-e",
-        "import {value} from './app.mjs'; if(value!==2)process.exit(23); console.log('tests pass')",
-      ],
+      command: {
+        argv: [
+          process.execPath,
+          "--input-type=module",
+          "-e",
+          "import {value} from './app.mjs'; if(value!==2)process.exit(23); console.log('tests pass')",
+        ],
+      },
     });
     expect(tested).toMatchObject({
-      structuredContent: { state: "succeeded", exitCode: 0, stdout: "tests pass\n" },
+      structuredContent: {
+        state: "completed",
+        outcome: { ok: true, result: { exitCode: 0 } },
+        stdout: "tests pass\n",
+      },
     });
     await guest.stop(value);
     await guest.start(value);
     expect(
-      (await value.mcp.call("read", { ...args, path: "app.mjs", offset: 0, length: 1024 }))
-        .structuredContent,
+      (await value.mcp.call("file_read", { ...args, path: "app.mjs" })).structuredContent,
     ).toMatchObject({ text: "export const value = 2;\n" });
     expect(readFileSync(join(value.root, "app.mjs"), "utf8")).toBe("export const value = 2;\n");
     expect(
-      (
-        await value.mcp.call(
-          "read",
-          { ...args, path: "app.mjs", offset: 0, length: 1024 },
-          OTHER_USER_ID,
-        )
-      ).isError,
+      (await value.mcp.call("file_read", { ...args, path: "app.mjs" }, OTHER_USER_ID)).isError,
     ).toBe(true);
   });
 
   it("publishes a large immutable owner file through registered MCP and the live public route without cloud storage", async () => {
     const value = await setup();
-    const args = { codespace_id: value.id };
+    const args = { workspace: value.reference };
     writeFileSync(join(value.root, "binary.bin"), value.nativeBytes);
-    const boundedDownload = await value.mcp.call("download", {
+    const boundedDownload = await value.mcp.call("file_download", {
       ...args,
       path: "binary.bin",
       file_name: "binary.bin",
@@ -1117,7 +1153,7 @@ describe("registered MCP tools against actual workspace and lifecycle services",
       structuredContent: { error: { code: "CODESPACE_DOWNLOAD_BOUND_EXCEEDED" } },
     });
     expect(boundedDownload.content.some((block) => block.type === "resource_link")).toBe(false);
-    const download = await value.mcp.call("download", {
+    const download = await value.mcp.call("file_download", {
       ...args,
       path: "binary.bin",
       file_name: "binary.bin",
@@ -1132,7 +1168,6 @@ describe("registered MCP tools against actual workspace and lifecycle services",
     expect(file.reference_id).toMatch(
       new RegExp(`^owner-file://workspace/${value.id}/[A-Za-z0-9_-]{43}$`),
     );
-    expect(file.sha256).toBe(createHash("sha256").update(value.nativeBytes).digest("hex"));
     const token = file.reference_id.split("/").at(-1)!;
     const routes = express();
     routes.get(

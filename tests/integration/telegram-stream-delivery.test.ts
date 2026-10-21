@@ -22,7 +22,7 @@ import {
 } from "../../packages/workspace-service/src/stream-frame.mjs";
 
 describe("Telegram streamed attachment HTTP transport", () => {
-  it("delivers MP4 and quoted Unicode JPG documents through one live owner and vendor HTTP fixture", async () => {
+  it("delivers MP4 and quoted Unicode JPG documents through the secret-bound broker and vendor HTTP fixture", async () => {
     const root = mkdtempSync(join(tmpdir(), "moira-telegram-stream-"));
     const receiverPath = join(root, "received-document.bin");
     const chunk = Buffer.alloc(256 * 1024, 0xa7);
@@ -148,14 +148,19 @@ describe("Telegram streamed attachment HTTP transport", () => {
             mimeType: filename.endsWith(".jpg") ? "image/jpeg" : "video/mp4",
           },
         };
-        const prepared = await transport.prepare(credential, current);
+        const prepared = await transport.prepare(credential, {
+          scope: current.scope,
+          requestId: current.requestId,
+          channelIds: current.channelIds,
+        });
         expect(prepared.channels).toHaveLength(1);
+        const channel = prepared.channels[0]!;
         const { channelIds: _channelIds, ...control } = current;
         const framed = encodeOwnerFrame(
           {
             ...control,
-            channelId: "telegram",
-            authorityDigest: prepared.channels[0]!.authorityDigest,
+            channelId: channel.channelId,
+            authorityDigest: channel.authorityDigest,
           },
           (async function* () {
             for (let index = 0; index < count; index++) yield chunk;

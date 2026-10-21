@@ -356,7 +356,8 @@ export class SbxRuntime {
         origin: z.literal("local"),
         editable: z.literal(false),
       })
-      .strict();
+      // SDK display metadata does not change the fixed denial semantics above.
+      .passthrough();
     if (
       allowEmpty &&
       networkScopesKnown &&

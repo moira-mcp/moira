@@ -66,6 +66,8 @@ export class UserNotificationHandler implements INodeHandler {
       throw new InternalError("UserNotificationHandler can only execute user-notification nodes");
     const timer = this.logger.startTimer();
     if (!context.userId) return this.failure(node, messageQueue, "missing_user", timer.elapsed());
+    let attachmentStatus: string | undefined;
+    let operation: string | undefined;
 
     try {
       const body = this.messageProcessor(node.format).processDirective(node.message, context);
@@ -91,12 +93,13 @@ export class UserNotificationHandler implements INodeHandler {
         };
       };
       const prepared = await prepare();
-      let attachmentStatus: string | undefined;
-      let originalRequestId: string | undefined;
-      let originalOwner: { device_id?: string; codespace_id?: string } = {};
       if (node.attachment || node.attachProgressImage) {
         try {
-          originalRequestId = await notificationDeliveryRequestId(repository, node.id, liveRun);
+          const originalRequestId = await notificationDeliveryRequestId(
+            repository,
+            node.id,
+            liveRun,
+          );
           const current = prepared.frame;
           let source: CommunicationOwnerSubmit["source"];
           if (node.attachment)
@@ -141,11 +144,8 @@ export class UserNotificationHandler implements INodeHandler {
                 : undefined,
             },
           );
+          operation = typeof raw.operation === "string" ? raw.operation : undefined;
           const receipt = communicationOwnerReceiptSchema.passthrough().parse(raw);
-          originalOwner = {
-            ...(typeof raw.device_id === "string" ? { device_id: raw.device_id } : {}),
-            ...(typeof raw.codespace_id === "string" ? { codespace_id: raw.codespace_id } : {}),
-          };
           if (receipt.outcome?.ok) {
             const delivery = receipt.outcome.result;
             return NodeResultBuilder.continue(node.id, "default", {
@@ -154,8 +154,7 @@ export class UserNotificationHandler implements INodeHandler {
               deliveredChannels:
                 delivery.channels?.filter((stage) => stage.status === "delivered").length ?? 0,
               channels: delivery.channels ?? [],
-              communicationRequestId: originalRequestId,
-              ...originalOwner,
+              ...(operation ? { operation } : {}),
               attachmentStatus:
                 delivery.status === "no_configured_channels" ? "not_delivered" : "delivered",
               notificationTimestamp: Date.now(),
@@ -185,8 +184,7 @@ export class UserNotificationHandler implements INodeHandler {
             data: {
               ...failure.data,
               attachmentStatus,
-              communicationRequestId: originalRequestId,
-              ...originalOwner,
+              ...(operation ? { operation } : {}),
             },
           };
         }
@@ -211,13 +209,21 @@ export class UserNotificationHandler implements INodeHandler {
           "configuration_error",
         );
       } else if (result.status === "all_failed") {
-        return this.failure(
+        const failure = this.failure(
           node,
           messageQueue,
           "delivery_failed",
           timer.elapsed(),
           result.channels,
         );
+        return {
+          ...failure,
+          data: {
+            ...failure.data,
+            ...(attachmentStatus ? { attachmentStatus } : {}),
+            ...(operation ? { operation } : {}),
+          },
+        };
       }
       return NodeResultBuilder.continue(node.id, "default", {
         userNotificationStatus: result.status,
@@ -225,13 +231,19 @@ export class UserNotificationHandler implements INodeHandler {
         deliveredChannels: result.deliveredChannels,
         channels: result.channels,
         notificationTimestamp: Date.now(),
-        ...(attachmentStatus
-          ? { attachmentStatus, communicationRequestId: originalRequestId, ...originalOwner }
-          : {}),
+        ...(attachmentStatus ? { attachmentStatus, ...(operation ? { operation } : {}) } : {}),
         executionTime: timer.elapsed(),
       });
     } catch {
-      return this.failure(node, messageQueue, "delivery_failed", timer.elapsed());
+      const failure = this.failure(node, messageQueue, "delivery_failed", timer.elapsed());
+      return {
+        ...failure,
+        data: {
+          ...failure.data,
+          ...(attachmentStatus ? { attachmentStatus } : {}),
+          ...(operation ? { operation } : {}),
+        },
+      };
     }
   }
 

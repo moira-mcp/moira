@@ -328,6 +328,7 @@ export function createWorkspaceEngine({ stateRoot, binding, searchExecutable }) 
           mode: current.stat.mode & 0o777,
           modifiedAt: Math.trunc(current.stat.mtimeMs),
           version: version(null, { ...current.stat, sha256: current.sha256 }),
+          identity: current.stat.identity,
         },
       };
     }
@@ -737,6 +738,7 @@ const sink={stdout:createWriteStream(input.stdoutPath,{mode:0o600,autoClose:fals
 let storageFailed=false;let groupStopRequested=false;
 for(const stream of ["stdout","stderr"])sink[stream].on("error",()=>{storageFailed=true;groupStopRequested=true;if(child?.connected)child.send('stop',()=>{})});
 let timedOut=false;
+let inputSource=null;let inputSettled=Promise.resolve();
 let runnerStartTime=null;if(process.platform==="linux"){runnerStartTime=await startTimeOf('/proc/self/stat');if(runnerStartTime===null)throw new Error("invalid runner start time")}
 await durable(input.runnerPidPath,{pid:process.pid,startTime:runnerStartTime});
 const childEnv={...process.env};
@@ -766,7 +768,7 @@ const closed=new Promise((resolveClose)=>child.once("close",()=>resolveClose(exi
 const startedAt=await started;
 if(startedAt!==null){await durable(input.executionPath,{...input.execution,launchAttempted:true,startedAt,runtimeMs:input.timeoutMs})}
 if(startedAt!==null&&input.session){await durable(input.session.path,{environment:input.session.identity,cwd:input.session.cwd,env:input.session.context})}
-try{if(input.inputDescriptor){const source=createReadStream(null,{fd:6,autoClose:true});source.on("error",()=>{groupStopRequested=true;if(child.connected)child.send('stop',()=>{})});source.pipe(child.stdin)}else child.stdin.end(Buffer.from(input.stdin,"base64"))}catch{}
+try{if(input.inputDescriptor){const source=createReadStream(process.platform==='linux'?'/proc/self/fd/6':'/dev/fd/6',{autoClose:true});inputSource=source;inputSettled=new Promise(resolve=>source.once('close',resolve));source.on("error",()=>{groupStopRequested=true;if(child.connected)child.send('stop',()=>{})});source.pipe(child.stdin)}else child.stdin.end(Buffer.from(input.stdin,"base64"))}catch{}
 // A start time is unreadable only once the child is gone; the published result is then the
 // authority, and an unverifiable identity is never reported as a live process.
 const startTime=process.platform==="linux"?await startTimeOf('/proc/'+child.pid+'/stat'):null;
@@ -775,6 +777,8 @@ if(startedAt!==null)await durable(input.pidPath,{pid:child.pid,startTime});
 // it is not inherited by the actual command or descendants.
 if(input.admissionLock){require('node:fs').writeSync(5,'release\n');require('node:fs').closeSync(5)}
 const code=await closed;let cancelled=false;try{await access(input.cancelPath);cancelled=true}catch{}
+// No input retirement can race an inherited source descriptor or a blocked pipe.
+inputSource?.destroy();await inputSettled;
 // The retained streams must be complete on disk before the result announces their size.
 await Promise.all(["stdout","stderr"].map(async(stream)=>{await new Promise(done=>{if(sink[stream].destroyed)done();else sink[stream].end(done)});const fd=sink[stream].fd;if(!Number.isInteger(fd)){storageFailed=true;return}try{await new Promise((done,reject)=>fsync(fd,error=>error?reject(error):done()))}catch{storageFailed=true}finally{await new Promise(done=>close(fd,error=>{if(error)storageFailed=true;done()}))}}));
 // A vanished launch owner is not command completion. Cancellation additionally
@@ -812,7 +816,9 @@ await durable(input.session.path,JSON.parse(encoded));
 }
 else if(input.session&&input.script)captureDropped=true;
 if(input.session&&input.sessionEnd)await rm(input.session.path,{force:true}).catch(()=>{});
-await durable(input.resultPath,{state,stdout:"",stderr:"",exitCode:!spawnRejected&&Number.isInteger(code)?code:null,...(exitSignal?{exitSignal}:{}),...(storageFailed?{reason:"OUTPUT_STORAGE_FAILED"}:spawnRejected?{reason:"COMMAND_START_REJECTED"}:state==='outcome_unknown'?{reason:"COMMAND_OUTCOME_UNKNOWN"}:{}),stdoutBytes:total.stdout,stderrBytes:total.stderr,sessionCaptureDropped:captureDropped,...(input.requestDigest===undefined?{}:{requestDigest:input.requestDigest,...(startedAt===null?{}:{startedAt,runtimeMs:input.timeoutMs})})});
+await durable(input.resultPath,{state,stdout:"",stderr:"",exitCode:!spawnRejected&&Number.isInteger(code)?code:null,...(exitSignal?{exitSignal}:{}),...(storageFailed?{reason:"OUTPUT_STORAGE_FAILED"}:spawnRejected?{reason:"COMMAND_START_REJECTED"}:state==='outcome_unknown'?{reason:"COMMAND_OUTCOME_UNKNOWN"}:{}),stdoutBytes:total.stdout,stderrBytes:total.stderr,sessionCaptureDropped:captureDropped,inputSettled:true,...(input.requestDigest===undefined?{}:{requestDigest:input.requestDigest,...(startedAt===null?{}:{startedAt,runtimeMs:input.timeoutMs})})});
+if(input.retirement){try{const {retireRequestInput}=await import(require('node:url').pathToFileURL(input.retirement.module).href);await retireRequestInput({directory:input.retirement.directory,resultDirectory:require('node:path').dirname(input.resultPath),sourceSettled:true})}catch{/* Retained membership makes cleanup retryable without changing the original result. */}}
+if(input.inputDescriptor)await new Promise(resolve=>close(6,()=>resolve()));
 if(input.sessionLock){require('node:fs').writeSync(3,'release\n');require('node:fs').closeSync(3)}
 })().catch(async()=>{process.exitCode=1});`;
 
@@ -869,6 +875,7 @@ if(input.sessionLock){require('node:fs').writeSync(3,'release\n');require('node:
       stdoutBytes: 0,
       stderrBytes: 0,
       sessionCaptureDropped: false,
+      inputSettled: true,
       ...(metadata.requestDigest === undefined ? {} : { requestDigest: metadata.requestDigest }),
     });
     return readResult(directory);
@@ -931,7 +938,7 @@ if(input.sessionLock){require('node:fs').writeSync(3,'release\n');require('node:
     }
   }
 
-  async function execute(request, binding, inputDescriptor) {
+  async function execute(request, binding, inputDescriptor, retirement) {
     const directory = validateBase(request);
     validateExecution(request);
     const requestHash = createHash("sha256").update(JSON.stringify(request)).digest("hex");
@@ -995,6 +1002,7 @@ if(input.sessionLock){require('node:fs').writeSync(3,'release\n');require('node:
           stdoutBytes: 0,
           stderrBytes: 0,
           sessionCaptureDropped: false,
+          inputSettled: true,
           requestDigest: request.requestDigest,
           startedAt,
           runtimeMs: request.timeoutMs,
@@ -1056,6 +1064,7 @@ if(input.sessionLock){require('node:fs').writeSync(3,'release\n');require('node:
           env: session.context ?? session.env,
           stdin: request.stdin,
           inputDescriptor: inputDescriptor !== undefined,
+          retirement,
           timeoutMs: request.timeoutMs,
           requestDigest: request.requestDigest,
           execution,
@@ -1318,7 +1327,8 @@ if(input.sessionLock){require('node:fs').writeSync(3,'release\n');require('node:
       validateExecution(request);
       validateSessionEnvironment(request.env);
     },
-    execute: (request, inputDescriptor) => execute(request, binding, inputDescriptor),
+    execute: (request, inputDescriptor, retirement) =>
+      execute(request, binding, inputDescriptor, retirement),
     inspect,
     cancel,
     environmentIdentity,

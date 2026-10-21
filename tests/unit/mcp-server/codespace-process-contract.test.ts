@@ -1,38 +1,26 @@
 import { afterEach, describe, expect, it } from "@jest/globals";
-import { createHash } from "node:crypto";
-import { createWorkspaceRequestId } from "@mcp-moira/shared/workspace-request-id";
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import {
-  TOOL_DEFINITIONS,
-  getToolJsonSchema,
-} from "../../../packages/mcp-server/src/tools/tool-definitions.js";
-import {
-  codespaceSchema,
-  codespaceProcessSchema,
-  CODESPACE_PROCESS_ACTION_REQUEST_SCHEMAS,
-  CODESPACE_ACTION_REQUEST_SCHEMAS,
-} from "../../../packages/mcp-server/src/tools/tool-schemas.js";
-import {
-  codespaceProcessLogContext,
-  executeCodespaceProcess,
-} from "../../../packages/mcp-server/src/tools/codespace-process.js";
-import {
-  parseCodespaceToolParams,
-  type CodespaceToolServices,
-} from "../../../packages/mcp-server/src/tools/manage-codespaces.js";
-import {
-  executeWorkspaceAction,
-  workspaceFailure,
-} from "../../../packages/mcp-server/src/tools/codespace-workspace.js";
+  encodeReference,
+  decodeReference,
+  type OwnerSelector,
+} from "@mcp-moira/shared/workspace-references";
 import { createWorkspaceClient } from "../../../packages/web-backend/src/services/workspace-client.js";
-
+import {
+  createWorkspaceToolHandler,
+  workspacePurposeLogContext,
+  type WorkspaceSemanticServices,
+} from "../../../packages/mcp-server/src/tools/workspace-tools.js";
+import { semanticFailure } from "../../../packages/mcp-server/src/tools/workspace-presentation.js";
+import type { CommunicationPurposeDependencies } from "../../../packages/mcp-server/src/tools/workspace-communication.js";
 type Fixture = {
   root: string;
-  socketPath: string;
   directory: string;
   stateRoot: string;
+  socketPath: string;
+  ownerSelector?: OwnerSelector;
   environment?: Record<string, string>;
 };
 const fixture = createRequire(import.meta.url)("../../fixtures/workspace-service.cjs") as {
@@ -44,459 +32,280 @@ const resources: Fixture[] = [];
 afterEach(async () => {
   for (const value of resources.splice(0)) await fixture.dispose(value);
 });
-async function service() {
+const resourceId = "00000000-0000-4000-8000-000000000001";
+const owner = { kind: "github" as const, resourceId };
+const workspaceRef = encodeReference("workspace", {
+  resourceId,
+  provider: "github-codespaces",
+  generation: 1,
+});
+async function service(prepare?: (value: Fixture) => void) {
   const value = fixture.createFixture();
   resources.push(value);
+  value.ownerSelector = owner;
+  prepare?.(value);
   await fixture.start(value);
   const workspace = createWorkspaceClient(value.socketPath);
-  return { ...value, workspace, services: { workspace } as CodespaceToolServices };
+  const resolved = { workspace, resourceId, owner };
+  const services: WorkspaceSemanticServices = {
+    invoke: async () => {
+      throw new Error("Unexpected cloud call");
+    },
+    resolveWorkspace: async () => resolved,
+    resolveOwner: async () => resolved,
+    resolveWorkspaceResource: async () => resolved,
+  };
+  const execute = createWorkspaceToolHandler(services, {} as CommunicationPurposeDependencies);
+  return {
+    ...value,
+    execute: (name: Parameters<typeof execute>[0], input: unknown) =>
+      execute(name, input, "owned-user"),
+  };
 }
-const codespaceId = "00000000-0000-4000-8000-000000000001";
-
-describe("workspace-backed codespace and process tools", () => {
-  it("reports an accepted file effect with failed receipt publication as uncertain through owner and MCP", async () => {
-    const value = fixture.createFixture();
-    resources.push(value);
-    const requestId = createWorkspaceRequestId();
-    const directory = join(value.stateRoot, "requests", requestId);
-    const armed = join(value.directory, "result-fault-armed");
-    const observed = join(value.directory, "result-fault-observed");
-    const fault = join(value.directory, "result-fault.cjs");
-    writeFileSync(
-      fault,
-      `const fs=require('node:fs');const path=require('node:path');const promises=require('node:fs/promises');const original=promises.rename;promises.rename=async(from,to)=>{if(path.basename(String(to))==='result.json'&&fs.existsSync(${JSON.stringify(armed)})&&fs.realpathSync(path.dirname(String(to)))===${JSON.stringify(directory)}){fs.writeFileSync(${JSON.stringify(observed)},'result-publication');throw Object.assign(new Error('injected result storage failure'),{code:'EIO'})}return original(from,to)};require('node:module').syncBuiltinESMExports();`,
-    );
-    value.environment = { NODE_OPTIONS: `--require=${fault}` };
-    writeFileSync(join(value.root, "target"), "original");
-    await fixture.start(value);
-    writeFileSync(armed, "armed");
-    const workspace = createWorkspaceClient(value.socketPath);
-    const result = await executeWorkspaceAction(
-      parseCodespaceToolParams({
-        action: "apply_patch",
-        codespace_id: codespaceId,
-        request_id: requestId,
-        files: [
-          {
-            path: "target",
-            expected: { exists: true },
-            edits: [{ start: 0, end: 8, text: "changed" }],
-          },
-        ],
-      }),
-      "owned-user",
-      workspace,
-    );
-    expect(readFileSync(observed, "utf8")).toBe("result-publication");
-    expect(readFileSync(join(value.root, "target"), "utf8")).toBe("changed");
-    expect(existsSync(join(directory, "accepted.json"))).toBe(true);
-    expect(existsSync(join(directory, "result.json"))).toBe(false);
+describe("semantic MCP tools with the actual workspace owner", () => {
+  it("resumes only the supplied original repository operation without a fresh ID or guest dispatch", async () => {
+    const reference = encodeReference("operation", {
+      owner: { kind: "controller", deviceId: resourceId, connectionId: resourceId },
+      requestId: "ws1-00000000-0000-4000-8000-000000000002",
+      kind: "repository",
+      journal: "repository-create",
+    });
+    const calls: unknown[][] = [];
+    const unexpected = async (): Promise<never> => {
+      throw new Error("Guest resolution must not run");
+    };
+    const services: WorkspaceSemanticServices = {
+      resolveWorkspace: unexpected,
+      resolveWorkspaceResource: unexpected,
+      resolveOwner: unexpected,
+      invoke: async (...args) => {
+        calls.push(args);
+        throw new Error("Lost original continuation reply");
+      },
+    };
+    const execute = createWorkspaceToolHandler(services, {} as CommunicationPurposeDependencies);
+    await expect(
+      execute("operation_resume", { reference, request_id: "manual" }, "owned-user"),
+    ).rejects.toThrow();
+    expect(calls).toEqual([]);
+    const result = await execute("operation_resume", { reference }, "owned-user");
+    expect(calls).toEqual([["owned-user", "operation_resume", { reference }]]);
     expect(result).toMatchObject({
       isError: true,
-      structuredContent: {
-        request_id: requestId,
-        error: { code: "WORKSPACE_OUTCOME_UNCONFIRMED" },
-      },
+      structuredContent: { operation: reference, error: { code: "WORKSPACE_OUTCOME_UNCONFIRMED" } },
     });
-    const message = String((result.structuredContent?.error as { message?: string })?.message);
-    expect(message).toContain("Collect the original request ID");
-    expect(message).not.toMatch(/refused|reply was lost/i);
-    unlinkSync(armed);
-    const collected = await executeWorkspaceAction(
-      parseCodespaceToolParams({
-        action: "exec",
-        codespace_id: codespaceId,
-        request_id: requestId,
-      }),
-      "owned-user",
-      workspace,
+  });
+  it("collects a real failed command and complete output continuation without runner proofs", async () => {
+    const value = await service();
+    const result = await value.execute("command_run", {
+      workspace: workspaceRef,
+      command: { argv: ["bash", "-c", "printf abcdef; printf warning >&2; exit 23"] },
+      max_stdout_bytes: 3,
+    });
+    expect(result.structuredContent).toMatchObject({
+      state: "completed",
+      outcome: { ok: false, result: { exitCode: 23 } },
+      stdout: "abc",
+      stderr: "warning",
+      operation: expect.any(String),
+      process: expect.any(String),
+      stdout_cursor: expect.any(String),
+    });
+    expect(result.structuredContent).not.toHaveProperty("requestDigest");
+    expect(result.structuredContent).not.toHaveProperty("request_id");
+    const output = await value.execute("process_output", {
+      process: result.structuredContent!.process,
+      stream: "stdout",
+      cursor: result.structuredContent!.stdout_cursor,
+      max_bytes: 3,
+    });
+    expect(output.structuredContent).toMatchObject({ text: "def", total_bytes: 6 });
+  });
+  it("collects one original detached effect and gives two deliberate calls distinct intents", async () => {
+    const value = await service();
+    const input = {
+      workspace: workspaceRef,
+      command: { argv: ["bash", "-c", "printf x >> once; printf done"] },
+      background: true,
+    };
+    const started = await value.execute("command_run", input);
+    const reference = String(started.structuredContent!.operation);
+    const collected = await value.execute("operation_get", { reference });
+    expect(collected.structuredContent).toHaveProperty("operation", reference);
+    const selected = decodeReference(reference, "operation");
+    const workspace = createWorkspaceClient(value.socketPath);
+    await workspace.json("owned-user", resourceId, {
+      method: "GET",
+      path: `/v1/operations/${selected.requestId}?waitMs=10000`,
+    });
+    expect((await value.execute("operation_get", { reference })).structuredContent).toMatchObject({
+      state: "completed",
+      outcome: { ok: true },
+    });
+    await value.execute("operation_get", { reference });
+    expect(readFileSync(join(value.root, "once"), "utf8")).toBe("x");
+    const second = await value.execute("command_run", { ...input, background: false });
+    expect(second.structuredContent!.operation).not.toBe(reference);
+    expect(readFileSync(join(value.root, "once"), "utf8")).toBe("xx");
+  });
+  it("guards text replacement and patching against the observed original while preserving binary-read refusal", async () => {
+    const value = await service();
+    expect(
+      (
+        await value.execute("file_create", {
+          workspace: workspaceRef,
+          path: "code.txt",
+          text: "hello",
+        })
+      ).structuredContent,
+    ).toMatchObject({ state: "completed", outcome: { ok: true } });
+    const stat = await value.execute("file_stat", { workspace: workspaceRef, path: "code.txt" });
+    const file = (stat.structuredContent!.stat as { file: string }).file;
+    expect(
+      (
+        await value.execute("file_replace", {
+          workspace: workspaceRef,
+          path: "code.txt",
+          text: "world",
+          expected: { file },
+        })
+      ).structuredContent,
+    ).toMatchObject({ state: "completed", outcome: { ok: true } });
+    const stale = await value.execute("file_replace", {
+      workspace: workspaceRef,
+      path: "code.txt",
+      text: "wrong",
+      expected: { file },
+    });
+    expect(stale.isError).toBe(true);
+    expect(readFileSync(join(value.root, "code.txt"), "utf8")).toBe("world");
+    const patch = await value.execute("file_patch", {
+      workspace: workspaceRef,
+      files: [
+        {
+          path: "code.txt",
+          expected: { text: "world" },
+          replacements: [{ old_text: "world", new_text: "hello" }],
+        },
+      ],
+    });
+    expect(patch.structuredContent).toMatchObject({ state: "completed", outcome: { ok: true } });
+    expect(
+      (await value.execute("file_read", { workspace: workspaceRef, path: "code.txt" }))
+        .structuredContent,
+    ).toMatchObject({ text: "hello", file: expect.any(String) });
+    writeFileSync(join(value.root, "binary"), Buffer.from([255]));
+    expect(
+      (await value.execute("file_read", { workspace: workspaceRef, path: "binary" })).isError,
+    ).toBe(true);
+  });
+  it("keeps an accepted file effect without its terminal receipt uncertain, then collects rather than applying it again", async () => {
+    let armed = "",
+      observed = "";
+    const value = await service((value) => {
+      armed = join(value.directory, "armed");
+      observed = join(value.directory, "observed");
+      const fault = join(value.directory, "fault.cjs");
+      writeFileSync(
+        fault,
+        `const fs=require('node:fs');const path=require('node:path');const promises=require('node:fs/promises');const original=promises.rename;promises.rename=async(from,to)=>{if(path.basename(String(to))==='result.json'&&fs.existsSync(${JSON.stringify(armed)})){fs.writeFileSync(${JSON.stringify(observed)},'result-publication');throw Object.assign(new Error('injected result storage failure'),{code:'EIO'})}return original(from,to)};require('node:module').syncBuiltinESMExports();`,
+      );
+      value.environment = { NODE_OPTIONS: `--require=${fault}` };
+      writeFileSync(join(value.root, "target"), "original");
+    });
+    writeFileSync(armed, "armed");
+    const result = await value.execute("file_patch", {
+      workspace: workspaceRef,
+      files: [
+        {
+          path: "target",
+          expected: { text: "original" },
+          replacements: [{ old_text: "original", new_text: "changed" }],
+        },
+      ],
+    });
+    expect(readFileSync(observed, "utf8")).toBe("result-publication");
+    expect(readFileSync(join(value.root, "target"), "utf8")).toBe("changed");
+    const operation = String(result.structuredContent!.operation);
+    const original = decodeReference(operation, "operation");
+    expect(existsSync(join(value.stateRoot, "requests", original.requestId, "accepted.json"))).toBe(
+      true,
     );
-    expect(collected.structuredContent).toMatchObject({ request_id: requestId, state: "unknown" });
+    expect(existsSync(join(value.stateRoot, "requests", original.requestId, "result.json"))).toBe(
+      false,
+    );
+    expect(result.isError).toBe(true);
+    unlinkSync(armed);
+    const collected = await value.execute("operation_get", { reference: operation });
+    expect(collected.structuredContent).toMatchObject({ state: "unconfirmed", operation });
     expect(readFileSync(join(value.root, "target"), "utf8")).toBe("changed");
   });
-
-  it("keeps cloud transport uncertainty distinct from a confirmed refusal and reconnectable reads", () => {
-    const requestId = createWorkspaceRequestId();
-    const transport = { details: { error: { code: "WORKSPACE_OUTCOME_UNKNOWN" } } };
-    const uncertain = workspaceFailure(transport, requestId);
-    expect(uncertain).toMatchObject({
-      isError: true,
-      structuredContent: {
-        request_id: requestId,
-        error: { code: "WORKSPACE_OUTCOME_UNCONFIRMED" },
-      },
+  it("retains a definite non-start and supports an explicitly opened named session", async () => {
+    const value = await service();
+    const refused = await value.execute("command_run", {
+      workspace: workspaceRef,
+      command: { argv: ["true"] },
+      cwd: "../outside",
     });
-    expect(JSON.stringify(uncertain)).not.toMatch(/refused|reply was lost/i);
-    expect(workspaceFailure(transport)).toMatchObject({
-      structuredContent: { error: { code: "WORKSPACE_UNAVAILABLE" } },
+    expect(refused.structuredContent).toMatchObject({
+      state: "completed",
+      outcome: { ok: false, result: { reason: "COMMAND_START_REJECTED" } },
+      operation: expect.any(String),
     });
-    expect(
-      workspaceFailure(
-        { details: { error: { code: "FILE_REJECTED", reason: "precondition" } } },
-        requestId,
-      ),
-    ).toMatchObject({
-      structuredContent: {
-        request_id: requestId,
-        error: { code: "FILE_REJECTED", reason: "precondition" },
-      },
+    const result = await value.execute("command_run", {
+      workspace: workspaceRef,
+      command: { script: "printf session-ready" },
+      session: { name: "s".repeat(65), mode: "open" },
+    });
+    expect(result.structuredContent).toMatchObject({
+      state: "completed",
+      outcome: { ok: true },
+      stdout: "session-ready",
     });
   });
-  it("forwards a distinctive owner result unchanged without cloud formatting or file acquisition", async () => {
-    const ownerResult = {
+  it("returns a distinctive owner-native object by identity without cloud rendering or file acquisition", async () => {
+    const native = {
       content: [
         { type: "text", text: "owner-text-not-json" },
         { type: "resource_link", uri: "https://owner.example/exact", name: "owned" },
       ],
-      structuredContent: { ownerOnly: "opaque", request_id: "distinctive" },
+      structuredContent: { ownerOnly: "opaque" },
       isError: true,
     };
-    const workspace = {
-      json: async () => ownerResult,
-      request: async () => {
-        throw new Error("Cloud bytes are forbidden");
+    const selected = { workspace: { json: async () => native }, resourceId, owner };
+    const services: WorkspaceSemanticServices = {
+      resolveWorkspace: async () => selected,
+      resolveWorkspaceResource: async () => selected,
+      resolveOwner: async () => selected,
+      invoke: async () => {
+        throw new Error("unexpected");
       },
     };
-    const result = await executeWorkspaceAction(
-      parseCodespaceToolParams({ action: "stat", codespace_id: codespaceId, path: "file" }),
-      "owned-user",
-      workspace,
-    );
-    expect(result).toBe(ownerResult);
-    expect(result.content[0]).toEqual({ type: "text", text: "owner-text-not-json" });
-  });
-  it("collects a real failed command and output windows without exposing runner proofs", async () => {
-    const value = await service();
-    const requestId = createWorkspaceRequestId();
-    const result = await executeWorkspaceAction(
-      parseCodespaceToolParams({
-        action: "exec",
-        codespace_id: codespaceId,
-        request_id: requestId,
-        argv: ["bash", "-c", "printf abcdef; printf warning >&2; exit 23"],
-        max_stdout_bytes: 3,
-      }),
-      "owned-user",
-      value.workspace,
-    );
-    expect(result).toMatchObject({
-      isError: true,
-      structuredContent: {
-        state: "failed",
-        exitCode: 23,
-        stdout: "abc",
-        stderr: "warning",
-        stdout_truncated: true,
-        stdout_total_bytes: 6,
-        request_id: requestId,
-      },
-    });
-    expect(result.structuredContent).not.toHaveProperty("requestDigest");
-    const output = await executeCodespaceProcess(
-      {
-        action: "read",
-        request: {
-          codespace_id: codespaceId,
-          process_id: requestId,
-          stream: "stdout",
-          offset: 3,
-          length: 3,
-        },
-      },
-      "owned-user",
-      value.services,
-    );
-    expect(output.structuredContent).toMatchObject({ text: "def", offset: 3, total_bytes: 6 });
-  });
-
-  it("uses the same detached identity for collection and replay, with one physical side effect", async () => {
-    const value = await service();
-    const requestId = createWorkspaceRequestId();
-    const request = {
-      codespace_id: codespaceId,
-      request_id: requestId,
-      argv: ["bash", "-c", "printf x >> once; printf done"],
-      session_start: false,
-      session_end: false,
-    };
-    const started = await executeCodespaceProcess(
-      { action: "start", request },
-      "owned-user",
-      value.services,
-    );
-    expect(started.structuredContent).toMatchObject({
-      process_id: requestId,
-      request_id: requestId,
-    });
     expect(
-      (
-        await executeWorkspaceAction(
-          parseCodespaceToolParams({
-            action: "exec",
-            codespace_id: codespaceId,
-            request_id: requestId,
-          }),
-          "owned-user",
-          value.workspace,
-        )
-      ).structuredContent,
-    ).toMatchObject({ state: "succeeded", stdout: "done" });
-    await executeCodespaceProcess({ action: "start", request }, "owned-user", value.services);
-    expect(readFileSync(join(value.root, "once"), "utf8")).toBe("x");
-    const status = await executeCodespaceProcess(
-      { action: "get", request: { codespace_id: codespaceId, process_id: requestId } },
-      "owned-user",
-      value.services,
-    );
-    expect(status.structuredContent).toMatchObject({
-      state: "succeeded",
-      exitCode: 0,
-      process_id: requestId,
-    });
-    expect(status.structuredContent).not.toHaveProperty("requestDigest");
-  });
-
-  it("writes, patches and reads real files while preserving stale-precondition and binary-read causes", async () => {
-    const value = await service();
-    const requestId = createWorkspaceRequestId();
-    const write = {
-      action: "write",
-      codespace_id: codespaceId,
-      request_id: requestId,
-      path: "code.txt",
-      expected: { exists: false },
-      text: "hello",
-    };
-    expect(
-      (await executeWorkspaceAction(parseCodespaceToolParams(write), "owned-user", value.workspace))
-        .structuredContent,
-    ).toMatchObject({ state: "succeeded" });
-    await executeWorkspaceAction(parseCodespaceToolParams(write), "owned-user", value.workspace);
-    const stale = await executeWorkspaceAction(
-      parseCodespaceToolParams({ ...write, request_id: createWorkspaceRequestId(), text: "wrong" }),
-      "owned-user",
-      value.workspace,
-    );
-    expect(stale).toMatchObject({
-      isError: true,
-      structuredContent: { error: { code: "FILE_REJECTED", reason: "precondition" } },
-    });
-    expect(readFileSync(join(value.root, "code.txt"), "utf8")).toBe("hello");
-    const patch = await executeWorkspaceAction(
-      parseCodespaceToolParams({
-        action: "apply_patch",
-        codespace_id: codespaceId,
-        request_id: createWorkspaceRequestId(),
-        files: [
-          {
-            path: "code.txt",
-            expected: {
-              exists: true,
-              size_bytes: 5,
-              sha256: createHash("sha256").update("hello").digest("hex"),
-            },
-            edits: [{ start: 0, end: 5, text: "world" }],
-          },
-        ],
-      }),
-      "owned-user",
-      value.workspace,
-    );
-    expect(patch.structuredContent).toMatchObject({ state: "succeeded" });
-    const read = await executeWorkspaceAction(
-      parseCodespaceToolParams({
-        action: "read",
-        codespace_id: codespaceId,
-        path: "code.txt",
-        offset: 0,
-        length: 5,
-      }),
-      "owned-user",
-      value.workspace,
-    );
-    expect(read.structuredContent).toMatchObject({ text: "world", total_bytes: 5 });
-    writeFileSync(join(value.root, "binary"), Buffer.from([255]));
-    expect(
-      await executeWorkspaceAction(
-        parseCodespaceToolParams({
-          action: "read",
-          codespace_id: codespaceId,
-          path: "binary",
-          offset: 0,
-          length: 1,
-        }),
+      await createWorkspaceToolHandler(services, {} as CommunicationPurposeDependencies)(
+        "file_stat",
+        { workspace: workspaceRef, path: "file" },
         "owned-user",
-        value.workspace,
       ),
-    ).toMatchObject({
+    ).toBe(native);
+  });
+  it("distinguishes a confirmed refusal from wire uncertainty while retaining the original operation", () => {
+    const operation = encodeReference("operation", {
+      owner,
+      requestId: "ws1-00000000-0000-4000-8000-000000000002",
+      kind: "command",
+    });
+    expect(semanticFailure(new Error("private transport details"), operation)).toMatchObject({
       isError: true,
-      structuredContent: { error: { code: "CODESPACE_BINARY_READ_REQUIRES_DOWNLOAD" } },
+      structuredContent: { operation, error: { code: "WORKSPACE_OUTCOME_UNCONFIRMED" } },
     });
-  });
-
-  it("reports a definite non-start without inventing lost execution", async () => {
-    const value = await service();
-    const requestId = createWorkspaceRequestId();
-    const result = await executeWorkspaceAction(
-      parseCodespaceToolParams({
-        action: "exec",
-        codespace_id: codespaceId,
-        request_id: requestId,
-        argv: ["true"],
-        cwd: "../outside",
-      }),
-      "owned-user",
-      value.workspace,
-    );
-    expect(result).toMatchObject({
-      isError: true,
-      structuredContent: {
-        state: "not_started",
-        reason: "COMMAND_START_REJECTED",
-        request_id: requestId,
-      },
+    expect(
+      semanticFailure({ details: { error: { code: "FILE_REJECTED" } } }, operation),
+    ).toMatchObject({ structuredContent: { operation, error: { code: "FILE_REJECTED" } } });
+    expect(JSON.stringify(semanticFailure(new Error("secret"), operation))).not.toContain("secret");
+    expect(workspacePurposeLogContext("command_run")).toEqual({
+      inputData: { workspace_tool: "command_run" },
+      resourceIds: {},
     });
-  });
-
-  it("opens a real session with a name beyond the removed MCP-only ceiling", async () => {
-    const value = await service();
-    const result = await executeWorkspaceAction(
-      parseCodespaceToolParams({
-        action: "exec",
-        codespace_id: codespaceId,
-        request_id: createWorkspaceRequestId(),
-        session: "s".repeat(65),
-        session_start: true,
-        script: "printf session-ready",
-      }),
-      "owned-user",
-      value.workspace,
-    );
-    expect(result.structuredContent).toMatchObject({ state: "succeeded", stdout: "session-ready" });
-  });
-
-  it("publishes a separate discoverable process tool with native stdin", () => {
-    const definition = TOOL_DEFINITIONS.find(
-      (tool) => (tool.name as string) === "codespace_process",
-    );
-    expect(definition).toBeDefined();
-    const schema = getToolJsonSchema(definition!) as {
-      type: string;
-      required: string[];
-      properties: Record<string, { enum?: string[]; type?: string }>;
-    };
-    expect(schema.type).toBe("object");
-    expect(schema).not.toHaveProperty("anyOf");
-    expect(schema.required).toContain("codespace_id");
-    expect(schema.properties.action.enum).toEqual(["start", "get", "read", "stop"]);
-    expect(schema.properties.stdin_file.type).toBe("object");
-    expect(definition!._meta).toEqual({ "openai/fileParams": ["stdin_file"] });
-  });
-
-  it("refuses background and cancellation controls on ordinary exec", () => {
-    expect(
-      codespaceSchema.safeParse({
-        action: "exec",
-        codespace_id: codespaceId,
-        argv: ["true"],
-        background: true,
-      }).success,
-    ).toBe(false);
-    expect(
-      codespaceSchema.safeParse({
-        action: "exec",
-        codespace_id: codespaceId,
-        operation_id: codespaceId,
-        cancel: true,
-      }).success,
-    ).toBe(false);
-  });
-
-  it("publishes explicit deletion confirmation without an agent generation counter", () => {
-    expect(
-      codespaceSchema.safeParse({
-        action: "delete",
-        codespace_id: codespaceId,
-        confirm_delete: true,
-      }).success,
-    ).toBe(true);
-    expect(
-      codespaceSchema.safeParse({
-        action: "delete",
-        codespace_id: codespaceId,
-        confirm_delete: true,
-        expected_generation: 1,
-      }).success,
-    ).toBe(false);
-  });
-
-  it("requires addressed process identity and refuses command fields on inspection", () => {
-    const requestId = createWorkspaceRequestId();
-    expect(codespaceProcessSchema.safeParse({ action: "start", argv: ["true"] }).success).toBe(
-      false,
-    );
-    expect(
-      CODESPACE_PROCESS_ACTION_REQUEST_SCHEMAS.get.safeParse({
-        codespace_id: codespaceId,
-        process_id: requestId,
-        argv: ["secret"],
-      }).success,
-    ).toBe(false);
-    expect(
-      CODESPACE_PROCESS_ACTION_REQUEST_SCHEMAS.start.safeParse({
-        codespace_id: codespaceId,
-        request_id: requestId,
-        argv: ["cat"],
-        stdin_text: "secret",
-        stdin_file: { file_id: "f", download_url: "https://files.example/file" },
-      }).success,
-    ).toBe(false);
-  });
-
-  it("refuses archived UUIDs on command submission, collection and process control", () => {
-    for (const input of [
-      { action: "exec", argv: ["true"] },
-      { action: "exec" },
-      { action: "write", path: "file", text: "x", expected: { exists: false } },
-    ] as const) {
-      const { action, ...request } = input;
-      expect(
-        CODESPACE_ACTION_REQUEST_SCHEMAS[action].safeParse({
-          ...request,
-          codespace_id: codespaceId,
-          request_id: codespaceId,
-        }).success,
-      ).toBe(false);
-    }
-    for (const input of [
-      { action: "start", argv: ["true"], request_id: codespaceId },
-      { action: "get", request_id: codespaceId },
-      { action: "get", process_id: codespaceId },
-      { action: "read", process_id: codespaceId, stream: "stdout", offset: 0, length: 1 },
-      { action: "stop", process_id: codespaceId },
-    ]) {
-      expect(
-        codespaceProcessSchema.safeParse({ ...input, codespace_id: codespaceId }).success,
-      ).toBe(false);
-    }
-  });
-
-  it("logs only opaque addressed identity for background commands", () => {
-    const requestId = createWorkspaceRequestId();
-    const logged = codespaceProcessLogContext({
-      action: "start",
-      codespace_id: codespaceId,
-      process_id: requestId,
-      argv: ["secret"],
-      env: { TOKEN: "secret" },
-      stdin_text: "secret",
-      stdin_file: { download_url: "https://secret.example/file" },
-      script: "secret",
-    });
-    expect(logged).toEqual({
-      inputData: { codespace_action: "start" },
-      resourceIds: { codespaceId, requestId },
-    });
-    expect(JSON.stringify(logged)).not.toContain("secret");
   });
 });

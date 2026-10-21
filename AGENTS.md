@@ -308,9 +308,13 @@ interface IGraphStorage {
 ### MCP Tools (short names)
 
 `list`, `start`, `step`, `manage`, `session`, `settings`, `token`, `notes`,
-`artifacts`, `communication`, `lock`, `help`, plus `codespace`, the provider-neutral
-codespace tool parameterized by `action` (lifecycle, exec, files, native upload/download; see
-`docs/CODESPACES.md`).
+`artifacts`, `lock`, `help`, plus strict purpose-specific workspace, command, file, process,
+repository and communication tools (see `docs/CODESPACES.md` and the typed tool catalog).
+Copy returned references unchanged; do not manufacture protocol IDs, generations, digests or byte
+edits. Collect an original through `operation_get`, or discover candidates with `operation_find`
+and choose explicitly after a lost first reply. Two deliberate calls are distinct intents.
+`operation_resume` only continues the retained private-repository creation addressed by its
+original handle; it is not command replay or a request to create another repository.
 The HTTP transport is
 `StreamableHTTPServerTransport` (stateless). See `docs/SYSTEM.md` for the full
 tool signatures and request/response shapes, and `packages/mcp-server/src/server.ts`
@@ -324,17 +328,33 @@ Commands, sessions, guarded file mutations and durable results belong to that gu
 owner through live streaming routing. Cloud Moira owns authorization, revocation and minimal
 Local route bindings; the always-on Local controller owns physical lifecycle, settings and
 their original-operation journals. The selected paired controller owns GitHub lifecycle admission,
-fixed bootstrap and explicit adoption; cloud services retain current account/repository
-authority, routing identity, billing and unresolved retirement witnesses. Workspace calls
-require the already enrolled live owner and do not trigger cloud SSH or startup.
-Existing offline Local work retains its owner grants and finite lease; fresh creation
+saves machine and idle/retention choices before submission, and performs fixed bootstrap and explicit
+adoption; cloud services broker fixed provider calls and retain current account/repository
+authority, routing identity, billing and unresolved retirement witnesses. Remote workspace calls
+require the already enrolled live owner and do not trigger cloud SSH or startup. Direct Unix API
+readiness is independent of remote enrollment and connection. Explicit `resume_setup` continues
+the same proved incomplete Local or GitHub environment. GitHub continuation uses the original
+generation, measured root, guest life and release; it does not reinstall or start the provider.
+An enrolled guest renews authority after a cold start through its existing connection loop;
+a never-enrolled guest cannot mint replacement proof after its life changes. Unknown creation
+remains original collection, and custody `recover` remains separate. Preserve repository contents
+and original create outcomes.
+Existing offline Local work retains its current owner grants and enabled permission; fresh creation
 requires cloud route registration and initial credential authority. Controller management
 retains separate account/device and local approval guards. File bytes, immutable publications
 and original delivery receipts remain with their workspace or controller owner. Archived uncertain receipts are
 not dispatched or replayed.
 
-The companion runs on the user's machine and retains physical VM custody, local repository
-grants and finite work leases. The server cannot choose host commands or expand those grants.
+The persistent host service runs on the user's machine and retains native VM custody, local
+repository grants, persistent enabled permission and broker/tunnel ownership. The companion CLI is a client:
+`run` starts or connects and returns; its exit does not stop VMs. `install` stages a complete sealed
+release without replacing the active owner. `service-status` distinguishes running from staged
+selection. Physical-owner updates require explicit `maintenance --confirm`, positive old-owner
+settlement and same-VM recovery without command replay. Native observation release is not settlement.
+Cold/reboot recovery retains identities and intended state, subject to login/storage/credential
+availability; it never adopts by PID or replays pre-reboot commands. See the canonical
+[owner lifecycle and update procedures](docs/CODESPACES.md#owner-web-control-and-bundle-updates).
+The server cannot choose host commands or expand those grants.
 GitHub and Local resources retain their provider identity for subsequent lifecycle calls.
 
 Build the companion with `npm run local:build`; invoke it through `npm run local --`

@@ -6,11 +6,10 @@ import { PrivateState } from "../../../packages/local/src/private-state.js";
 
 export function localPolicy(root: string): LocalPolicy {
   return localPolicySchema.parse({
-    version: 1,
+    version: 2,
     deviceId: randomUUID(),
     label: "Local integration device",
     enabled: true,
-    leaseUntil: Date.now() + 60_000,
     runtime: {
       binary: "/usr/bin/sbx",
       template: `docker.io/test/shell@sha256:${"a".repeat(64)}`,

@@ -9,6 +9,7 @@ import {
   getCodespaceResourcePolicy,
   LocalDeviceService,
   LocalDeviceRepository,
+  LocalDeviceError,
   getAccountAccessDenial,
   WorkspaceAuthRepository,
   type WorkspaceAgentBinding,
@@ -226,10 +227,25 @@ export function getWorkspaceRouter(): WorkspaceRouter {
       let record;
       try {
         record = new WorkspaceAuthRepository(getSqliteInstance()).authenticate(value);
-      } catch {
-        const device = new LocalDeviceService(
-          new LocalDeviceRepository(getSqliteInstance()),
-        ).authenticateDevice(value);
+      } catch (error) {
+        if (
+          !(error instanceof CodespaceResourceError) ||
+          error.code !== "CODESPACE_AUTHORIZATION_REQUIRED"
+        )
+          throw error;
+        let device;
+        try {
+          device = new LocalDeviceService(
+            new LocalDeviceRepository(getSqliteInstance()),
+          ).authenticateDevice(value);
+        } catch (error) {
+          if (error instanceof LocalDeviceError && error.code === "LOCAL_UNAUTHORIZED")
+            throw new CodespaceResourceError(
+              "CODESPACE_AUTHORIZATION_REQUIRED",
+              "Controller credential refused",
+            );
+          throw error;
+        }
         const binding = currentControllerAuthority(device.userId, device.deviceId);
         if (
           binding.kind !== "controller" ||

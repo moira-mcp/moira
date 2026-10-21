@@ -6,6 +6,7 @@ import {
   type CodespaceObservedState,
   type CodespaceRetentionPolicy,
 } from "./resource-types.js";
+import type { WorkspaceSetupFailure, WorkspaceRemoteObservation } from "./local-protocol.js";
 
 /**
  * Sanitized codespace summary shared by the website and the MCP tools. It omits
@@ -39,6 +40,9 @@ export interface CodespaceSummaryView {
   /** Null until an exact provider observation succeeds; retries do not advance it. */
   observed_at: number | null;
   lifecycle_error: CodespaceResourceErrorCode | null;
+  /** Last verified guest transport observation; absence means not observed. */
+  remote?: WorkspaceRemoteObservation;
+  setup_failure?: WorkspaceSetupFailure;
   generation: number;
   created_at: number;
   updated_at: number;
@@ -64,6 +68,61 @@ export interface CodespaceUnavailableResourceView {
 export interface CodespaceResourceListView {
   codespaces: CodespaceSummaryView[];
   unavailable: CodespaceUnavailableResourceView[];
+  has_diagnostics?: boolean;
+}
+
+export type CodespaceDiscoveryView = "actionable" | "diagnostics" | "history";
+
+/** A presentation choice, never authority to mutate or erase a retained identity. */
+export function selectCodespaceDiscoveryView(
+  resources: CodespaceResourceListView,
+  view: CodespaceDiscoveryView = "actionable",
+): CodespaceResourceListView {
+  const actionable: CodespaceSummaryView[] = [];
+  const history: CodespaceSummaryView[] = [];
+  const diagnostics = [...resources.unavailable];
+  for (const resource of resources.codespaces) {
+    if (resource.state === "deleted") {
+      history.push(resource);
+      continue;
+    }
+    const authorityUnknown =
+      resource.lifecycle_error === "CODESPACE_AUTHORIZATION_REQUIRED" ||
+      resource.lifecycle_error === "CODESPACE_LOCAL_CREATION_UNKNOWN" ||
+      resource.lifecycle_error === "WORKSPACE_OUTCOME_UNCONFIRMED";
+    const knownSetup =
+      resource.lifecycle_error === "CODESPACE_LOCAL_SETUP_INCOMPLETE" || !!resource.setup_failure;
+    const unobservedPreparation =
+      ["create_pending", "create_submitted", "start_pending"].includes(resource.state) &&
+      resource.observed_at === null &&
+      resource.observed_state === "unknown";
+    if (
+      authorityUnknown ||
+      resource.state === "rejected" ||
+      (resource.state === "ambiguous" && !knownSetup) ||
+      (unobservedPreparation && !knownSetup)
+    ) {
+      diagnostics.push({
+        codespace_id: resource.codespace_id,
+        provider: resource.provider,
+        repository_id: resource.repository_id,
+        repository: resource.repository,
+        requested_ref: resource.requested_ref,
+        created_at: resource.created_at,
+        ...(resource.device_id ? { device_id: resource.device_id } : {}),
+        ...(resource.pending_request_ids
+          ? { pending_request_ids: resource.pending_request_ids }
+          : {}),
+        error: { code: resource.lifecycle_error ?? "CODESPACE_PROVIDER_UNAVAILABLE" },
+      });
+    } else actionable.push(resource);
+  }
+  return {
+    codespaces: view === "history" ? history : view === "actionable" ? actionable : [],
+    unavailable:
+      view === "diagnostics" ? diagnostics : view === "history" ? resources.unavailable : [],
+    has_diagnostics: diagnostics.length > 0,
+  };
 }
 
 export interface CodespaceProviderErrorView {

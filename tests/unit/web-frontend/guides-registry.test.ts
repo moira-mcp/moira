@@ -159,6 +159,7 @@ describe("the walkthroughs the guides replaced", () => {
       "security",
       "notifications",
       "github",
+      "environment-views",
       "local-devices",
       "apps",
       "tokens",

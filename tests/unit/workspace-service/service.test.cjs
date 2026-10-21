@@ -28,13 +28,17 @@ const {
 const cliUrl = pathToFileURL(resolve("packages/workspace-service/src/cli.mjs")).href;
 let createWorkspaceRequestId;
 let workspaceRequestUuid;
+let encodeReference, decodeReference;
 beforeAll(async () => {
   ({ createWorkspaceRequestId, workspaceRequestUuid } =
     await import("../../../packages/shared/src/codespaces/workspace-request-id.ts"));
+  ({ encodeReference, decodeReference } =
+    await import("../../../packages/shared/src/codespaces/workspace-references.mjs"));
 });
 const fixtures = [];
 function fixture() {
   const value = createFixture();
+  value.ownerSelector = { kind: "github", resourceId: randomUUID() };
   fixtures.push(value);
   return value;
 }
@@ -81,7 +85,10 @@ test("raw input and retained output exceed former envelopes without changing exa
   expect(result.stdoutBytes).toBe(bytes.length);
   const output = await call(value, "GET", `/v1/operations/${requestId}/output`);
   expect(output.bytes.equals(bytes)).toBe(true);
-  expect(existsSync(join(value.stateRoot, "requests", requestId, "input"))).toBe(true);
+  expect(existsSync(join(value.stateRoot, "requests", requestId, "input"))).toBe(false);
+  expect(
+    JSON.parse(readFileSync(join(value.stateRoot, "requests", requestId, "input.json"), "utf8")),
+  ).toEqual(input);
 });
 
 test("the direct owner and tool view share original effects and retained results without an HTTP server", async () => {
@@ -94,20 +101,22 @@ test("the direct owner and tool view share original effects and retained results
     stateRoot: value.stateRoot,
     binding: value.binding,
     searchExecutable: value.searchExecutable,
+    ownerSelector: value.ownerSelector,
   };
   let owner = await createWorkspaceOwner(options);
   const requestId = createWorkspaceRequestId();
   const request = {
-    request_id: requestId,
     stdin_text: "retained input",
-    argv: [
-      process.execPath,
-      "-e",
-      "const f=require('node:fs');f.appendFileSync('direct-effects','once\\n');process.stdin.pipe(process.stdout)",
-    ],
+    command: {
+      argv: [
+        process.execPath,
+        "-e",
+        "const f=require('node:fs');f.appendFileSync('direct-effects','once\\n');process.stdin.pipe(process.stdout)",
+      ],
+    },
   };
   try {
-    const admitted = await executeOwnerTool(owner, { action: "process_start", request });
+    const admitted = await executeOwnerTool(owner, { action: "command_run", request, requestId });
     expect(admitted.isError).toBeUndefined();
     expect(await owner.observe(requestId, 5000)).toMatchObject({
       state: "succeeded",
@@ -116,48 +125,50 @@ test("the direct owner and tool view share original effects and retained results
     await owner.close();
     owner = await createWorkspaceOwner(options);
     const collected = await executeOwnerTool(owner, {
-      action: "exec",
-      request: { request_id: requestId },
+      action: "operation_get",
+      request: { reference: admitted.structuredContent.operation },
     });
     expect(collected.structuredContent).toMatchObject({
-      state: "succeeded",
-      request_id: requestId,
-      stdout: "retained input",
+      state: "completed",
+      operation: admitted.structuredContent.operation,
+      outcome: { ok: true, result: { stdoutBytes: 14 } },
     });
-    const same = await executeOwnerTool(owner, { action: "process_start", request });
-    expect(same.structuredContent).toMatchObject({ state: "succeeded", request_id: requestId });
+    const same = await executeOwnerTool(owner, { action: "command_run", request, requestId });
+    expect(same.structuredContent).toMatchObject({
+      state: "completed",
+      operation: admitted.structuredContent.operation,
+    });
     expect(readFileSync(join(value.root, "direct-effects"), "utf8")).toBe("once\n");
     expect(existsSync(value.socketPath)).toBe(false);
     const written = await executeOwnerTool(owner, {
-      action: "write",
+      action: "file_create",
       request: {
-        request_id: createWorkspaceRequestId(),
         path: "direct-file",
-        expected: { exists: false },
-        text: "owner bytes",
+        text: "owner\nbytes",
       },
     });
-    expect(written.structuredContent).toMatchObject({ state: "succeeded", path: "direct-file" });
-    const observed = await executeOwnerTool(owner, {
-      action: "read",
-      request: { path: "direct-file", offset: 6, length: 5 },
+    expect(written.structuredContent).toMatchObject({
+      state: "completed",
+      outcome: { ok: true, result: { path: "direct-file" } },
     });
-    expect(observed.structuredContent).toEqual({ offset: 6, text: "bytes", total_bytes: 11 });
-    const previous = (await owner.file({ action: "stat", path: "direct-file" })).stat.version;
+    const observed = await executeOwnerTool(owner, {
+      action: "file_read",
+      request: { path: "direct-file", window: { start_line: 2 } },
+    });
+    expect(observed.structuredContent).toMatchObject({ text: "bytes" });
     const writes = await Promise.all(
       ["first replacement", "second replacement"].map((text) =>
         executeOwnerTool(owner, {
-          action: "write",
+          action: "file_replace",
           request: {
-            request_id: createWorkspaceRequestId(),
             path: "direct-file",
-            expected: { exists: true, size_bytes: previous.size, sha256: previous.sha256 },
+            expected: { file: observed.structuredContent.file },
             text,
           },
         }),
       ),
     );
-    expect(writes.filter((result) => result.structuredContent.state === "succeeded")).toHaveLength(
+    expect(writes.filter((result) => result.structuredContent.outcome?.ok === true)).toHaveLength(
       1,
     );
     expect(writes.filter((result) => result.isError)).toHaveLength(1);
@@ -168,18 +179,19 @@ test("the direct owner and tool view share original effects and retained results
     mkdirSync(value.root);
     const refusedId = createWorkspaceRequestId();
     const refused = await executeOwnerTool(owner, {
-      action: "exec",
+      action: "command_run",
+      requestId: refusedId,
       request: {
-        request_id: refusedId,
-        argv: [
-          process.execPath,
-          "-e",
-          "require('node:fs').writeFileSync('foreign-effect','unexpected')",
-        ],
+        command: {
+          argv: [
+            process.execPath,
+            "-e",
+            "require('node:fs').writeFileSync('foreign-effect','unexpected')",
+          ],
+        },
       },
     });
     expect(refused.structuredContent).toMatchObject({
-      request_id: refusedId,
       error: { code: "WORKSPACE_OPERATION_ERROR" },
     });
     expect(readdirSync(value.root)).toEqual([]);
@@ -227,12 +239,15 @@ test("service restart and direct CLI collect a detached command without launchin
     [
       "--input-type=module",
       "-e",
-      `import {runWorkspaceCli} from ${JSON.stringify(cliUrl)};await runWorkspaceCli(['status',${JSON.stringify(requestId)}],{socketPath:${JSON.stringify(value.socketPath)}});`,
+      `import {runWorkspaceCli} from ${JSON.stringify(cliUrl)};await runWorkspaceCli(['get',${JSON.stringify(encodeReference("operation", { owner: value.ownerSelector, requestId, kind: "command" }))}],{socketPath:${JSON.stringify(value.socketPath)}});`,
     ],
     { encoding: "utf8" },
   );
   expect(cli.status).toBe(0);
-  expect(JSON.parse(cli.stdout)).toMatchObject({ requestId, state: "succeeded", stdoutBytes: 8 });
+  expect(JSON.parse(cli.stdout).structuredContent).toMatchObject({
+    state: "completed",
+    outcome: { ok: true, result: { stdoutBytes: 8 } },
+  });
 });
 
 test("large guarded binary publication is idempotent and rejects traversal and a stale precondition", async () => {
@@ -257,18 +272,19 @@ test("large guarded binary publication is idempotent and rejects traversal and a
     process.execPath,
     [
       resolve("packages/workspace-service/src/cli.mjs"),
-      "write",
-      "--request-id",
-      requestId,
-      "binary.dat",
-      source,
+      "get",
+      encodeReference("operation", { owner: value.ownerSelector, requestId, kind: "file-change" }),
     ],
     { env: { ...process.env, MOIRA_WORKSPACE_SOCKET: value.socketPath }, encoding: "utf8" },
   );
   expect(replay.status).toBe(0);
-  const [printed, collected] = replay.stdout.trim().split("\n");
-  expect(printed).toBe(requestId);
-  expect(JSON.parse(collected)).toEqual(receipt);
+  expect(JSON.parse(replay.stdout).structuredContent).toMatchObject({
+    state: "completed",
+    outcome: { ok: true, result: { path: "binary.dat", current: receipt.current } },
+  });
+  expect(JSON.parse((await call(value, "PUT", path, bytes, headers)).bytes.toString())).toEqual(
+    receipt,
+  );
   const refused = await call(
     value,
     "PUT",
@@ -365,6 +381,9 @@ test.each([false, true])(
     const previous = await control(value, "POST", "/v1/files/stat", { path: "target" });
     await stop(value);
     const requestId = createWorkspaceRequestId();
+    // This fixture represents a pre-index retained operation, not a new admission
+    // bypassing the current owner's durable active membership.
+    unlinkSync(join(value.stateRoot, "active-requests.json"));
     const directory = join(value.stateRoot, "requests", requestId);
     mkdirSync(directory, { mode: 0o700 });
     const marker = `moira-op-${workspaceRequestUuid(requestId).replaceAll("-", "")}`;
@@ -398,6 +417,7 @@ test.each([false, true])(
       foreign ? "independent edit" : "original",
     );
     expect(readdirSync(value.root).some((name) => name.startsWith(".moira-"))).toBe(foreign);
+    expect(existsSync(join(value.stateRoot, "active-requests", `${requestId}.json`))).toBe(foreign);
   },
 );
 
@@ -502,6 +522,8 @@ test.each(["owned", "target", "backup"])(
         const {createWorkspaceEngine}=await import(${JSON.stringify(pathToFileURL(resolve("packages/workspace-service/src/engine.mjs")).href)});
         const engine=createWorkspaceEngine(${JSON.stringify({ stateRoot: join(value.stateRoot, "engine"), binding: value.binding })});
         const directory=${JSON.stringify(directory)},marker=${JSON.stringify(marker)};
+        const {retainActiveRequest}=await import(${JSON.stringify(pathToFileURL(resolve("packages/workspace-service/src/request-retirement.mjs")).href)});
+        await retainActiveRequest(directory);
         const staged=[];
         for(const name of ['one','two']) staged.push(await engine.stageStream(name,[Buffer.from(name.toUpperCase())],{exists:true},marker));
         await engine.writeDurableJson(directory,'accepted.json',{kind:'patch'});
@@ -572,6 +594,9 @@ test.each(["owned", "target", "backup"])(
         substitution === "owned" ? "interrupted" : "unknown",
       );
       if (substitution !== "owned") expect(observe()).toEqual(before);
+      expect(existsSync(join(value.stateRoot, "active-requests", `${requestId}.json`))).toBe(
+        substitution !== "owned",
+      );
     } finally {
       if (retained !== undefined) closeSync(retained);
     }
@@ -638,11 +663,18 @@ test("rejected preflight remains a collectible no-start result and direct CLI in
   ).toBe(false);
   const cli = spawnSync(
     process.execPath,
-    [resolve("packages/workspace-service/src/cli.mjs"), "status", requestId],
+    [
+      resolve("packages/workspace-service/src/cli.mjs"),
+      "get",
+      encodeReference("operation", { owner: value.ownerSelector, requestId, kind: "command" }),
+    ],
     { env: { ...process.env, MOIRA_WORKSPACE_SOCKET: value.socketPath }, encoding: "utf8" },
   );
-  expect(cli.status).toBe(0);
-  expect(JSON.parse(cli.stdout)).toEqual(result);
+  expect(cli.status).toBe(1);
+  expect(JSON.parse(cli.stdout)).toMatchObject({
+    isError: true,
+    structuredContent: { state: "completed", outcome: { ok: false } },
+  });
   const conflicting = await call(value, "POST", "/v1/exec", { requestId, argv: ["true"] });
   expect(JSON.parse(conflicting.bytes.toString()).error.code).toBe("REQUEST_ID_CONFLICT");
   const missing = createWorkspaceRequestId();
@@ -809,7 +841,7 @@ test("legacy caller and operation UUIDs cannot address new work despite an indep
   expect(readFileSync(join(legacy, "execution.json"), "utf8")).toBe(receipt);
 });
 
-test("CLI preserves explicit workspace IDs and generates them only when omitted", async () => {
+test("ordinary CLI refuses caller IDs and collects distinct fresh commands through returned references", async () => {
   const value = fixture();
   await start(value);
   const oldId = randomUUID();
@@ -835,23 +867,29 @@ test("CLI preserves explicit workspace IDs and generates them only when omitted"
   ]) {
     const refused = run(args);
     expect(refused.status).toBe(1);
-    expect(refused.stdout).toBe("");
   }
   expect(readdirSync(join(value.stateRoot, "requests"))).toEqual(requests);
   expect(existsSync(join(value.root, "old-target"))).toBe(false);
-  const explicit = createWorkspaceRequestId();
-  const admitted = run(["exec", "--request-id", explicit, "--", "true"]);
-  expect(admitted.status).toBe(0);
-  const [printed, result] = admitted.stdout.trim().split("\n");
-  expect(printed).toBe(explicit);
-  expect(JSON.parse(result).requestId).toBe(explicit);
-  expect((await settle(value, explicit)).state).toBe("succeeded");
-  const generated = run(["exec", "--", "true"]);
-  expect(generated.status).toBe(0);
-  const [identity, generatedResult] = generated.stdout.trim().split("\n");
-  expect(identity).toMatch(/^ws1-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/);
-  expect(JSON.parse(generatedResult).requestId).toBe(identity);
-  expect((await settle(value, identity)).state).toBe("succeeded");
+  const operations = [];
+  for (let index = 0; index < 2; index++) {
+    const generated = run([
+      "exec",
+      "--",
+      process.execPath,
+      "-e",
+      "require('node:fs').appendFileSync('cli-effects','once\\n')",
+    ]);
+    expect(generated.status).toBe(0);
+    const result = JSON.parse(generated.stdout).structuredContent;
+    expect(result).toMatchObject({ state: "completed", outcome: { ok: true } });
+    const identity = decodeReference(result.operation, "operation").requestId;
+    expect(identity).toMatch(/^ws1-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/);
+    expect((await settle(value, identity)).state).toBe("succeeded");
+    expect(run(["get", result.operation]).status).toBe(0);
+    operations.push(result.operation);
+  }
+  expect(operations[0]).not.toBe(operations[1]);
+  expect(readFileSync(join(value.root, "cli-effects"), "utf8")).toBe("once\nonce\n");
 });
 
 test("argv, inline stdin and genuine exit codes survive the HTTP service without shell interpretation", async () => {
@@ -881,7 +919,45 @@ test("argv, inline stdin and genuine exit codes survive the HTTP service without
     requestId: refused,
     argv: [join(value.root, "missing-executable")],
   });
-  expect(await settle(value, refused)).toMatchObject({ state: "not_started", exitCode: null });
+  const negative = await settle(value, refused);
+  try {
+    expect(negative).toMatchObject({ state: "not_started", exitCode: null });
+  } catch (error) {
+    const directory = join(
+      value.stateRoot,
+      "engine",
+      `moira-op-${workspaceRequestUuid(refused).replaceAll("-", "")}`,
+    );
+    error.message += `\nOriginal runner evidence: ${JSON.stringify(
+      readdirSync(directory)
+        .filter((name) => name.endsWith(".json"))
+        .map((name) => {
+          try {
+            const record = JSON.parse(readFileSync(join(directory, name), "utf8"));
+            return [
+              name,
+              Object.fromEntries(
+                [
+                  "state",
+                  "reason",
+                  "inputSettled",
+                  "requestDigest",
+                  "pid",
+                  "startTime",
+                  "launchAttempted",
+                  "startedAt",
+                ]
+                  .filter((key) => ["string", "number", "boolean"].includes(typeof record?.[key]))
+                  .map((key) => [key, record[key]]),
+              ),
+            ];
+          } catch (failure) {
+            return [name, { code: failure.code ?? "INVALID_DIAGNOSTIC_RECORD" }];
+          }
+        }),
+    )}`;
+    throw error;
+  }
 });
 
 test("large Unicode environment values cross the real runner pipe without changing accepted bytes", async () => {
@@ -1186,8 +1262,15 @@ test.each(["acknowledged", "missing-start-ack"])(
     const requestId = createWorkspaceRequestId();
     let actualChild;
     try {
+      await control(
+        value,
+        "PUT",
+        `/v1/operations/${requestId}/input`,
+        Buffer.from("unknown retained input"),
+      );
       await control(value, "POST", "/v1/exec", {
         requestId,
+        inputReady: true,
         argv: [
           process.execPath,
           "-e",
@@ -1248,6 +1331,10 @@ test.each(["acknowledged", "missing-start-ack"])(
       const retained = JSON.parse(readFileSync(join(directory, "result.json"), "utf8"));
       expect(retained).toMatchObject({ state: "outcome_unknown", exitCode: null });
       expect(retained.reason).not.toBe("COMMAND_START_REJECTED");
+      expect(readFileSync(join(value.stateRoot, "requests", requestId, "input"), "utf8")).toBe(
+        "unknown retained input",
+      );
+      expect(existsSync(join(value.stateRoot, "active-requests", `${requestId}.json`))).toBe(true);
       const execution = JSON.parse(readFileSync(join(directory, "execution.json"), "utf8"));
       expect(execution.launchAttempted).toBe(true);
       if (phase === "missing-start-ack") expect(execution.startedAt).toBeUndefined();

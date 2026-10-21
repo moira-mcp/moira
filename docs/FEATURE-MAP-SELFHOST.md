@@ -53,12 +53,12 @@ flag.
 Codespace orchestration also belongs to the OSS runtime. GitHub resources use the configured
 GitHub integration; local resources use an explicitly approved Moira Local device and do not require
 GitHub OAuth on the server. Local work still requires the instance runtime policy and the device's
-own repository grants and finite lease. See [Codespaces](CODESPACES.md) for setup and provider limits.
+own repository grants and enabled permission until explicit disable. See [Codespaces](CODESPACES.md) for setup and provider limits.
 
 Both providers use the same guest workspace service and direct Unix-socket CLI for commands,
 files and sessions. The cloud routes live authorized streams; it does not own an offline command
 queue or command/file quotas. The Local host companion owns lifecycle only. GitHub's configured
-resource/billing policy is separate from the Local device's owner-approved allocations and lease.
+resource/billing policy is separate from the Local device's owner-approved allocations and work permission.
 Supported self-host Compose includes a static Traefik ingress routing workspace HTTP/1.1 Upgrade
 directly to backend 3001 on the same public host port.
 

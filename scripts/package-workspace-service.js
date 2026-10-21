@@ -127,6 +127,7 @@ export async function packageWorkspaceService({
       "guest-proxy.mjs",
       "owner-renderer.mjs",
       "extension-handler-host.mjs",
+      "request-retirement.mjs",
     ]) {
       await copyFile(join(output, name), join(staging, "service", name));
     }

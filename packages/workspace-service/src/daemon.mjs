@@ -22,11 +22,14 @@ import { request } from "node:http";
 import { pathToFileURL, fileURLToPath, URL } from "node:url";
 import { startWorkspaceService } from "./server.mjs";
 import { createWorkspaceEngine } from "./engine.mjs";
-import { startWorkspaceRemote } from "./remote.ts";
+import { openDaemonDiagnostics } from "./daemon-diagnostics.mjs";
+import { startWorkspaceRemote, WorkspaceAuthorityRefusal } from "./remote.ts";
 import { validatedInstalledProxy } from "./tls-transport.mjs";
 import { originalGitOrigin, configureOwnerGit } from "./github-config.mjs";
 import { startWorkspaceGitBroker, brokerPullRequest } from "./github-broker.mjs";
 import { credentialWorkspaceStore } from "./credential-workspace-store.mjs";
+import { isOwnerSelector } from "../../shared/src/codespaces/workspace-references.mjs";
+import { canonicalJson } from "../../shared/src/utils/canonical-json.ts";
 import { createOwnerCommunicationTransport } from "./communication-transport.mjs";
 import {
   createWorkspaceRequestId,
@@ -151,7 +154,8 @@ const unprovenRebind = () =>
 function numericGitHubOwner(previous, selection, root, metadata) {
   return (
     previous?.github?.repositoryId === selection.repositoryId &&
-    previous.remote?.resourceId === selection.resourceId &&
+    previous.ownerSelector?.kind === "github" &&
+    previous.ownerSelector.resourceId === selection.resourceId &&
     previous.binding?.root === root &&
     previous.binding.dev === metadata.dev &&
     previous.binding.ino === metadata.ino
@@ -235,6 +239,30 @@ export async function configureWorkspace(input) {
     (!input.remote && input.mode !== "local-only")
   )
     throw new Error("Invalid workspace bootstrap configuration");
+  if (input.expectedRelease !== undefined && input.expectedRelease !== (await releaseIdentity()))
+    throw new Error("Workspace measured release changed");
+  const previous = await privateJson(configurationPath).catch((error) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+  if (input.remote) {
+    workspaceBootstrapCredentialSchema.parse(input.remote);
+    const origin = new URL(input.remote.origin);
+    if (
+      origin.protocol !== "https:" ||
+      origin.username ||
+      origin.password ||
+      origin.pathname !== "/" ||
+      origin.search ||
+      origin.hash ||
+      input.remoteState !== undefined
+    )
+      throw new Error("Invalid workspace remote authority");
+  } else if (
+    input.remoteState !== undefined &&
+    !["unconfigured", "enrollment_unavailable", "refused"].includes(input.remoteState)
+  )
+    throw new Error("Invalid workspace remote observation");
   const metadata = await lstat(input.root);
   if (
     !metadata.isDirectory() ||
@@ -264,7 +292,8 @@ export async function configureWorkspace(input) {
   const environmentIdentity = input.environmentIdentity ?? input.remote?.environmentIdentity;
   if (
     !/^[a-f0-9]{64}$/.test(environmentIdentity ?? "") ||
-    environmentIdentity !== (await life(binding))
+    environmentIdentity !== (await life(binding)) ||
+    (input.remote && input.remote.environmentIdentity !== environmentIdentity)
   )
     throw new Error("Workspace bootstrap guest life changed");
   let proxy;
@@ -277,10 +306,30 @@ export async function configureWorkspace(input) {
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
-  if (!input.remote && (!proxy || input.expectedOrigin === undefined))
-    throw new Error(
-      "Local-only workspace requires its installed Local network and repository binding",
-    );
+  if (!input.remote && proxy && input.expectedOrigin === undefined)
+    throw new Error("Local-only workspace requires its installed Local repository binding");
+  const ownerSelector =
+    input.ownerSelector ??
+    (!proxy && input.remote ? { kind: "github", resourceId: input.remote.resourceId } : undefined);
+  if (
+    !isOwnerSelector(ownerSelector) ||
+    (proxy
+      ? ownerSelector.kind !== "local"
+      : ownerSelector.kind !== "github" ||
+        ownerSelector.resourceId !== input.resourceId ||
+        (input.remote && ownerSelector.resourceId !== input.remote.resourceId)) ||
+    (previous?.ownerSelector &&
+      canonicalJson(previous.ownerSelector) !== canonicalJson(ownerSelector))
+  )
+    throw new Error("Workspace original owner selector changed or is unavailable");
+  if (
+    !proxy &&
+    !input.remote &&
+    (input.rootDevice === undefined ||
+      input.rootInode === undefined ||
+      input.expectedRelease === undefined)
+  )
+    throw new Error("Credential-free GitHub configuration requires its complete measured proof");
   if (
     input.expectedOrigin === undefined &&
     (proxy || !input.remote) &&
@@ -288,7 +337,7 @@ export async function configureWorkspace(input) {
   )
     throw new Error("Workspace bootstrap repository identity changed");
   let github;
-  if (!proxy && input.remote && canonicalOrigin) {
+  if (!proxy && canonicalOrigin) {
     const selection = githubRepositorySelectionSchema.parse({
       resourceId: input.resourceId,
       repositoryId: input.repositoryId,
@@ -297,11 +346,7 @@ export async function configureWorkspace(input) {
         ? { previousRepositoryFullName: input.previousRepositoryFullName }
         : {}),
     });
-    if (selection.resourceId !== input.remote.resourceId) throw unprovenRebind();
-    const previous = await privateJson(configurationPath).catch((error) => {
-      if (error.code === "ENOENT") return null;
-      throw error;
-    });
+    if (selection.resourceId !== ownerSelector.resourceId) throw unprovenRebind();
     if (
       previous &&
       (previous.binding.root !== input.root ||
@@ -311,23 +356,34 @@ export async function configureWorkspace(input) {
       throw new Error("Previous Git owner binding changed");
     if (!approvedGitHubOrigin(previous, selection, input.root, metadata, canonicalOrigin))
       throw new Error("Workspace bootstrap repository identity changed");
-    const capability = randomBytes(32).toString("hex");
-    origin = `http://${input.remote.resourceId}:${capability}@127.0.0.1:3437/git/${input.repositoryFullName}.git`;
-    github = {
-      repositoryId: selection.repositoryId,
-      repositoryFullName: input.repositoryFullName,
-      canonicalOrigin,
-      brokerOrigin: origin,
-      authorization: `Basic ${Buffer.from(`${input.remote.resourceId}:${capability}`).toString("base64")}`,
-    };
+    if (
+      numericGitHubOwner(previous, selection, input.root, metadata) &&
+      previous.github.repositoryFullName === input.repositoryFullName &&
+      previous.github.canonicalOrigin === canonicalOrigin
+    ) {
+      github = previous.github;
+      origin = github.brokerOrigin;
+    } else {
+      const capability = randomBytes(32).toString("hex");
+      origin = `http://${ownerSelector.resourceId}:${capability}@127.0.0.1:3437/git/${input.repositoryFullName}.git`;
+      github = {
+        repositoryId: selection.repositoryId,
+        repositoryFullName: input.repositoryFullName,
+        canonicalOrigin,
+        brokerOrigin: origin,
+        authorization: `Basic ${Buffer.from(`${ownerSelector.resourceId}:${capability}`).toString("base64")}`,
+      };
+    }
     await configureOwnerGit(input.root, canonicalOrigin, origin, previous?.github);
     binding = { ...binding, origin, canonicalOrigin };
   }
   await publish(configurationPath, {
     version: 1,
     binding,
+    ownerSelector,
     environmentIdentity,
     ...(proxy ? { proxy } : {}),
+    ...(!input.remote ? { remoteState: input.remoteState ?? "unconfigured" } : {}),
     ...(github ? { github } : {}),
     ...(input.remote ? { remote: { ...input.remote, ...(proxy ? { proxy } : {}) } } : {}),
     ...(input.renewal
@@ -340,6 +396,17 @@ export async function configureWorkspace(input) {
       : {}),
     releaseIdentity: await releaseIdentity(),
   });
+  // This fixed local request carries no credentials or selected paths. The
+  // existing owner re-observes its private published configuration itself.
+  const running = await health().catch((error) => {
+    if (!["ENOENT", "ECONNREFUSED"].includes(error.code)) throw error;
+    return null;
+  });
+  if (
+    running?.releaseIdentity === (await releaseIdentity()) &&
+    running.repositoryFullName === input.repositoryFullName
+  )
+    await health("POST", "/v1/configuration/reload");
   return {
     configured: true,
     releaseIdentity: await releaseIdentity(),
@@ -347,8 +414,7 @@ export async function configureWorkspace(input) {
   };
 }
 
-/** Cold boot repeats only its durably recorded enrollment security request, never VM or command work. */
-export async function renewWorkspaceConfiguration(config, release) {
+async function workspaceRenewalProof(config, release) {
   if (
     !config.github ||
     config.proxy ||
@@ -357,10 +423,7 @@ export async function renewWorkspaceConfiguration(config, release) {
     config.releaseIdentity !== release
   )
     throw new Error("Workspace cold boot enrollment unavailable");
-  const installed = workspaceBootstrapCredentialSchema.parse({
-    ...config.remote,
-    renewal: config.renewal,
-  });
+  workspaceBootstrapCredentialSchema.parse({ ...config.remote, renewal: config.renewal });
   const root = config.binding.root,
     identity = await lstat(root, { bigint: true });
   if (
@@ -375,13 +438,24 @@ export async function renewWorkspaceConfiguration(config, release) {
   const environmentIdentity = await life(config.binding);
   if (!/^[a-f0-9]{64}$/.test(environmentIdentity ?? ""))
     throw new Error("Workspace cold boot life unavailable");
-  const body = {
+  await createWorkspaceEngine({ stateRoot, binding: config.binding }).verifyBinding();
+  return {
     environmentIdentity,
     root,
     rootDevice: String(identity.dev),
     rootInode: String(identity.ino),
     release,
   };
+}
+
+/** Cold boot repeats only its durably recorded enrollment security request, never VM or command work. */
+export async function renewWorkspaceConfiguration(config, release, signal) {
+  const body = await workspaceRenewalProof(config, release);
+  const { environmentIdentity } = body;
+  const installed = workspaceBootstrapCredentialSchema.parse({
+    ...config.remote,
+    renewal: config.renewal,
+  });
   const requestPath = join(stateRoot, `renewal-${environmentIdentity}.json`);
   let original = await privateJson(requestPath).catch((error) => {
     if (error.code === "ENOENT") return null;
@@ -397,7 +471,7 @@ export async function renewWorkspaceConfiguration(config, release) {
     !WORKSPACE_REQUEST_ID_PATTERN.test(original.requestId) ||
     !Object.entries(body).every(([key, value]) => original[key] === value)
   )
-    throw new Error("Workspace original enrollment request changed");
+    throw new WorkspaceAuthorityRefusal("Workspace original enrollment request changed");
   const origin = new URL(installed.origin);
   if (
     origin.protocol !== "https:" ||
@@ -407,7 +481,7 @@ export async function renewWorkspaceConfiguration(config, release) {
     origin.search ||
     origin.hash
   )
-    throw new Error("Workspace enrollment origin invalid");
+    throw new WorkspaceAuthorityRefusal("Workspace enrollment origin invalid");
   const response = await globalThis.fetch(
     new URL(`/api/codespaces/github/resources/${installed.resourceId}/renew-enrollment`, origin),
     {
@@ -418,30 +492,43 @@ export async function renewWorkspaceConfiguration(config, release) {
       },
       body: JSON.stringify(original),
       redirect: "error",
+      signal,
     },
   );
   if (response.status !== 200) {
     await response.body?.cancel();
+    if (response.status === 401 || response.status === 403)
+      throw new WorkspaceAuthorityRefusal("Workspace renewal authority refused");
     throw new Error("Workspace enrollment outcome unconfirmed");
   }
   const remote = workspaceBootstrapCredentialSchema.parse(await response.json());
   if (
     remote.resourceId !== installed.resourceId ||
+    remote.resourceGeneration !== installed.resourceGeneration ||
+    remote.authorizationGeneration !== installed.authorizationGeneration ||
     remote.environmentIdentity !== environmentIdentity ||
     remote.origin !== installed.origin ||
     remote.publicOrigin !== installed.publicOrigin ||
     remote.renewal?.credential !== installed.renewal.credential
   )
-    throw new Error("Workspace enrollment authority changed");
+    throw new WorkspaceAuthorityRefusal("Workspace enrollment authority changed");
+  if (
+    canonicalJson(await workspaceRenewalProof(config, release)) !== canonicalJson(body) ||
+    canonicalJson(await privateJson(configurationPath)) !== canonicalJson(config) ||
+    signal?.aborted
+  )
+    throw new WorkspaceAuthorityRefusal("Workspace renewal binding changed");
   const { renewal, ...credential } = remote;
   const next = { ...config, environmentIdentity, remote: credential, renewal };
+  delete next.renewalPending;
+  delete next.remoteState;
   await publish(configurationPath, next);
   return next;
 }
 
-function health() {
+function health(method = "GET", path = "/v1/health") {
   return new Promise((done, failed) => {
-    const call = request({ socketPath, path: "/v1/health", agent: false }, (response) => {
+    const call = request({ socketPath, method, path, agent: false }, (response) => {
       const chunks = [];
       let size = 0;
       response.on("data", (chunk) => {
@@ -512,13 +599,46 @@ async function stopOwnedService() {
   while (await identity()) await new Promise((done) => setTimeout(done, 25));
 }
 
+// This descriptor proof is available before publishing the owner receipt and before touching logs.
+async function ownsDaemonLock() {
+  if (process.platform !== "linux") return false;
+  try {
+    const descriptor = await stat("/proc/self/fd/4");
+    const named = await lstat(join(stateRoot, "daemon.lock"));
+    if (
+      !named.isFile() ||
+      named.isSymbolicLink() ||
+      named.nlink !== 1 ||
+      named.uid !== process.getuid() ||
+      named.mode & 0o077 ||
+      descriptor.dev !== named.dev ||
+      descriptor.ino !== named.ino
+    )
+      return false;
+    const info = await readFile("/proc/self/fdinfo/4", "utf8");
+    return info
+      .split("\n")
+      .some((line) => /^lock:\s+\S+:\s+FLOCK\s+ADVISORY\s+WRITE\s+/.test(line));
+  } catch {
+    return false;
+  }
+}
+
 async function serve() {
   let config = await privateJson(configurationPath);
   const release = await releaseIdentity();
-  if (config.environmentIdentity !== (await life(config.binding)))
-    config = await renewWorkspaceConfiguration(config, release);
+  if (config.environmentIdentity !== (await life(config.binding))) {
+    if (config.proxy)
+      throw new Error(
+        "Local workspace life changed; the host owner must refresh its fixed binding",
+      );
+    const proof = await workspaceRenewalProof(config, release);
+    config = { ...config, environmentIdentity: proof.environmentIdentity, renewalPending: true };
+    await publish(configurationPath, config);
+  }
   if (
     config.version !== 1 ||
+    !isOwnerSelector(config.ownerSelector) ||
     config.releaseIdentity !== release ||
     config.environmentIdentity !== (await life(config.binding))
   )
@@ -541,24 +661,7 @@ async function serve() {
         owner.program !== fileURLToPath(import.meta.url)
       )
         return false;
-      // startOwnedService passes the daemon.lock descriptor as FD4 through the
-      // fixed shell's flock+exec. fdinfo reports locks of this open description.
-      const descriptor = await stat("/proc/self/fd/4");
-      const named = await lstat(join(stateRoot, "daemon.lock"));
-      if (
-        !named.isFile() ||
-        named.isSymbolicLink() ||
-        named.nlink !== 1 ||
-        named.uid !== process.getuid() ||
-        named.mode & 0o077 ||
-        descriptor.dev !== named.dev ||
-        descriptor.ino !== named.ino
-      )
-        return false;
-      const info = await readFile("/proc/self/fdinfo/4", "utf8");
-      return info
-        .split("\n")
-        .some((line) => /^lock:\s+\S+:\s+FLOCK\s+ADVISORY\s+WRITE\s+/.test(line));
+      return ownsDaemonLock();
     } catch {
       return false;
     }
@@ -566,42 +669,120 @@ async function serve() {
   const githubBroker = config.github
     ? await startWorkspaceGitBroker(
         config.github,
-        config.remote,
+        config.renewalPending ? undefined : config.remote,
         credentialWorkspaceStore(stateRoot),
         verifyExclusiveOwner,
       )
     : null;
   const gitProxy = config.proxy ?? config.github?.brokerOrigin;
   let service, remote;
+  let closing;
+  let reloading = Promise.resolve();
+  const remoteConfiguration = (value) =>
+    value.remote && !value.renewalPending
+      ? {
+          publicationScope: {
+            resourceId: value.remote.resourceId,
+            resourceGeneration: value.remote.resourceGeneration,
+            authorizationGeneration: value.remote.authorizationGeneration,
+            publicOrigin: value.remote.publicOrigin ?? value.remote.origin,
+          },
+          communicationTransport: createOwnerCommunicationTransport({
+            origin: value.remote.origin,
+            credential: value.remote.credential,
+            proxy: value.proxy,
+          }),
+        }
+      : {};
+  const reloadConfiguration = () => {
+    const work = reloading.then(async () => {
+      if (closing) throw new Error("Workspace owner is closing");
+      const next = await privateJson(configurationPath);
+      if (
+        next.version !== 1 ||
+        next.releaseIdentity !== release ||
+        next.environmentIdentity !== config.environmentIdentity ||
+        JSON.stringify(next.binding) !== JSON.stringify(config.binding) ||
+        !isOwnerSelector(next.ownerSelector) ||
+        canonicalJson(next.ownerSelector) !== canonicalJson(config.ownerSelector) ||
+        next.proxy !== config.proxy ||
+        JSON.stringify(next.github) !== JSON.stringify(config.github) ||
+        next.environmentIdentity !== (await life(next.binding))
+      )
+        throw new Error("Running workspace configuration identity changed");
+      await createWorkspaceEngine({ stateRoot, binding: next.binding }).verifyBinding();
+      if (next.remote) {
+        const credential = { ...next.remote };
+        delete credential.proxy;
+        const checked = workspaceBootstrapCredentialSchema.parse(credential);
+        if (
+          checked.environmentIdentity !== next.environmentIdentity ||
+          (config.remote &&
+            (checked.resourceId !== config.remote.resourceId ||
+              checked.origin !== config.remote.origin))
+        )
+          throw new Error("Running workspace remote authority changed owner");
+      }
+      if (
+        JSON.stringify(next.remote) === JSON.stringify(config.remote) &&
+        next.remoteState === config.remoteState
+      )
+        return;
+      await service.owner.configureRemote(remoteConfiguration(next));
+      githubBroker?.configureRemote(next.remote);
+      await remote?.close();
+      remote = undefined;
+      config = next;
+      if (next.remote) remote = startWorkspaceRemote({ socketPath, ...next.remote });
+    });
+    reloading = work.catch(() => undefined);
+    return work;
+  };
   try {
     service = await startWorkspaceService({
       socketPath,
       stateRoot,
       binding: config.binding,
+      ownerSelector: config.ownerSelector,
       releaseIdentity: release,
       searchExecutable: fileURLToPath(new URL("../runtime/bin/rg", import.meta.url)),
       sourceProxy: config.proxy,
+      remoteStatus: () => remote?.status() ?? { state: config.remoteState ?? "unconfigured" },
+      reloadConfiguration,
       ...(githubBroker ? { collectCredentialRequest: githubBroker.collect } : {}),
       ...(gitProxy
         ? { pullRequest: (action, input) => brokerPullRequest(gitProxy, action, input) }
         : {}),
-      ...(config.remote
-        ? {
-            communicationTransport: createOwnerCommunicationTransport({
-              origin: config.remote.origin,
-              credential: config.remote.credential,
-              proxy: config.proxy,
-            }),
-            publicationScope: {
-              resourceId: config.remote.resourceId,
-              resourceGeneration: config.remote.resourceGeneration,
-              authorizationGeneration: config.remote.authorizationGeneration,
-              publicOrigin: config.remote.publicOrigin ?? config.remote.origin,
-            },
-          }
-        : {}),
+      ...remoteConfiguration(config),
     });
-    if (config.remote) remote = await startWorkspaceRemote({ socketPath, ...config.remote });
+    if (config.remote)
+      remote = startWorkspaceRemote({
+        socketPath,
+        ...config.remote,
+        environmentIdentity: config.environmentIdentity,
+        ...(config.renewalPending
+          ? {
+              prepareCredential: async (signal) => {
+                if (!config.renewalPending) return config.remote.credential;
+                let next;
+                try {
+                  next = await renewWorkspaceConfiguration(config, release, signal);
+                } catch (error) {
+                  if (error instanceof WorkspaceAuthorityRefusal || signal.aborted) throw error;
+                  // Local identity failure cannot become another enrollment proof.
+                  await workspaceRenewalProof(config, release).catch(() => {
+                    throw new WorkspaceAuthorityRefusal("Workspace renewal binding changed");
+                  });
+                  throw error;
+                }
+                await service.owner.configureRemote(remoteConfiguration(next));
+                githubBroker?.configureRemote(next.remote);
+                config = next;
+                return next.remote.credential;
+              },
+            }
+          : {}),
+      });
     const owner = {
       pid: process.pid,
       startTime: await processStart(process.pid),
@@ -610,9 +791,9 @@ async function serve() {
       environmentIdentity: await life(config.binding),
     };
     await publish(ownerPath, owner);
-    let closing;
     const close = () =>
       (closing ??= (async () => {
+        await reloading;
         await remote?.close();
         await service.close();
         await githubBroker?.close();
@@ -629,15 +810,14 @@ async function serve() {
           () => process.exit(1),
         );
       });
-    await remote?.whenConnected();
     const ready = await health();
     if (ready.releaseIdentity !== release)
       throw new Error("Workspace service release is not current");
-    if (process.connected)
-      process.send({ type: "workspace-service-ready", health: ready }, () => {});
     process.stdout.write(
       `${JSON.stringify({ workspaceService: "ready", releaseIdentity: release })}\n`,
     );
+    if (process.connected)
+      process.send({ type: "workspace-service-ready", health: ready }, () => {});
   } catch (error) {
     const cleanup = await Promise.allSettled([
       remote?.close(),
@@ -682,10 +862,7 @@ async function startOwnedService(foreground = false) {
     }
   };
   const lock = await ownedFile(join(stateRoot, "daemon.lock"), constants.O_RDWR);
-  let log;
   try {
-    if (!foreground)
-      log = await ownedFile(join(stateRoot, "daemon.log"), constants.O_WRONLY | constants.O_APPEND);
     // The fixed shell claims the inherited descriptor, then execs the daemon
     // while preserving the private IPC channel and held kernel lock. The
     // controller waits for actual readiness or child failure, then leaves this
@@ -694,7 +871,9 @@ async function startOwnedService(foreground = false) {
       "/bin/sh",
       [
         "-c",
-        '/usr/bin/flock --exclusive --nonblock 4 || exit $?; exec "$1" "$2"',
+        foreground
+          ? '/usr/bin/flock --exclusive --nonblock 4 || exit $?; exec "$1" "$2"'
+          : '/usr/bin/flock --exclusive --nonblock 4 || exit $?; exec "$1" "$2" --owned-daemon',
         "sh",
         process.execPath,
         fileURLToPath(import.meta.url),
@@ -703,7 +882,7 @@ async function startOwnedService(foreground = false) {
         detached: !foreground,
         stdio: foreground
           ? ["ignore", "inherit", "inherit", "ipc", lock.fd]
-          : ["ignore", log.fd, log.fd, "ipc", lock.fd],
+          : ["ignore", "ignore", "ignore", "ipc", lock.fd],
         env: process.env,
       },
     );
@@ -737,14 +916,20 @@ async function startOwnedService(foreground = false) {
     }
     return result;
   } finally {
-    await log?.close();
     await lock.close();
   }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  let diagnostics;
   try {
-    if (process.argv[2] === "--github-proof") {
+    if (process.argv[2] === "--owned-daemon") {
+      if (!(await ownsDaemonLock())) throw new Error("Workspace daemon lock is not held");
+      diagnostics = openDaemonDiagnostics(stateRoot);
+      diagnostics.redirectStandardStreams();
+      process.once("exit", () => diagnostics.close());
+      await serve();
+    } else if (process.argv[2] === "--github-proof") {
       const chunks = [];
       for await (const chunk of process.stdin) chunks.push(chunk);
       const input = JSON.parse(Buffer.concat(chunks).toString("utf8"));
@@ -771,10 +956,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         const running = await health().catch(() => null);
         if (
           running?.releaseIdentity === (await releaseIdentity()) &&
-          running?.environmentIdentity === (await life(configured.binding))
+          running?.environmentIdentity === (await life(configured.binding)) &&
+          running?.repositoryFullName === configured.binding.repositoryFullName
         )
           process.stdout.write(`${JSON.stringify(running)}\n`);
-        else process.stdout.write(`${JSON.stringify(await startOwnedService())}\n`);
+        else {
+          // A new payload replaces only the proved owned service observer.
+          // A same-release lost reply never stops the existing Unix owner.
+          if (running) await stopOwnedService();
+          process.stdout.write(`${JSON.stringify(await startOwnedService())}\n`);
+        }
       } else
         process.stdout.write(`${JSON.stringify({ workspaceService: "enrollment-required" })}\n`);
     } else if (process.argv[2] === "--start") {

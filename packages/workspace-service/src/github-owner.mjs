@@ -70,24 +70,23 @@ async function withLease(authority, action, work) {
           typeof lease.validate === "function" &&
           Number.isSafeInteger(lease.expiresAt))
       ) ||
-      !Number.isSafeInteger(lease.useUntil) ||
-      (lease.mode === "scoped" ? Math.min(lease.expiresAt, lease.useUntil) : lease.useUntil) <=
-        Date.now()
+      (!(lease.mode === "anonymous" && lease.useUntil === null) &&
+        (!Number.isSafeInteger(lease.useUntil) ||
+          (lease.mode === "scoped" ? Math.min(lease.expiresAt, lease.useUntil) : lease.useUntil) <=
+            Date.now()))
     )
       reject();
     const abort = new globalThis.AbortController();
     const stopped = () => abort.abort();
     authority.signal?.addEventListener("abort", stopped, { once: true });
     if (authority.signal?.aborted) stopped();
-    const deadline = globalThis.setTimeout(
-      stopped,
-      Math.min(
-        (lease.mode === "scoped" ? Math.min(lease.expiresAt, lease.useUntil) : lease.useUntil) -
-          Date.now(),
-        2147483647,
-      ),
-    );
-    deadline.unref();
+    const useUntil =
+      lease.mode === "scoped" ? Math.min(lease.expiresAt, lease.useUntil) : lease.useUntil;
+    const deadline =
+      useUntil === null
+        ? undefined
+        : globalThis.setTimeout(stopped, Math.min(useUntil - Date.now(), 2147483647));
+    deadline?.unref();
     const validation = new globalThis.AbortController();
     let checking;
     const sweep =

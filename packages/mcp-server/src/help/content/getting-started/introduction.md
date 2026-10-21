@@ -66,12 +66,18 @@ Updates/errors/retry stay local; other controls, loaded data and drafts remain.
 
 ## Development environments
 
-Use `codespace` for persistent GitHub or local Docker Sandboxes environments.
+Use `workspace_list({ provider: "local-sandboxes" })` or
+`workspace_list({ provider: "github-codespaces" })` to find persistent environments for one provider.
+Pass the selected environment's returned reference to command and file tools. Use
+`workspace_targets` with the same `provider` to select an approved repository and paired controller
+before creation. The normal list includes known incomplete setup; choose `view: "diagnostics"`
+for unavailable or uncertain identities and their original operations, or `view: "history"`
+for confirmed retired environments. Local discovery does not await GitHub or billing.
 **Settings → Development:** environments, GitHub connection and local computers.
 Approve pairing on your computer; its companion applies pending owner settings within local limits.
 Both providers run the same guest workspace service. MCP and the direct guest
 `moira-workspace` CLI share its commands, files and retained output; its owned Node
-runtime is independent of the project. Owner permissions, leases and physical resources
+runtime is independent of the project. Current owner permissions and physical resources
 remain enforced without command/file quotas.
 [Setup, permissions and security](/docs/getting-started/self-hosting/#connect-local-codespaces).
 

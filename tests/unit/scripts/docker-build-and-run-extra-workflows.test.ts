@@ -24,7 +24,7 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-function dryRun(extraWorkflowsDirs: string) {
+function dryRun(extraWorkflowsDirs: string, bindAddress?: string) {
   const envFile = path.join(dir, "test.env");
   fs.writeFileSync(
     envFile,
@@ -32,12 +32,14 @@ function dryRun(extraWorkflowsDirs: string) {
       "DOCKER_IMAGE_NAME=moira-dry-run-probe",
       "DOCKER_CONTAINER_NAME=moira-dry-run-probe",
       "DOCKER_PORT=39999",
+      ...(bindAddress ? [`DOCKER_BIND_ADDRESS=${bindAddress}`] : []),
       `EXTRA_WORKFLOWS_DIRS=${extraWorkflowsDirs}`,
       "",
     ].join("\n"),
   );
   const env = { ...process.env };
   delete env.EXTRA_WORKFLOWS_DIRS;
+  delete env.DOCKER_BIND_ADDRESS;
   return spawnSync("bash", [script, "--local", "--dry-run", "--env-file", envFile], {
     cwd: path.resolve("."),
     env,
@@ -46,6 +48,16 @@ function dryRun(extraWorkflowsDirs: string) {
 }
 
 describe("docker-build-and-run.sh extra workflow catalogs", () => {
+  test("local fixtures bind loopback unless the operator explicitly selects another address", () => {
+    const local = dryRun("");
+    expect(local.status).toBe(0);
+    expect(local.stdout).toContain("-p 127.0.0.1:39999:80");
+
+    const selected = dryRun("", "192.0.2.1");
+    expect(selected.status).toBe(0);
+    expect(selected.stdout).toContain("-p 192.0.2.1:39999:80");
+  });
+
   test("a missing catalog directory is reported and skipped while an existing one is still mounted", () => {
     const missing = path.join(dir, "no-such-catalog");
     const existing = fs.mkdtempSync(path.join(dir, "catalog-"));

@@ -11,6 +11,7 @@ import { pipeline } from "node:stream/promises";
 import {
   binaryTransportSchema,
   binaryControlsSchema,
+  binaryHandlerSettings,
 } from "../../workflow-engine/src/extensions/binary-transport.ts";
 
 function refusal() {
@@ -165,11 +166,7 @@ export async function deliverOwnerExtension(options) {
         }
       });
     });
-    const settings = Object.fromEntries(
-      (installed.channel.settings ?? []).flatMap((key) =>
-        key in options.settings ? [[key, options.settings[key]]] : [],
-      ),
-    );
+    const settings = binaryHandlerSettings(installed.channel, options.settings);
     child.send({
       kind: "invoke",
       channelId: options.channelId,

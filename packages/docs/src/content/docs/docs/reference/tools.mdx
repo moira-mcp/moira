@@ -11,6 +11,11 @@ Tool descriptions and their supported agent/model variants are static parts of t
 cannot be overridden through database settings. Runtime system instructions are delivered separately
 through MCP initialization and never alter a tool description.
 
+The server checks the tool-contract revision accepted by the authenticated MCP connection.
+HTTP 426 `upgrade_required` requires reconnecting or reinitializing that connection to refresh
+its tools. Successful MCP initialization accepts the current catalog for that credential;
+reading help or calling an old tool does not bypass the check.
+
 <McpToolsReference locale="en" />
 
 ## Behavioral guidance
@@ -19,77 +24,85 @@ The typed catalog defines what clients can send. The following notes describe au
 
 ### User communication
 
-`communication` delivers only to the authenticated user's enabled channels. The server selects
-providers and recipients; callers cannot supply a user, provider, destination, credential, local
-path, remote URL, or arbitrary request header. `send` accepts a non-empty message and returns
-a sanitized aggregate status for all configured channels. Text limits belong to the selected
-provider; Telegram limits an ordinary message to 4096 characters.
+`communication_send` sends ordinary text to the authenticated user's configured channels.
+The server selects credentials and recipients. An optional `channel` selects one configured
+channel; callers cannot provide destination authority or arbitrary headers. Provider text limits
+apply; Telegram accepts up to 4096 characters in an ordinary message.
 
-A file owner is an enrolled workspace service or a paired controller on the user's computer.
-It retains the immutable source and original delivery receipt. Cloud Moira authorizes the channel
-and streams its source to a fixed vendor transport without downloading native attachments or
-keeping a temporary file copy. Ordinary text through `send` needs no file owner.
+`communication_deliver` requires the host's native `file` descriptor. Pass its `file_id`,
+`download_url` and available name/type/size metadata unchanged; never invent a file ID or URL.
+Select the returned controller reference in `owner` when several controllers are registered.
+Availability is decided by actual dispatch; an unavailable selected controller is not replaced.
 
-Before `deliver-file`, choose a fresh `request_id` in `ws1-<lowercase UUID>` form. Supply exactly
-one source: a returned `file.reference_id` in `referenceId`, or the host's native descriptor in
-`file`. A native source needs a paired controller with an active registration. Select `device_id`
-if several are registered, even when only one is online. Omit it only when exactly one is registered.
-Availability is checked by the actual dispatch; an unavailable selected controller is not replaced.
-A publication reference identifies its owner:
+`communication_deliver_publication` uses an existing immutable `publication` reference,
+which already addresses its owner:
 
 ```javascript
-communication({
-  action: "deliver-file",
-  request_id: "ws1-11111111-1111-4111-8111-111111111111",
-  referenceId: "<file.reference_id>",
+communication_deliver_publication({
+  publication: "<returned publication reference>",
   message: "The requested recording",
   kind: "document",
 });
+operation_get({ reference: "<returned operation reference>" });
 ```
 
-For a native attachment, replace `referenceId` with `file: nativeFile`, using the exact descriptor
-supplied by the host: `file_id`, `download_url` and any available `file_name`, `mime_type`,
-`size_bytes`. Do not invent an ID or substitute an arbitrary URL. An optional `channelId` selects
-one configured channel. Filename, MIME and size come from the source.
-
-Retain the original ID and returned `device_id` or `codespace_id`. The owner receipt names the ID
-`requestId`; tool input uses `request_id`. After an uncertain reply, collect without resending:
-
-```javascript
-communication({
-  action: "operation",
-  request_id: "ws1-11111111-1111-4111-8111-111111111111",
-  device_id: "<device_id returned for this delivery>",
-});
-```
-
-For a workspace source, use its `codespace_id` instead of `device_id`; never provide both.
-Collection does not upload, render or send again. `absent`, `accepted`, `completed` and
-`unconfirmed` describe the original receipt; a completed receipt can contain an uncertain error.
-Absence or uncertainty does not authorize an automatic new delivery. For
-`COMMUNICATION_OWNER_UNAVAILABLE`, connect the original owner and inspect the same request if
-an earlier submission may have been admitted.
+The file owner retains the bytes and original delivery receipt. Cloud Moira authorizes the
+channel and streams the source to its fixed vendor transport without acquiring the native file
+or retaining a temporary copy. The owner receives channel capabilities and provider constraints
+and validates the complete file/text plan before vendor staging. An explicitly selected unsupported
+kind is refused rather than silently changed; no eligible delivery cannot report success.
+Ordinary text needs no file owner. A delivery returns its original
+operation reference; collect it without resending. If the first reply was lost, use
+`operation_find` at the selected owner and choose the original explicitly. No match, absence or
+an unavailable observation does not prove that delivery never happened.
+Workflow attachment notification results expose the same `operation` for collection; their
+internal execution/visit identity is not a separate public recovery protocol.
 
 Publications contain complete immutable bytes and support repeated reads until expiry under
-current authority; later source edits do not change them. Publishing does not send a message,
-and delivery neither consumes the publication nor renews it. Telegram's own image/document bounds
-and installed extensions' declared binary transports apply without a generic cloud attachment quota.
+current authority. Source edits do not change them. Publishing does not send a message, and
+delivery neither consumes nor renews a publication. Real Telegram image/document restrictions
+and installed extension transports remain applicable.
+
+### Workspace purposes and references
+
+Workspace, controller, target and installation references are returned by discovery. Copy them
+unchanged; encoded addresses do not grant authority. Lifecycle tools consume the captured
+workspace observation. A conflict requires a new observation and deliberate decision, including
+another confirmation for deletion. Callers do not manufacture request IDs, generations or hashes.
+
+`command_run` accepts either argv or script and optional text stdin; `command_run_native`
+requires a native stdin file instead. Operation and process references retain their original
+owner. `operation_get` collects, `operation_find` discovers candidates, and
+`process_output`/`process_stop` address the returned process. Each deliberate uncontrolled
+call is a distinct intent; a lost first reply is never deduplicated from command text.
+An absent receipt or unavailable owner does not authorize automatic replay. Candidate selection
+is explicit, even for one match. Generic operation results are data for their operation kind,
+not necessarily workspace summaries.
+Discovery returns safe metadata and references; full original outcomes require explicit collection.
+Get and find project known uncertain outcomes as `unconfirmed` even when the private receipt is
+terminal. A confirmed refusal remains completed with `outcome.ok:false`; neither classification
+rewrites the retained receipt or permits replay.
+
+`operation_resume` explicitly continues only the retained private-repository setup identified
+by its original repository-create operation reference. It does not rerun commands or create
+another repository. Read-only collection remains `operation_get`.
+
+`file_read` returns complete UTF-8 characters, a checked whole-file reference and optional
+continuation. Read by lines or returned cursor. `file_create` requires an absent path;
+`file_replace` checks complete expected text or an observed file reference. `file_patch`
+matches old/new text against one original, without caller-computed byte offsets or hashes.
+`file_upload` requires a native descriptor and an explicit create path or checked replacement
+target. `file_download` publishes the complete file by path, deriving its name and media type
+when omitted; no separate stat is required. `file_preview` returns validated native image
+content. Explicit windows bound observations without imposing a command work deadline.
 
 ### Workflow discovery and execution
 
 `list` returns only workflows accessible to the authenticated user. Search, visibility, ordering, and pagination filters are combined; `total` describes all matches, not only the returned page. Every response includes the effective `offset` and `limit`, `returnedCount`, and `hasMore`. When another page exists, pass `nextOffset` as the next request's `offset`; the terminal page returns `nextOffset: null`.
 
-All tools publish a root-object input schema so MCP clients can discover the complete catalog. The
-public `start` schema therefore exposes `action` directly and lists the fields accepted by either
-phase. Runtime validation still enforces the selected phase exactly: `prepare` requires `workflowId`
-and `parentExecutionId`, while `execute` requires `startAttemptId`; fields belonging only to the other
-phase and unknown fields are rejected as MCP errors. The `codespace` tool follows the same pattern:
-one flat object carries `action` and the catalog's fields, while dispatch validates the exact selected
-action and applies its defaults. Collect an admitted command with `codespace_id` and its original
-`request_id`, without submitting command fields again. An execution accepts at most one of
-`stdin_text` and `stdin_file`. Unknown fields are MCP errors; fields belonging only to another action
-return `CODESPACE_REQUEST_INVALID`. Caller-selected search/output windows bound observations;
-image preview validates the complete container within optional max_bytes, and native download streams a complete file by path.
+All tools publish root-object input schemas. Workspace purposes each have their own strict schema;
+unknown or mixed-purpose fields are rejected before dispatch. Workflow `start` still exposes
+`action` for its prepare/execute phases and validates the selected phase exactly.
 
 `start({ action: "prepare" })` resolves and validates an authorized workflow, binds the workflow version and request options, and returns a Start attempt ID that expires after 15 minutes without creating an execution. `parentExecutionId` links a child to an existing parent; use `"none"` for a standalone execution. `skipNotificationCheck` records a policy to bypass only optional ordinary-notification preflight during execute. `skipTelegramCheck` remains a deprecated alias with the same behavior, and conflicting values are rejected.
 
@@ -218,227 +231,115 @@ curl -X POST "${uploadUrl}" -F "workflow=@your-workflow.json"
 
 ### Development codespaces
 
-`codespace` operates an owned persistent GitHub Codespace or Local VM. Each Local codespace has
-its own VM, and a repository may have several independent environments. Reuse its `codespace_id`
-across clients; collaboration uses repository branches. The typed catalog above lists the supported
-actions and their exact inputs.
+Choose one provider for discovery; another provider or billing does not delay its response:
 
-Both providers install the same workspace service with its own Node.js and ripgrep runtime.
-Commands, named sessions, guarded file operations and durable results belong to that service.
-The direct `moira-workspace` CLI uses its private Unix socket. Remote MCP calls reach the same
-owner through authenticated streaming routing; cloud Moira stores neither command queues nor
-command/file results. Provider bootstrap establishes the service before ordinary work is admitted.
+```javascript
+workspace_list({ provider: "local-sandboxes" });
+workspace_list({ provider: "local-sandboxes", view: "diagnostics" });
+workspace_list({ provider: "github-codespaces", view: "history" });
+workspace_targets({ provider: "github-codespaces" });
+```
 
-#### Git and pull requests
+The default `actionable` view contains current useful environments, including known incomplete
+setup. `diagnostics` exposes uncertain or unavailable owned identities with safe errors and
+original-operation references; `history` contains confirmed retired environments.
+`has_diagnostics` signals preserved diagnostic identities outside the ordinary list.
+An unavailable identity supports observation and original collection without an invented state,
+machine or lifecycle generation. A selected-provider failure remains explicit, not a healthy
+empty list. Changing views never deletes identities or retries their effects.
 
-Use ordinary `git fetch`/`git push` in the workspace. A trusted owner broker executes fixed
-HTTPS Git and typed PR requests directly; cloud Moira issues a child credential limited to
-the approved repository/action. Original OAuth/refresh credentials stay in its vault, and
-tools receive no GitHub token. The broker's same-UID trust boundary is not an OS sandbox.
+`workspace_targets` requires the same provider selection. Local targets include observed controller
+contact status without awaiting GitHub installations. GitHub targets include registered controllers
+and eligible personal installation choices; registration alone does not certify reachability.
 
-For `pull_request_create`, choose a fresh `ws1-<lowercase UUID>` `request_id` before
-submission. After an unconfirmed result, collect with only `codespace_id` and that original
-`request_id`, then use `pull_request_find` for the pushed head/base before considering another
-create. Collection never creates a PR; get/find are reads. An unknown create is an error
-carrying the original PR ID and any `security_request_id`. The latter identifies credential
-issuance/disposal separately from the PR effect. Custody or disposal pending remains
-uncertain; collecting that security identity cannot mint another token or replay Git.
+Use `workspace_create` with a returned target and branch. `workspace_lifecycle` starts,
+stops or resumes incomplete Local or GitHub setup against its captured workspace reference.
+`workspace_adopt` assigns an observed GitHub environment to an explicitly selected controller;
+`workspace_adopt_external` prepares an owned environment by its known provider name.
+`workspace_delete` requires `confirm_delete: true` and the captured reference.
+A conflict requires `workspace_observe` and a new decision, never automatic precondition refresh.
+`workspace_setup_help` explains missing configuration without provisioning.
 
-The direct CLI supports `pull-request-create --request-id ID pr.json`, collect-only
-`pull-request-create --request-id ID`, `pull-request-get NUMBER` and
-`pull-request-find HEAD BASE` on the same owner.
+A Local environment has its own VM and persistent files; one repository can have several VMs.
+Current owner permission and exact repository grants remain required. Owner settings govern
+Local resource admission. CPU/RAM/Docker defaults affect new VMs, not existing admitted profiles.
+GitHub requires current account/App grants, personal billing and the explicitly selected paired
+controller. Controller discovery uses registration, not an availability fallback.
+The controller saves the machine and idle/retention choices before cloud submission; cloud Moira
+brokers fixed provider calls with current authority and billing checks.
+Provider idle policy applies to new GitHub Codespaces: disabling auto-stop requests GitHub's
+240-minute maximum, not unlimited uptime. A silent command can be interrupted by provider idle stop.
 
-#### Access and lifecycle
+`resume_setup` continues the same proved incomplete environment after repairing its prerequisite.
+GitHub continuation requires the original generation, measured root, guest life and release;
+it neither reinstalls the service nor starts the provider. An enrolled guest renews authority
+after a cold start before reconnecting remotely, while its Unix API is already usable. A
+never-enrolled guest cannot mint replacement setup proof after its life changes.
+Ordinary start and custody acknowledgement are separate. Unknown creation remains collection of
+the original operation, not permission to replace a VM. Guest Unix readiness is independent of
+remote enrollment; MCP work additionally needs its authorized live route. The observed remote
+state can be unconfigured, enrollment unavailable, connecting, connected, unavailable or refused.
+Temporary loss reconnects; confirmed refusal retires remote authority. Neither replays commands.
 
-GitHub authorization happens on the Moira website. Install the Moira GitHub App and grant the
-repositories the agent may use; accept permission updates on GitHub. `setup_help` returns the
-current missing condition, provider instruction and applicable configured links without provisioning
-anything. `repositories` discovers approved targets and `local_devices` discovers owned computers.
-Local pairing, repository admission and finite work permission remain owner-controlled and do not
-require the GitHub Codespaces provider to be enabled.
+`repository_admit` requests existing-private admission through a returned controller and GitHub
+repository ID. `repository_create` uses that controller, a returned installation and a name.
+Current owner delegation and verified personal-account grants remain mandatory. Agents cannot
+change that consent or supply rights. An incomplete creation retains its original operation and
+confirmed GitHub identity. Repair installation/permission prerequisites, inspect with
+`operation_get`, and explicitly continue with `operation_resume` when instructed; do not
+create another repository. Unknown creation uses its retained marker, never unrelated name adoption.
 
-For both providers, `create`, `start`, `stop`, `delete` and GitHub `adopt` require a caller-chosen `request_id` in
-`ws1-<lowercase UUID>` form. Start/stop/delete also require the resource's observed `generation`;
-the owner refuses a stale generation with `CODESPACE_GENERATION_CONFLICT`, rather than repairing
-authorization or using a newer value on the caller's behalf. Get/list expose that generation and
-`pending_request_ids` from the live owner. Collect the original receipt with
-`codespace({ action: "operation", device_id, request_id })`, even if create returned no ID.
-`absent`, `accepted`, `completed` and `unconfirmed` distinguish original outcomes; collection
-never repeats the mutation. Neither absence nor a newer snapshot permits automatic replay.
-An unavailable owner supplies no current policy or grants and accepts no queued offline mutations.
+Scoped Git/PR work uses derived credentials while original OAuth/refresh credentials remain
+server-side. Ordinary Git fetch/push follows repository rights. `pull_request_create` returns
+an operation; collect it after uncertainty and use `pull_request_read` with head/base or number
+before deliberately creating another PR. Credential custody or disposal uncertainty is not a
+confirmed refusal. Preserve the returned original and follow its security-collection guidance.
+Tokens are never project files, command arguments, environment values or tool results.
 
-Local resource summaries use the live owner's machine, current lifecycle generation and state;
-route registration alone cannot supply them. The public `machine` field is nullable, including
-after confirmed deletion. Without an owner resource observation, `get` refuses as
-`CODESPACE_PROVIDER_UNAVAILABLE` instead of inventing a profile or generation. If the owner journal
-retains pending creation work, `CODESPACE_LOCAL_CREATION_UNKNOWN` carries the original `request_id`,
-`device_id` and `codespace_id` for collection even before a summary is available. A completed receipt
-with an uncertain error remains uncertain on explicit repetition; collection never creates another VM.
+Commands, sessions and complete output belong to the common guest owner and its persistent
+journal. Cloud routing has no offline command queue or separate result copy. Loss of observation
+does not cancel a command; provider stop can interrupt it. `timeout_seconds` is explicit,
+and output windows do not limit retained output. Cancellation remains pending until physically
+proved. Named sessions must be explicitly opened or continued and cannot be assumed to survive
+guest restart. File changes use confined descriptors, checked originals and atomic transactions;
+interrupted recovery preserves uncertainty and foreign changes.
 
-`list` returns observed summaries in `codespaces` and separately retains owned identities whose
-observation failed in `unavailable`. Each unavailable entry carries its identity and safe `error.code`,
-without an invented state or generation. Known owner request IDs may appear in `pending_request_ids`;
-their absence does not certify that no request was admitted. `provider_errors` identifies providers
-that failed to produce a view, including when all providers failed; successful peers remain visible.
-Settings shows unavailable identities read-only until a current observation supplies lifecycle authority.
-
-On the computer, the host CLI uses the running private controller for `create`, `start`, `stop`,
-`remove --confirm` and `collect`. Fresh creation needs live cloud route registration and initial
-Git authority; admitted VMs can be managed offline under applicable current owner rights.
-Starting requires the finite work lease; owner-confirmed cleanup does not renew it. Ordinary
-commands/files use the guest `moira-workspace` CLI.
-
-GitHub create/adopt runs at a paired controller with an active registration; choose `device_id`
-when several are registered, even when only one is online. Actual dispatch checks that selected
-controller's availability without substituting another. `adopt` accepts a registered `codespace_id` with its observed `generation`, or an owned
-`provider_resource_name` for initial admission. The controller uses trusted gh/SSH and the shipped
-payload in place, preserving the disk and original operation journal. Ordinary file calls cannot
-start or SSH into the environment. Local has no cloud aggregate quota; its current rights and
-physical limits belong to the owner.
-
-`create`, `get`, `start`, `stop` and `delete` address the selected provider. GitHub create/start may
-return a pending resource; inspect its original receipt and current guest connection without replay. Ordinary workspace
-dispatch requires a usable guest. Stop preserves repository data, and delete requires `confirm_delete: true` and
-confirmed absence. Local agent deletion also requires its repository permission and current work
-authority. The owner can instead confirm cleanup of that exact environment in **Settings →
-Development → Local computers**, with paired local web control, without granting agent deletion
-or renewing an expired work lease.
-
-Unknown or foreign resources disclose no other owner's data. Ordinary resource calls return
-`CODESPACE_NOT_FOUND`; process authority refusal uses `CODESPACE_AUTHORIZATION_REQUIRED`.
-An incomplete GitHub provider refresh reports a warning rather than erasing saved entries.
-`codespace({ action: "list", refresh: true })` requests a fresh approved repository/resource observation. Repository
-identity follows the provider ID, so a rename or checked-out branch change does not replace the
-environment. Creation still requires a valid branch or commit reference.
-
-GitHub creation supports personal-account billing. Organization-billed creation is refused with
-`CODESPACE_BILLING_UNSUPPORTED`. Settings shows current resources and separately available current-month GitHub billing. Local has no cloud billing limits;
-its resource and policy observations come from the owner.
-Billing may be unavailable without `Plan: read` or while its API is unavailable; that does not grant
-or revoke resource access. Physical Local storage, CPU/RAM admission and finite work leases remain
-effective.
-
-GitHub idle preferences apply when Moira creates a new Codespace:
-`codespaces.auto_stop_enabled` defaults to true and `codespaces.idle_timeout_minutes` defaults to
-30 within GitHub's 5–240-minute range. Disabling the preference requests 240 minutes, not unlimited
-running. Existing environments retain their provider parameters. GitHub detects editor, browser and
-terminal activity; a silent background command can be stopped by its native idle policy or lifetime
-limit. Local environments follow their computer owner's policy. Starting a stopped environment requires explicit start; stopping does not preserve a live process.
-
-#### Commands, collection and sessions
-
-Choose a fresh `request_id` in `ws1-<lowercase UUID>` form before `exec`, process start,
-`write`, `apply_patch` or `upload`. Repository admission has its separate UUID identity.
-Historical plain operation UUIDs are archival and cannot address new work; adding a prefix to an
-old identifier does not recover its operation. Retain the actual identity you chose before submission.
-
-`exec` accepts `argv` as arguments without shell interpolation, or `script` inside a named
-session. It observes briefly and can return `starting` or `running` before completion. Collect a
-lost reply with `exec` containing only `codespace_id` and the original `request_id`; do not start
-a second command. A changed command or input under the same admitted identity is refused.
-`timeout_seconds` sets an execution deadline only when explicitly supplied. Reply windows
-`max_stdout_bytes` and `max_stderr_bytes` bound returned text; they neither stop the command nor
-limit its retained output. Read later output with `read`, the original `request_id`, `stream`,
-`offset` and `length`. Command observations retain their actual `exitCode` and stream sizes.
-
-`codespace_process` exposes start/get/read/stop for a long-lived command. Start uses the same
-command identity and fields; retain its `process_id` for collection and explicit cancellation.
-A lost connection closes observation, not the admitted command. `unknown` means its effect is
-unconfirmed, not that it never ran. `not_started` requires evidence that execution was prevented;
-a cancellation request is not proof of completed cancellation. Inspect the same identity and
-affected files before deciding what new work is needed.
-
-Open a named session with `session_start: true`; subsequent commands use the same `session`.
-The session carries its working directory and environment, including changes left by a shell
-script. `session_end: true` closes it. Sessions have no inherited slot or context-size quota;
-actual process/environment and storage failures remain observable. Session state is local to the
-guest life, so reopen it after an environment restart. Retained terminal results can remain on the
-persistent disk; a missing or uncertain result is never automatically replayed.
-
-Supply at most one stdin form: `stdin_text` or a native `stdin_file` reference. Native bytes stream
-to the service without base64 in the conversation or a cloud command-input spool. Current account,
-repository, resource generation and Local device/work authority are checked independently of the
-command journal. Independent commands and reads can proceed while another result is uncertain;
-guarded mutations coordinate inside the guest.
-
-Source preparation is distinct from execution: repository authority is checked before native
-acquisition, and the final locked session/repository gate can still refuse the prepared command.
-Collect its original result; prepared bytes alone do not prove execution or authorize a retry.
-
-#### Reading, editing and publishing files
-
-Paths are repository-relative. `stat` returns file metadata and its version; it is useful when an
-edit needs a size/hash precondition, and is not a required step before downloading.
-`search` supports literal or regex search with caller-selected result windows
-`max_matches` and `max_bytes`; those windows do not limit the total file bytes scanned.
-`read` returns the requested UTF-8 range with `offset` and `total_bytes`, defaulting to a 64 KiB
-window. Binary text ranges return `CODESPACE_BINARY_READ_REQUIRES_DOWNLOAD`.
-
-`write` and `apply_patch` require a stable workspace request identity and `expected` existence,
-with optional `size_bytes` and whole-file `sha256`. Patches use ordered byte-offset edits.
-The service stages and commits guarded changes, refuses stale preconditions, traversal, unsafe
-links and substituted ownership, and retains uncertainty rather than overwriting foreign data
-during interrupted recovery. There is no inherited 4 MiB code-file ceiling.
-
-`upload` streams a native attachment to its guarded repository target. `download` reads a complete
-file by `path` and requires `file_name` and `mime_type`. It publishes an MCP `resource_link` plus
-`file.reference_id`, size, digest and expiry. Optional `max_bytes` refuses an oversized complete
-file with `CODESPACE_DOWNLOAD_BOUND_EXCEEDED`; it never publishes a prefix as the file.
-A complete empty file is valid. Publication does not send a message: explicitly use
-`communication({ action: "deliver-file", request_id, referenceId, message, kind })` for an owned ready file.
-Its immutable owner publication supports repeated reads until expiry; delivery does not renew it.
-
-`preview_image` returns complete structurally checked PNG/JPEG content; optional `max_bytes`
-sets the caller's whole-image bound without generic byte or dimension ceilings.
-Use complete download for the original binary. Workspace command/file streams have no inherited
-aggregate transfer, output, session or implicit execution-duration quota. Physical storage,
-filesystem confinement, scoped authority, provider policies and caller-selected observation bounds
-still apply. The MCP HTTP JSON body guard is a separate metadata boundary; native binary streams
-and the direct guest CLI do not encode their bytes in that JSON body.
+Native input streams directly to the owner without base64 or cloud attachment storage.
+Operation identity, input digest/comparison metadata and original results remain retained.
+After a matching terminal result and settled readers, the owner can remove a verified temporary
+native/stdin copy; live, unknown or conflicting work retains it. Complete command output remains,
+and collection neither reacquires that source nor repeats the action.
+Repository authority is checked before acquisition, and final owner admission can still refuse
+prepared input. File/output continuation preserves complete UTF-8 characters. Binary files require
+download rather than lossy text decoding. Download returns an immutable resource link and
+publication reference with size, digest and expiry; a bound never publishes a prefix as a full file.
+Preview validates the complete PNG/JPEG container, not decoded pixels. Explicit observation
+bounds, actual storage capacity, filesystem ownership, current authority and real provider
+limits remain; there are no generic command runtime, output or file-transfer quotas.
 
 #### Direct guest terminal access
 
-The installed CLI uses the same service and identities as remote calls:
+The installed `moira-workspace` CLI uses the same private Unix owner and purposes.
+Use `--help` for supported options:
 
 ```bash
-moira-workspace exec --request-id ws1-11111111-1111-4111-8111-111111111111 -- npm test
-moira-workspace status ws1-11111111-1111-4111-8111-111111111111
-moira-workspace output ws1-11111111-1111-4111-8111-111111111111 stdout
-moira-workspace upload --request-id ws1-22222222-2222-4222-8222-222222222222 assets/data.bin /tmp/data.bin
-moira-workspace download assets/data.bin > /tmp/data-copy.bin
+moira-workspace exec -- npm test
+moira-workspace get "$OPERATION_REF"
+moira-workspace output "$PROCESS_REF" --stream stdout
+moira-workspace read README.md
+moira-workspace patch README.md --old "Old text" --new "New text"
 ```
 
-Choose a fresh identity for each intended mutation; the literals above illustrate the format.
-The command shortcuts generate and print one before accepting input or starting work when their
-optional `--request-id` is omitted.
-`upload`/ `write` default to an absent target unless an explicit expected JSON guard is supplied.
-CLI `download` writes repository bytes to standard output; MCP download is the separate publication
-step that supplies a private reference for communication. Use CLI status/output after a lost reply.
-
-Use `moira-workspace action request.json` (or `action -` for JSON on stdin) for the full
-workspace action contract, including scripts, sessions, cwd, environment, explicit timeouts,
-native descriptors and observation windows. For example, `request.json` can contain:
-
-```json
-{
-  "action": "exec",
-  "request": {
-    "request_id": "ws1-33333333-3333-4333-8333-333333333333",
-    "session": "checks",
-    "session_start": true,
-    "cwd": ".",
-    "env": { "CHECK_MODE": "local" },
-    "script": "printf '%s\\n' \"$CHECK_MODE\"",
-    "timeout_seconds": 30
-  }
-}
-```
-
-The JSON adapter preserves the supplied `request_id` or `process_id`; it does not generate one.
-Collect with an `exec` action containing only the original `request_id`, or use status/output.
-`moira-workspace communication request.json` (or `communication -`) submits the owner communication
-JSON with its original camelCase `requestId`; status collects that original receipt without
-another publication or send. Keep signed native descriptors in the JSON file or stdin, never argv.
+Copy returned references into later calls. Each deliberate mutation is a new intent; there is no
+caller-supplied request ID or automatic replay. `find` discovers retained originals for explicit
+selection. `native-upload`, `exec --native-stdin` and `deliver --native` read the native
+descriptor from stdin, never argv. Files and PRs use checked references and meaningful
+parameters; publication and delivery remain distinct. Local-only execution does not require cloud enrollment,
+but cloud collection still needs a registered authorized owner.
+Detached guest daemon diagnostics rotate separately in
+`~/.local/state/moira/workspace-service/daemon.log`, `daemon.log.1` and `daemon.log.2`, each bounded
+to 1 MiB. This does not trim command stdout/stderr; use the returned process reference and
+`output` or `process_output` for those full streams.
 Installation through the common image or Feature is described in
 [self-hosting](/docs/getting-started/self-hosting/#connect-local-codespaces).
 

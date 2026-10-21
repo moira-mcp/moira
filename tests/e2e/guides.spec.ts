@@ -63,6 +63,7 @@ const SETTINGS_STEPS = [
   "security",
   "notifications",
   "github",
+  "environment-views",
   "local-devices",
   "apps",
   "tokens",
@@ -153,11 +154,7 @@ test("the flow page's tour shows its owner the edit switch", async ({ page }) =>
 
 for (const [guideId, opener, steps] of [
   ["settings", "guide-open", SETTINGS_STEPS],
-  [
-    "settings-github",
-    "github-guide-open",
-    ["steps", "connect", "codespaces", "limits", "autopause"],
-  ],
+  ["settings-github", "github-guide-open", ["steps", "connect", "codespaces", "autopause"]],
   ["settings-telegram", "telegram-guide-open", ["bot", "chat", "enable", "test"]],
 ] as const) {
   test(`the Settings guide ${guideId} lands on a rendered element at every step`, async ({

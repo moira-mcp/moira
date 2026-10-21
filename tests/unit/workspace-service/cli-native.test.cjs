@@ -6,7 +6,6 @@ const { join, resolve } = require("node:path");
 const { pathToFileURL } = require("node:url");
 const sharp = require("sharp");
 const { createFixture, start, call, dispose } = require("../../fixtures/workspace-service.cjs");
-
 const fixtures = [];
 afterEach(async () => {
   for (const value of fixtures.splice(0)) await dispose(value);
@@ -20,6 +19,7 @@ async function service(configure = () => {}) {
     authorizationGeneration: 1,
     publicOrigin: "https://moira.example",
   };
+  value.ownerSelector = { kind: "github", resourceId: value.publicationScope.resourceId };
   configure(value);
   await start(value);
   return value;
@@ -31,154 +31,159 @@ function cli(value, args, input) {
     encoding: "utf8",
   });
 }
+const payload = (reply) => JSON.parse(reply.stdout).structuredContent;
 const descriptor = {
   file_id: "file_fixture",
   download_url: "https://127.0.0.1/source?sig=private-source-secret",
   size_bytes: 3,
 };
+async function tool(value, action, request, requestId) {
+  return JSON.parse(
+    (
+      await call(
+        value,
+        "POST",
+        "/v1/tools",
+        { action, request, ...(requestId ? { requestId } : {}) },
+        { "content-type": "application/json" },
+      )
+    ).bytes,
+  );
+}
 
-test("CLI action preserves session cwd, environment and scripts through the common owner contract", async () => {
+test("ordinary CLI preserves script/session cwd, environment and explicit timeout through the common owner", async () => {
   const value = await service();
   mkdirSync(join(value.root, "nested"));
-  const requestId = `ws1-${randomUUID()}`;
-  const started = cli(
-    value,
-    ["action", "-"],
-    JSON.stringify({
-      action: "exec",
-      request: {
-        request_id: requestId,
-        session: "cli-context",
-        session_start: true,
-        cwd: "nested",
-        env: { CLI_VALUE: "authored value" },
-        script: 'printf "%s|%s" "$CLI_VALUE" "$PWD"; export CLI_VALUE="retained value"',
-        timeout_seconds: 10,
-      },
-    }),
-  );
+  const script = join(value.directory, "script");
+  writeFileSync(script, 'printf "%s|%s" "$CLI_VALUE" "$PWD"; export CLI_VALUE="retained value"');
+  const started = cli(value, [
+    "exec",
+    "--script",
+    script,
+    "--session",
+    "cli-context",
+    "--cwd",
+    "nested",
+    "--env",
+    "CLI_VALUE=authored value",
+    "--timeout",
+    "10",
+  ]);
   expect(started.status).toBe(0);
-  const [printed, payload] = started.stdout.trim().split("\n");
-  expect(printed).toBe(requestId);
-  expect(JSON.parse(payload).structuredContent).toMatchObject({
-    request_id: requestId,
-    state: "succeeded",
-    runtimeMs: 10_000,
-    stdout: `authored value|${join(value.root, "nested")}`,
+  expect(payload(started)).toMatchObject({
+    state: "completed",
+    stdout: "authored value|" + join(value.root, "nested"),
   });
-  const continuedId = `ws1-${randomUUID()}`;
-  const continued = cli(
-    value,
-    ["action", "-"],
-    JSON.stringify({
-      action: "exec",
-      request: {
-        request_id: continuedId,
-        session: "cli-context",
-        script: 'printf "%s|%s" "$CLI_VALUE" "$PWD"',
-      },
-    }),
-  );
+  writeFileSync(script, 'printf "%s|%s" "$CLI_VALUE" "$PWD"');
+  const continued = cli(value, [
+    "exec",
+    "--script",
+    script,
+    "--session",
+    "cli-context",
+    "--continue",
+  ]);
   expect(continued.status).toBe(0);
-  expect(JSON.parse(continued.stdout.trim().split("\n")[1]).structuredContent).toMatchObject({
-    request_id: continuedId,
-    state: "succeeded",
-    stdout: `retained value|${join(value.root, "nested")}`,
+  expect(payload(continued)).toMatchObject({
+    state: "completed",
+    stdout: "retained value|" + join(value.root, "nested"),
   });
+  expect(payload(started).operation).not.toBe(payload(continued).operation);
 });
 
-test("CLI action collects the original process and reads its requested range without repeating its effect", async () => {
+test("CLI returned process/operation references collect and continue output without repeating the effect", async () => {
   const value = await service();
-  const requestId = `ws1-${randomUUID()}`;
-  const inputPath = join(value.directory, "action.json");
-  writeFileSync(
-    inputPath,
-    JSON.stringify({
-      action: "process_start",
-      request: {
-        request_id: requestId,
-        argv: [
-          process.execPath,
-          "-e",
-          "require('node:fs').appendFileSync('effect','once\\n');process.stdout.write('0123456789abcdef')",
-        ],
-      },
-    }),
-  );
-  const submitted = cli(value, ["action", inputPath]);
+  const submitted = cli(value, [
+    "exec",
+    "--max-stdout",
+    "4",
+    "--",
+    process.execPath,
+    "-e",
+    "require('node:fs').appendFileSync('effect','once\\n');process.stdout.write('Я🙂аб🙂z')",
+  ]);
   expect(submitted.status).toBe(0);
-  expect(submitted.stdout.split("\n")[0]).toBe(requestId);
-  const collect = () =>
-    cli(
-      value,
-      ["action", "-"],
-      JSON.stringify({ action: "exec", request: { request_id: requestId } }),
-    );
-  const collected = collect();
+  const first = payload(submitted);
+  const collected = cli(value, ["get", first.operation]);
   expect(collected.status).toBe(0);
-  const original = JSON.parse(collected.stdout.trim().split("\n")[1]);
-  expect(original.structuredContent).toMatchObject({
-    request_id: requestId,
-    state: "succeeded",
-    stdout: "0123456789abcdef",
-  });
-  expect(collect().stdout).toBe(collected.stdout);
-  const ranged = cli(
-    value,
-    ["action", "-"],
-    JSON.stringify({
-      action: "process_read",
-      request: { process_id: requestId, stream: "stdout", offset: 3, length: 5 },
-    }),
-  );
-  expect(ranged.status).toBe(0);
-  expect(JSON.parse(ranged.stdout.trim().split("\n")[1]).structuredContent).toEqual({
-    process_id: requestId,
-    stream: "stdout",
-    offset: 3,
-    total_bytes: 16,
-    text: "34567",
-  });
+  expect(payload(collected).state).toBe("completed");
+  expect(cli(value, ["get", first.operation]).stdout).toBe(collected.stdout);
+  let text = first.stdout,
+    cursor = first.stdout_cursor;
+  while (cursor) {
+    const result = cli(value, ["output", first.process, "--cursor", cursor, "--max-bytes", "4"]);
+    expect(result.status).toBe(0);
+    const next = payload(result);
+    text += next.text;
+    cursor = next.next_cursor;
+  }
+  expect(text).toBe("Я🙂аб🙂z");
   expect(readFileSync(join(value.root, "effect"), "utf8")).toBe("once\n");
 });
 
-test("CLI communication publishes exact bytes and collects its original receipt without a second publication", async () => {
+test("CLI upload/raw stdin preserve opaque bytes and download derives original name/type", async () => {
   const value = await service();
-  const requestId = `ws1-${randomUUID()}`;
   const bytes = Buffer.from([0, 255, 42, 13, 10, 128]);
-  const input = JSON.stringify({
-    action: "publish",
-    requestId,
-    source: {
-      type: "inline",
-      data: bytes.toString("base64"),
-      fileName: "owner.bin",
-      mimeType: "application/octet-stream",
-    },
+  const uploaded = cli(value, ["upload", "owner.bin", "-"], bytes);
+  expect(uploaded.status).toBe(0);
+  expect(readFileSync(join(value.root, "owner.bin"))).toEqual(bytes);
+  const run = cli(
+    value,
+    [
+      "exec",
+      "--stdin",
+      "--",
+      process.execPath,
+      "-e",
+      "process.stdin.pipe(require('node:fs').createWriteStream('stdin.bin'))",
+    ],
+    bytes,
+  );
+  expect(run.status).toBe(0);
+  expect(readFileSync(join(value.root, "stdin.bin"))).toEqual(bytes);
+  const published = cli(value, ["download", "owner.bin"]);
+  expect(published.status).toBe(0);
+  const result = JSON.parse(published.stdout);
+  expect(result.content[0]).toMatchObject({
+    type: "resource_link",
+    name: "owner.bin",
+    mimeType: "application/octet-stream",
+    size: bytes.length,
   });
-  const submitted = cli(value, ["communication", "-"], input);
-  expect(submitted.status).toBe(0);
-  const [printed, payload] = submitted.stdout.trim().split("\n");
-  expect(printed).toBe(requestId);
-  const receipt = JSON.parse(payload);
-  expect(receipt).toMatchObject({
-    requestId,
-    state: "completed",
-    outcome: { ok: true, result: { file: { fileName: "owner.bin", size: bytes.length } } },
-  });
-  const collected = cli(value, ["status", requestId]);
-  expect(collected.status).toBe(0);
-  expect(JSON.parse(collected.stdout)).toEqual(receipt);
-  const repeated = cli(value, ["communication", "-"], input);
-  expect(repeated.status).toBe(0);
-  const [repeatedId, repeatedPayload] = repeated.stdout.trim().split("\n");
-  expect(repeatedId).toBe(requestId);
-  expect(JSON.parse(repeatedPayload)).toEqual(receipt);
+  const token = result.structuredContent.file.reference_id.split("/").at(-1);
+  expect((await call(value, "GET", "/v1/publications/" + token)).bytes).toEqual(bytes);
+});
+
+test("CLI collects a controlled publication delivery through the unified original operation reference", async () => {
+  const value = await service();
+  const requestId = "ws1-" + randomUUID();
+  const bytes = Buffer.from([0, 255, 42]);
+  const original = JSON.parse(
+    (
+      await call(
+        value,
+        "POST",
+        "/v1/communication",
+        {
+          action: "publish",
+          requestId,
+          source: {
+            type: "inline",
+            data: bytes.toString("base64"),
+            fileName: "owner.bin",
+            mimeType: "application/octet-stream",
+          },
+        },
+        { "content-type": "application/json" },
+      )
+    ).bytes,
+  );
+  const found = cli(value, ["find", "--kind", "delivery"]);
+  expect(found.status).toBe(0);
+  const reference = payload(found).operations[0].operation;
+  expect(payload(cli(value, ["get", reference])).outcome).toEqual(original.outcome);
+  expect(payload(cli(value, ["get", reference])).outcome).toEqual(original.outcome);
   expect(readdirSync(join(value.stateRoot, "publications", "objects"))).toHaveLength(1);
-  const token = receipt.outcome.result.file.referenceId.split("/").at(-1);
-  const downloaded = await call(value, "GET", `/v1/publications/${token}`);
-  expect(downloaded.status).toBe(200);
-  expect(downloaded.bytes).toEqual(bytes);
 });
 
 function scopedService(code, securityRequestId) {
@@ -186,257 +191,181 @@ function scopedService(code, securityRequestId) {
     const module = join(fixture.directory, "scoped-refusal.mjs");
     writeFileSync(
       module,
-      `import {appendFile} from 'node:fs/promises';export async function pullRequest(){await appendFile(${JSON.stringify(join(fixture.directory, "issuer-calls"))},'acquire\\n');throw Object.assign(new Error('private-provider-secret'),{publicCode:${JSON.stringify(code)},status:503,securityRequestId:${JSON.stringify(securityRequestId)}})}`,
+      "import {appendFile} from 'node:fs/promises';export async function pullRequest(){await appendFile(" +
+        JSON.stringify(join(fixture.directory, "issuer-calls")) +
+        ",'acquire\\n');throw Object.assign(new Error('private-provider-secret'),{publicCode:" +
+        JSON.stringify(code) +
+        ",status:503,securityRequestId:" +
+        JSON.stringify(securityRequestId) +
+        "})}",
     );
     fixture.pullRequestFixture = pathToFileURL(module).href;
   });
 }
-
 test.each([
   "SCOPED_CREDENTIAL_OUTCOME_UNCONFIRMED",
   "SCOPED_CREDENTIAL_CUSTODY_UNCONFIRMED",
   "SCOPED_CREDENTIAL_DISPOSAL_PENDING",
 ])(
-  "CLI preserves %s as original security uncertainty rather than PR dispatch uncertainty",
+  "CLI preserves %s with original operation/security references without another issuance",
   async (code) => {
-    const securityRequestId = `ws1-${randomUUID()}`;
-    const value = await scopedService(code, securityRequestId);
-    const requestId = `ws1-${randomUUID()}`;
-    const submitted = cli(
-      value,
-      ["pull-request-create", "--request-id", requestId, "-"],
-      JSON.stringify({ head: "work", base: "main", title: "Owner PR" }),
-    );
+    const value = await scopedService(code, "ws1-" + randomUUID());
+    const submitted = cli(value, ["pr-create", "work", "main", "Owner PR"]);
     expect(submitted.status).toBe(1);
-    const [printed, payload] = submitted.stdout.trim().split("\n");
-    expect(printed).toBe(requestId);
-    expect(JSON.parse(payload).structuredContent).toMatchObject({
-      request_id: requestId,
-      state: "not_started",
-      error: { code },
-      security_request_id: securityRequestId,
+    const original = payload(submitted);
+    expect(original).toMatchObject({
+      state: "unconfirmed",
+      original: { error: { code } },
+      security_operation: expect.any(String),
     });
-    expect(submitted.stderr).toContain(code);
-    expect(submitted.stderr).toContain(securityRequestId);
-    expect(submitted.stderr).toContain("unconfirmed");
-    expect(submitted.stderr).not.toContain("confirmed result is not a lost reply");
-    expect(submitted.stdout + submitted.stderr).not.toContain("private-provider-secret");
-    const collected = cli(value, ["pull-request-create", "--request-id", requestId]);
+    const collected = cli(value, ["get", original.operation]);
     expect(collected.status).toBe(1);
-    expect(collected.stdout).toBe(submitted.stdout);
-    expect(collected.stderr).toBe(submitted.stderr);
+    expect(payload(collected)).toEqual(original);
+    const found = cli(value, ["find", "--kind", "pull-request"]);
+    expect(found.status).toBe(0);
+    expect(payload(found).operations).toMatchObject([
+      { operation: original.operation, state: "unconfirmed" },
+    ]);
     expect(readFileSync(join(value.directory, "issuer-calls"), "utf8")).toBe("acquire\n");
+    expect(submitted.stdout + submitted.stderr).not.toContain("private-provider-secret");
   },
 );
-
+test("confirmed scoped refusal stays a completed refusal in discovery and collection", async () => {
+  const value = await scopedService("SCOPED_CREDENTIAL_AUTHORITY_REFUSED", "ws1-" + randomUUID());
+  const original = payload(cli(value, ["pr-create", "work", "main", "Owner PR"]));
+  expect(original).toMatchObject({
+    state: "completed",
+    outcome: { ok: false, error: { code: "SCOPED_CREDENTIAL_AUTHORITY_REFUSED" } },
+  });
+  expect(payload(cli(value, ["find", "--kind", "pull-request"])).operations).toMatchObject([
+    { operation: original.operation, state: "completed" },
+  ]);
+  expect(payload(cli(value, ["get", original.operation]))).toEqual(original);
+  expect(readFileSync(join(value.directory, "issuer-calls"), "utf8")).toBe("acquire\n");
+});
 test.each([
-  ["pull-request-get", ["7"]],
-  ["pull-request-find", ["work", "main"]],
+  ["pr-get", ["7"]],
+  ["pr-find", ["work", "main"]],
 ])(
-  "CLI %s retains original security uncertainty through the owner HTTP refusal",
-  async (action, args) => {
-    const securityRequestId = `ws1-${randomUUID()}`;
-    const code = "SCOPED_CREDENTIAL_DISPOSAL_PENDING";
-    const value = await scopedService(code, securityRequestId);
-    const result = cli(value, [action, ...args]);
+  "CLI %s preserves scoped read uncertainty without provider metadata leakage",
+  async (command, args) => {
+    const value = await scopedService("SCOPED_CREDENTIAL_DISPOSAL_PENDING", "ws1-" + randomUUID());
+    const result = cli(value, [command, ...args]);
     expect(result.status).toBe(1);
-    expect(JSON.parse(result.stdout)).toMatchObject({
-      isError: true,
-      structuredContent: {
-        error: { code, message: "Scoped credential operation outcome is unconfirmed" },
-        security_request_id: securityRequestId,
-      },
+    expect(payload(result)).toMatchObject({
+      error: { code: "SCOPED_CREDENTIAL_DISPOSAL_PENDING" },
+      security_operation: expect.any(String),
     });
-    expect(result.stderr).toContain(securityRequestId);
-    expect(result.stderr).toContain("unconfirmed");
-    expect(result.stderr).not.toContain("confirmed result is not a lost reply");
     expect(result.stdout + result.stderr).not.toContain("private-provider-secret");
     expect(readFileSync(join(value.directory, "issuer-calls"), "utf8")).toBe("acquire\n");
   },
 );
-
-test("post-dispatch PR uncertainty retains the original security identity through receipt collection", async () => {
-  const securityRequestId = `ws1-${randomUUID()}`;
-  const value = await scopedService("WORKSPACE_OUTCOME_UNCONFIRMED", securityRequestId);
-  const requestId = `ws1-${randomUUID()}`;
-  const submit = async (request) =>
-    JSON.parse(
-      (
-        await call(
-          value,
-          "POST",
-          "/v1/tools",
-          { action: "pull_request_create", request },
-          { "content-type": "application/json" },
-        )
-      ).bytes.toString(),
-    ).structuredContent;
-  const result = await submit({
-    request_id: requestId,
-    head: "work",
-    base: "main",
-    title: "Owner PR",
-  });
-  expect(result).toMatchObject({
-    request_id: requestId,
-    state: "unknown",
-    reason: "PULL_REQUEST_OUTCOME_UNKNOWN",
-    security_request_id: securityRequestId,
-  });
-  expect(await submit({ request_id: requestId })).toEqual(result);
-  const collected = cli(value, ["pull-request-create", "--request-id", requestId]);
-  expect(collected.status).toBe(1);
-  const [printed, payload] = collected.stdout.trim().split("\n");
-  expect(printed).toBe(requestId);
-  expect(JSON.parse(payload)).toMatchObject({
-    isError: true,
-    structuredContent: {
-      request_id: requestId,
-      state: "unknown",
-      reason: "PULL_REQUEST_OUTCOME_UNKNOWN",
-      error: { code: "WORKSPACE_OUTCOME_UNCONFIRMED" },
-      security_request_id: securityRequestId,
-    },
-  });
-  expect(collected.stderr).toContain("could not be confirmed");
+test("post-dispatch PR uncertainty retains the original security reference through pure get", async () => {
+  const value = await scopedService("WORKSPACE_OUTCOME_UNCONFIRMED", "ws1-" + randomUUID());
+  const submitted = cli(value, ["pr-create", "work", "main", "Owner PR"]);
+  expect(submitted.status).toBe(1);
+  const original = payload(submitted);
+  expect(original).toMatchObject({ state: "unconfirmed", security_operation: expect.any(String) });
+  expect(payload(cli(value, ["get", original.operation]))).toEqual(original);
+  expect(payload(cli(value, ["find", "--kind", "pull-request"])).operations).toMatchObject([
+    { operation: original.operation, state: "unconfirmed" },
+  ]);
   expect(readFileSync(join(value.directory, "issuer-calls"), "utf8")).toBe("acquire\n");
-  expect(JSON.stringify(result)).not.toContain("private-provider-secret");
 });
 
 test.each(["native-upload", "native-stdin"])(
-  "CLI %s reports a confirmed owner source refusal with original identity and no effect",
+  "CLI %s preserves confirmed source refusal without an effect",
   async (mode) => {
     const value = await service();
-    const requestId = `ws1-${randomUUID()}`;
-    const args =
+    const result = cli(
+      value,
       mode === "native-upload"
-        ? ["native-upload", "--request-id", requestId, "target.bin"]
+        ? ["native-upload", "target.bin"]
         : [
             "exec",
-            "--request-id",
-            requestId,
             "--native-stdin",
             "--",
             process.execPath,
             "-e",
             "require('node:fs').writeFileSync('effect','started')",
-          ];
-    const result = cli(value, args, JSON.stringify(descriptor));
+          ],
+      JSON.stringify(descriptor),
+    );
     expect(result.status).toBe(1);
-    const [printed, payload] = result.stdout.trim().split("\n");
-    expect(printed).toBe(requestId);
-    expect(JSON.parse(payload)).toMatchObject({
-      isError: true,
-      structuredContent: { error: { code: "SOURCE_REFUSED" }, request_id: requestId },
+    expect(payload(result)).toMatchObject({
+      error: { code: "SOURCE_REFUSED" },
+      operation: expect.any(String),
     });
-    expect(result.stderr).toContain("confirmed result is not a lost reply");
-    expect(result.stderr).not.toContain("could not be confirmed");
     expect(result.stdout + result.stderr).not.toContain("private-source-secret");
     expect(result.stdout + result.stderr).not.toContain("127.0.0.1");
     expect(existsSync(join(value.root, "target.bin"))).toBe(false);
     expect(existsSync(join(value.root, "effect"))).toBe(false);
-    const collected = await call(value, "GET", `/v1/operations/${requestId}`);
-    expect(JSON.parse(collected.bytes.toString())).toMatchObject({ state: "absent" });
+    expect(payload(cli(value, ["get", payload(result).operation])).state).toBe("absent");
   },
 );
 
-test("CLI refuses mutually exclusive stdin forms before submission", async () => {
+test("CLI refuses old control JSON, caller identity and mutually exclusive stdin before submission", async () => {
   const value = await service();
   const before = readdirSync(join(value.stateRoot, "requests"));
-  const result = cli(
-    value,
+  for (const args of [
+    ["action", "-"],
+    ["exec", "--request-id", "ws1-" + randomUUID(), "--", "true"],
     ["exec", "--stdin", "--native-stdin", "--", "true"],
-    JSON.stringify(descriptor),
-  );
-  expect(result.status).toBe(1);
-  expect(result.stdout).toBe("");
-  expect(result.stderr).toContain("refused before dispatch");
+  ]) {
+    const result = cli(value, args, JSON.stringify(descriptor));
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("refused before dispatch");
+  }
   expect(readdirSync(join(value.stateRoot, "requests"))).toEqual(before);
 });
 
-test.each(["write", "upload"])(
-  "CLI raw %s preserves a confirmed owner precondition refusal and its original identity",
+test.each(["create", "upload"])(
+  "CLI %s preserves a precondition refusal and the existing target",
   async (action) => {
     const value = await service();
-    const requestId = `ws1-${randomUUID()}`;
     writeFileSync(join(value.root, "target.txt"), "original");
-    const result = cli(
-      value,
-      [action, "--request-id", requestId, "target.txt", "-"],
-      "replacement",
-    );
+    const result = cli(value, [action, "target.txt", "-"], "replacement");
     expect(result.status).toBe(1);
-    const [printed, payload] = result.stdout.trim().split("\n");
-    expect(printed).toBe(requestId);
-    expect(JSON.parse(payload)).toMatchObject({
-      isError: true,
-      structuredContent: {
-        request_id: requestId,
-        error: { code: "FILE_REJECTED", reason: "precondition" },
-      },
-    });
-    expect(result.stderr).toContain("confirmed result is not a lost reply");
-    expect(result.stderr).not.toContain("could not be confirmed");
+    expect(payload(result).error).toMatchObject({ code: "FILE_REJECTED", reason: "precondition" });
     expect(readFileSync(join(value.root, "target.txt"), "utf8")).toBe("original");
-    expect(
-      JSON.parse((await call(value, "GET", `/v1/operations/${requestId}`)).bytes),
-    ).toMatchObject({ state: "absent" });
   },
 );
 
-test("CLI stdin preparation preserves a confirmed original-input conflict without launching its command", async () => {
+test("internal original stdin conflict still refuses before command launch", async () => {
   const value = await service();
-  const requestId = `ws1-${randomUUID()}`;
-  expect(
-    (await call(value, "PUT", `/v1/operations/${requestId}/input`, Buffer.from("original"))).status,
-  ).toBe(200);
-  const result = cli(
-    value,
-    [
-      "exec",
-      "--request-id",
-      requestId,
-      "--stdin",
-      "--",
-      process.execPath,
-      "-e",
-      "require('node:fs').writeFileSync('effect','started')",
-    ],
-    "replacement",
+  const requestId = "ws1-" + randomUUID();
+  await call(value, "PUT", "/v1/operations/" + requestId + "/input", Buffer.from("original"));
+  const refused = JSON.parse(
+    (await call(value, "PUT", "/v1/operations/" + requestId + "/input", Buffer.from("replacement")))
+      .bytes,
   );
-  expect(result.status).toBe(1);
-  const [printed, payload] = result.stdout.trim().split("\n");
-  expect(printed).toBe(requestId);
-  expect(JSON.parse(payload)).toMatchObject({
-    isError: true,
-    structuredContent: { request_id: requestId, error: { code: "REQUEST_ID_CONFLICT" } },
-  });
-  expect(result.stderr).toContain("confirmed result is not a lost reply");
+  expect(refused.error.code).toBe("REQUEST_ID_CONFLICT");
   expect(existsSync(join(value.root, "effect"))).toBe(false);
-  expect(JSON.parse((await call(value, "GET", `/v1/operations/${requestId}`)).bytes)).toMatchObject(
-    { state: "absent" },
-  );
 });
 
-test("CLI raw write retains post-effect publication uncertainty instead of claiming a refusal", async () => {
-  const value = await service();
-  const requestId = `ws1-${randomUUID()}`;
-  const directory = join(value.stateRoot, "requests", requestId);
-  mkdirSync(join(directory, "result.json"), { recursive: true, mode: 0o700 });
-  const result = cli(value, ["write", "--request-id", requestId, "written.txt", "-"], "written");
-  expect(result.status).toBe(1);
-  const [printed, payload] = result.stdout.trim().split("\n");
-  expect(printed).toBe(requestId);
-  expect(JSON.parse(payload)).toMatchObject({
-    isError: true,
-    structuredContent: { request_id: requestId, error: { code: "WORKSPACE_OUTCOME_UNCONFIRMED" } },
+test("post-effect publication failure retains original uncertainty through the semantic owner", async () => {
+  const value = await service(),
+    requestId = "ws1-" + randomUUID();
+  mkdirSync(join(value.stateRoot, "requests", requestId, "result.json"), {
+    recursive: true,
+    mode: 0o700,
   });
-  expect(result.stderr).toContain("could not be confirmed");
-  expect(result.stderr).not.toContain("confirmed result is not a lost reply");
+  const result = await tool(
+    value,
+    "file_create",
+    { path: "written.txt", text: "written" },
+    requestId,
+  );
+  expect(result.isError).toBe(true);
+  expect(result.structuredContent).toMatchObject({
+    operation: expect.any(String),
+    error: { code: "WORKSPACE_OUTCOME_UNCONFIRMED" },
+  });
   expect(readFileSync(join(value.root, "written.txt"), "utf8")).toBe("written");
 });
 
-test("CLI preview uses the owner payload and publication preserves the exact original bytes", async () => {
+test("CLI preview retains native image output and its selected whole-file bound", async () => {
   const value = await service();
   const image = await sharp({ create: { width: 3, height: 2, channels: 3, background: "#aabbcc" } })
     .png()
@@ -444,28 +373,10 @@ test("CLI preview uses the owner payload and publication preserves the exact ori
   writeFileSync(join(value.root, "image.png"), image);
   const result = cli(value, ["preview", "image.png"]);
   expect(result.status).toBe(0);
-  const owner = await call(
-    value,
-    "POST",
-    "/v1/tools",
-    { action: "preview_image", request: { path: "image.png" } },
-    { "content-type": "application/json" },
+  expect(JSON.parse(result.stdout)).toEqual(
+    await tool(value, "file_preview", { path: "image.png" }),
   );
-  expect(JSON.parse(result.stdout)).toEqual(JSON.parse(owner.bytes.toString()));
-  const bound = cli(value, ["preview", "image.png", String(image.length - 1)]);
-  expect(bound.status).toBe(1);
-  expect(bound.stderr).not.toContain("could not be confirmed");
-  const published = cli(value, ["publish", "image.png", "image.png", "image/png"]);
-  expect(published.status).toBe(0);
-  const payload = JSON.parse(published.stdout);
-  expect(payload.content[0]).toMatchObject({
-    type: "resource_link",
-    mimeType: "image/png",
-    size: image.length,
-  });
-  expect(payload.structuredContent.file.reference_id).toMatch(/^owner-file:\/\/workspace\//);
-  const token = payload.structuredContent.file.reference_id.split("/").at(-1);
-  const downloaded = await call(value, "GET", `/v1/publications/${token}`);
-  expect(downloaded.status).toBe(200);
-  expect(downloaded.bytes).toEqual(image);
+  expect(cli(value, ["preview", "image.png", "--max-bytes", String(image.length - 1)]).status).toBe(
+    1,
+  );
 });

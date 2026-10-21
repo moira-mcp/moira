@@ -2,7 +2,9 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import type { CodespaceProviderBillingView } from "@mcp-moira/shared";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useGitHubCodespaces } from "./GitHubCodespacesData";
+import { apiClient } from "@/services/api-client";
+import { useResource } from "@/hooks/useResource";
+import { DataRegion } from "@/components/DataRegion";
 
 export function CodespaceBillingPanel({
   billing,
@@ -109,14 +111,27 @@ export function CodespaceBillingPanel({
   );
 }
 
-export function CodespaceBillingFromData(): React.JSX.Element | null {
-  const { management } = useGitHubCodespaces();
-  if (!management) return null;
-  const selected = management.providers?.find((entry) => entry.provider === "github-codespaces");
-  const billing = selected
-    ? "provider_billing" in selected
-      ? selected.provider_billing
-      : "unavailable"
-    : management.provider_billing;
-  return <CodespaceBillingPanel billing={billing ?? "unavailable"} />;
+export function CodespaceBillingFromData({
+  active = false,
+}: {
+  active?: boolean;
+}): React.JSX.Element | null {
+  const { t } = useTranslation();
+  const resource = useResource<CodespaceProviderBillingView>(
+    active ? "codespace-provider-billing" : null,
+    () => apiClient.getCodespaceBilling(),
+    () => t("localDevices.codespaces.billingFailed"),
+  );
+  if (!active) return null;
+  return (
+    <DataRegion
+      hasResult={resource.data !== undefined}
+      pending={resource.pending}
+      error={resource.error}
+      onRetry={resource.refresh}
+      testId="codespace-billing-region"
+    >
+      {resource.data !== undefined && <CodespaceBillingPanel billing={resource.data} />}
+    </DataRegion>
+  );
 }

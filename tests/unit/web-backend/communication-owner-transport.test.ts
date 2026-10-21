@@ -1,6 +1,7 @@
 import { describe, expect, test } from "@jest/globals";
 import { Readable } from "node:stream";
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import type { Request, Response } from "express";
 import express from "express";
 import request from "supertest";
@@ -9,9 +10,11 @@ import { CommunicationOwnerTransport } from "../../../packages/web-backend/src/s
 import {
   TelegramCommunicationAdapter,
   CommunicationChannelRegistry,
+  ExtensionRegistry,
+  ExtensionCommunicationChannelAdapter,
   type IDataRepository,
 } from "@mcp-moira/workflow-engine";
-import type { CommunicationOwnerPrepare, CommunicationOwnerSend } from "@mcp-moira/shared";
+import type { CommunicationOwnerSend } from "@mcp-moira/shared";
 
 const scope = {
   kind: "controller" as const,
@@ -20,15 +23,18 @@ const scope = {
   deviceGeneration: 1,
   connectionId: "6dc89e7d-9ddb-47ab-a29b-e326866df77b",
 };
-const input: CommunicationOwnerPrepare = {
+const input = {
   scope,
   requestId: "ws1-c2fe6a69-74b9-4a70-a1df-38399297d9f6",
-  kind: "document",
+  kind: "document" as const,
   text: "Report",
   file: { fileName: "report.bin", mimeType: "application/octet-stream", size: 3 },
 };
 const routeBearer = "o".repeat(43);
-function fixture(fetcher: typeof fetch) {
+function fixture(
+  fetcher: typeof fetch,
+  registry = new CommunicationChannelRegistry([new TelegramCommunicationAdapter()]),
+) {
   const settings = new Map<string, unknown>([
     ["telegram.bot_token", "123:trusted-secret"],
     ["telegram.chat_id", "42"],
@@ -47,7 +53,7 @@ function fixture(fetcher: typeof fetch) {
     repository: {
       getSetting: async (_user: string, key: string) => settings.get(key) ?? null,
     } as unknown as IDataRepository,
-    registry: new CommunicationChannelRegistry([new TelegramCommunicationAdapter()]),
+    registry,
     fetch: fetcher,
   });
   return {
@@ -62,7 +68,7 @@ async function sendInput(
   service: CommunicationOwnerTransport,
   change: Partial<CommunicationOwnerSend> = {},
 ) {
-  const preparation = await service.prepare("owner-bearer", input);
+  const preparation = await service.prepare("owner-bearer", { scope, requestId: input.requestId });
   return {
     ...input,
     channelId: "telegram",
@@ -72,6 +78,129 @@ async function sendInput(
 }
 
 describe("fixed owner communication transport", () => {
+  test("installed transport-role settings remain at the broker while legitimate handler settings cross preparation", async () => {
+    const manifest = JSON.parse(
+      readFileSync(
+        "tests/fixtures/extension-bundles/channel-extension/moira-extension.json",
+        "utf8",
+      ),
+    );
+    const channel = manifest.communicationChannels[0];
+    channel.binaryTransport.operations[0].endpoint = {
+      baseUrlSetting: "channel-probe.baseUrl",
+      path: "/files",
+    };
+    channel.settings.push("channel-probe.baseUrl");
+    channel.configurationSchema.properties["channel-probe.baseUrl"] = { type: "string" };
+    manifest.settings.push({ key: "channel-probe.baseUrl", type: "string", label: "Endpoint" });
+    const extensions = new ExtensionRegistry();
+    expect(extensions.register(manifest).registered).toBe(true);
+    const declaration = extensions.getCommunicationChannel("channel-probe.notifications")!;
+    const adapter = new ExtensionCommunicationChannelAdapter(declaration, {
+      invoke: async () => ({ output: {} }),
+      binaryArtifact: async () => ({ digest: "b".repeat(64), bytes: Buffer.from("installed") }),
+    });
+    const requests: Array<{ url: string; headers: unknown; body: string }> = [];
+    const f = fixture(
+      (async (url, init) => {
+        const chunks: Uint8Array[] = [];
+        for await (const chunk of init!.body as unknown as AsyncIterable<Uint8Array>)
+          chunks.push(chunk);
+        requests.push({
+          url: String(url),
+          headers: init!.headers,
+          body: Buffer.concat(chunks).toString(),
+        });
+        return new Response("accepted");
+      }) as typeof fetch,
+      new CommunicationChannelRegistry([adapter]),
+    );
+    f.settings.set("channel-probe.enabled", true);
+    f.settings.set("channel-probe.destination", "fixed-recipient");
+    f.settings.set("channel-probe.baseUrl", "https://allowed.example/private/");
+    f.settings.set("channel-probe.token", "private-token");
+    const prepared = await f.service.prepare("owner-bearer", { scope, requestId: input.requestId });
+    expect(prepared.channels).toEqual([
+      expect.objectContaining({
+        capabilities: { text: true, image: true, document: true },
+        operations: ["upload"],
+        settings: { "channel-probe.enabled": true },
+      }),
+    ]);
+    expect(JSON.stringify(prepared)).not.toMatch(/fixed-recipient|allowed\.example|private-token/);
+    const descriptor = prepared.channels[0]!;
+    expect(
+      await f.service.send(
+        "owner-bearer",
+        {
+          ...input,
+          channelId: descriptor.channelId,
+          authorityDigest: descriptor.authorityDigest,
+          bundleDigest: descriptor.bundleDigest,
+          operationId: "upload",
+          controls: { caption: "Owner caption" },
+        },
+        (async function* () {
+          yield Buffer.from([0, 255, 1]);
+        })(),
+      ),
+    ).toEqual({ status: "delivered" });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      url: "https://allowed.example/files",
+      headers: { authorization: "Bearer private-token" },
+    });
+    expect(requests[0]!.body).toContain('name="recipient"\r\n\r\nfixed-recipient');
+    expect(requests[0]!.body).toContain('name="caption"\r\n\r\nOwner caption');
+    f.settings.set("channel-probe.destination", "replacement");
+    let staleSourceReads = 0;
+    expect(
+      await f.service.send(
+        "owner-bearer",
+        {
+          ...input,
+          channelId: descriptor.channelId,
+          authorityDigest: descriptor.authorityDigest,
+          bundleDigest: descriptor.bundleDigest,
+          operationId: "upload",
+        },
+        (async function* () {
+          staleSourceReads++;
+          yield Buffer.from([0, 255, 1]);
+        })(),
+      ),
+    ).toEqual({ status: "refused", reason: "channel_changed" });
+    expect(requests).toHaveLength(1);
+    expect(staleSourceReads).toBe(0);
+  });
+  test("authority-only preparation returns provider contracts without receiving or deciding file eligibility", async () => {
+    const f = fixture((async () => {
+      throw new Error("Preparation cannot dispatch");
+    }) as typeof fetch);
+    const prepared = await f.service.prepare("owner-bearer", { scope, requestId: input.requestId });
+    expect(prepared.channels).toEqual([
+      expect.objectContaining({
+        channelId: "telegram",
+        provider: "telegram",
+        capabilities: { text: true, image: true, document: true },
+        operations: ["send_message"],
+        constraints: {
+          text: { maxLength: 4096 },
+          caption: { maxLength: 1024 },
+          file: {
+            image: {
+              mimeTypes: ["image/png", "image/jpeg"],
+              minBytes: 1,
+              maxBytes: 10 * 1024 * 1024,
+            },
+            document: { minBytes: 1, maxBytes: 50 * 1024 * 1024 },
+          },
+        },
+      }),
+    ]);
+    expect(JSON.stringify(prepared)).not.toContain("trusted-secret");
+    expect(JSON.stringify(prepared)).not.toContain('"42"');
+  });
   test.each([
     { path: "/send", expected: { status: "refused", reason: "owner_unauthorized" } },
     {
@@ -154,7 +283,7 @@ describe("fixed owner communication transport", () => {
     }) as typeof fetch);
     const app = express();
     app.use(createCommunicationOwnerRoutes(f.service));
-    const body = { ...input, file: { ...input.file, fileName: `${"中".repeat(40_000)}.bin` } };
+    const body = { scope: { ...scope, userId: "中".repeat(40_000) }, requestId: input.requestId };
     const prepared = await request(app)
       .post("/prepare")
       .set("Authorization", `Bearer ${routeBearer}`)
@@ -312,26 +441,25 @@ describe("fixed owner communication transport", () => {
     expect(source.closed).toBe(true);
   });
 
-  test("provider upload bounds are checked before returning an admission descriptor", async () => {
+  test("the fixed broker refuses an invalid owner-prepared upload before opening its source", async () => {
+    let reads = 0;
     const f = fixture((async () => {
       throw new Error("must not dispatch");
     }) as typeof fetch);
-    await expect(
-      f.service.prepare("owner-bearer", {
-        ...input,
-        channelIds: ["telegram"],
-        kind: "image",
-        file: { ...input.file, mimeType: "image/png", size: 10 * 1024 * 1024 + 1 },
-      }),
-    ).rejects.toThrow();
     expect(
-      (
-        await f.service.prepare("owner-bearer", {
-          ...input,
-          file: { ...input.file, size: 50 * 1024 * 1024 },
-        })
-      ).channels,
-    ).toHaveLength(1);
+      await f.service.send(
+        "owner-bearer",
+        await sendInput(f.service, {
+          kind: "image",
+          file: { ...input.file, mimeType: "image/png", size: 10 * 1024 * 1024 + 1 },
+        }),
+        (async function* () {
+          reads++;
+          yield Buffer.from("x");
+        })(),
+      ),
+    ).toEqual({ status: "refused", reason: "delivery_not_admitted" });
+    expect(reads).toBe(0);
   });
 
   test("source interruption after vendor dispatch stays uncertain rather than becoming a refusal", async () => {

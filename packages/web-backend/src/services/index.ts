@@ -8,6 +8,10 @@ export { getCodespaceConnectionService } from "./codespace-connection-service.js
 export { getCodespaceResourceService } from "./codespace-resource-service.js";
 export { getWorkspaceClient, getControllerClient } from "./workspace-client.js";
 export {
+  getWorkspaceSemanticServices,
+  createWorkspaceSemanticServices,
+} from "./workspace-semantic-service.js";
+export {
   issueWorkspaceAgentCredential,
   authorizeWorkspacePublication,
 } from "./workspace-services.js";

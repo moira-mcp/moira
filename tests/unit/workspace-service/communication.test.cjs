@@ -1,5 +1,5 @@
 const { test, expect, afterEach } = require("@jest/globals");
-const { mkdtemp, realpath, rm, readdir, readFile, lstat } = require("node:fs/promises");
+const { mkdtemp, realpath, rm, readdir, readFile, writeFile, lstat } = require("node:fs/promises");
 const { watch } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
@@ -62,7 +62,275 @@ async function fixture(transport, sourceOpener, options = {}) {
   return { root, owner, open, scope, publications, bytes, input };
 }
 const prepare = async () => ({
-  channels: [{ channelId: "telegram", authorityDigest: "a".repeat(64), provider: "telegram" }],
+  channels: [
+    {
+      channelId: "telegram",
+      authorityDigest: "a".repeat(64),
+      provider: "telegram",
+      capabilities: { text: true, image: true, document: true },
+      operations: ["send_message"],
+      constraints: { text: { maxLength: 4096 }, caption: { maxLength: 1024 } },
+    },
+  ],
+});
+
+test.each(["unsupported explicit", "unsupported implicit", "MIME", "size", "empty", "text"])(
+  "owner delivery policy refuses %s before any vendor stage and retains its original result",
+  async (condition) => {
+    const calls = [];
+    const value = await fixture({
+      async prepare(control) {
+        expect(control).not.toHaveProperty("file");
+        expect(control).not.toHaveProperty("text");
+        expect(control).not.toHaveProperty("kind");
+        return {
+          channels: [
+            {
+              channelId: "telegram",
+              authorityDigest: "a".repeat(64),
+              provider: "telegram",
+              capabilities: {
+                text: true,
+                image: true,
+                document: !condition.startsWith("unsupported"),
+              },
+              operations: ["send_message"],
+              constraints: {
+                text: { maxLength: 4096 },
+                caption: { maxLength: 1024 },
+                file: {
+                  image: {
+                    mimeTypes: ["image/png", "image/jpeg"],
+                    minBytes: 1,
+                    maxBytes: 10 * 1024 * 1024,
+                  },
+                  document: { minBytes: 1, maxBytes: 50 * 1024 * 1024 },
+                },
+              },
+            },
+          ],
+        };
+      },
+      async send(control, source) {
+        calls.push(control);
+        for await (const _chunk of source) {
+          /* Drain any incorrectly admitted stage so the policy assertion observes it. */
+        }
+        return { status: "delivered" };
+      },
+    });
+    const input = {
+      ...value.input,
+      ...(condition === "unsupported explicit" ? { channelIds: ["telegram"] } : {}),
+      ...(condition === "MIME"
+        ? { kind: "image", source: { ...value.input.source, mimeType: "application/octet-stream" } }
+        : {}),
+      ...(condition === "size"
+        ? {
+            kind: "image",
+            source: {
+              ...value.input.source,
+              mimeType: "image/png",
+              data: Buffer.alloc(10 * 1024 * 1024 + 1).toString("base64"),
+            },
+          }
+        : {}),
+      ...(condition === "empty" ? { source: { ...value.input.source, data: "" } } : {}),
+      ...(condition === "text" ? { text: "x".repeat(4097) } : {}),
+    };
+    const receipt = await value.owner.submit(input);
+    expect(receipt).toMatchObject({
+      state: "completed",
+      stages: [],
+      outcome: { ok: false, error: { code: "COMMUNICATION_DELIVERY_REFUSED" } },
+    });
+    expect(calls).toEqual([]);
+    const record = await readFile(join(value.root, "communication", input.requestId + ".json"));
+    expect(await value.owner.submit(input)).toEqual(receipt);
+    expect(await value.owner.inspect(input.requestId)).toEqual(receipt);
+    expect(await readFile(join(value.root, "communication", input.requestId + ".json"))).toEqual(
+      record,
+    );
+    expect(calls).toEqual([]);
+  },
+);
+
+test("a local-only Unix owner gains remote publication without replacing work and captures each delivery configuration", async () => {
+  const { startWorkspaceService } =
+    await import("../../../packages/workspace-service/src/server.mjs");
+  const previousLife = process.env.MOIRA_ENVIRONMENT_ID;
+  process.env.MOIRA_ENVIRONMENT_ID ??= "service-test";
+  cleanup.push(() => {
+    if (previousLife === undefined) delete process.env.MOIRA_ENVIRONMENT_ID;
+    else process.env.MOIRA_ENVIRONMENT_ID = previousLife;
+  });
+  const value = guest.createFixture();
+  value.ownerSelector = {
+    kind: "local",
+    deviceId: randomUUID(),
+    spaceId: randomUUID(),
+    operationMarker: "moira-" + "a".repeat(24),
+  };
+  cleanup.push(() => guest.dispose(value));
+  value.socketPath = join(await realpath("/tmp"), `remote-config-${randomUUID()}.sock`);
+  const service = await startWorkspaceService(value);
+  cleanup.push(() => service.close());
+  const owner = service.owner;
+  const health = await owner.health();
+  const scope = {
+    resourceId: randomUUID(),
+    resourceGeneration: 1,
+    authorizationGeneration: 1,
+    publicOrigin: "https://moira.example",
+  };
+  const commandId = "ws1-" + randomUUID();
+  const releasePath = join(value.binding.root, "release");
+  cleanup.push(() => writeFile(releasePath, "release"));
+  let observed;
+  const started = new Promise((resolve) => {
+    observed = resolve;
+  });
+  const inspectEffect = async () => {
+    if (await readFile(join(value.binding.root, "effects"), "utf8").catch(() => null)) observed();
+  };
+  const watcher = watch(value.binding.root, () => void inspectEffect());
+  cleanup.push(() => watcher.close());
+  await owner.execute({
+    requestId: commandId,
+    argv: [
+      process.execPath,
+      "-e",
+      "const f=require('node:fs');f.appendFileSync('effects','once\\n');const t=setInterval(()=>{if(f.existsSync('release'))clearInterval(t)},10)",
+    ],
+  });
+  await inspectEffect();
+  await started;
+  const input = {
+    action: "deliver",
+    requestId: "ws1-" + randomUUID(),
+    source: {
+      type: "inline",
+      fileName: "owned.txt",
+      mimeType: "text/plain",
+      data: Buffer.from("same owner bytes").toString("base64"),
+    },
+    kind: "document",
+    text: "Original delivery",
+  };
+  await expect(owner.submitCommunication(input)).rejects.toMatchObject({
+    publicCode: "COMMUNICATION_OWNER_UNAVAILABLE",
+  });
+  let entered, resume;
+  const preparing = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const held = new Promise((resolve) => {
+    resume = resolve;
+  });
+  cleanup.push(() => resume());
+  const sends = [];
+  const transport = (name, delayed = false) => ({
+    async prepare(control) {
+      if (delayed) {
+        entered();
+        await held;
+      }
+      return prepare(control);
+    },
+    async send(control, source) {
+      const chunks = [];
+      for await (const bytes of source) chunks.push(bytes);
+      sends.push({ name, scope: control.scope, bytes: Buffer.concat(chunks) });
+      if (name === "uncertain") throw new Error("controlled lost vendor response");
+      return { status: "delivered" };
+    },
+  });
+  await owner.configureRemote({
+    publicationScope: scope,
+    communicationTransport: transport("original", true),
+  });
+  const original = owner.submitCommunication(input);
+  await preparing;
+  const nextScope = { ...scope, resourceGeneration: 2, authorizationGeneration: 2 };
+  await owner.configureRemote({
+    publicationScope: nextScope,
+    communicationTransport: transport("successor"),
+  });
+  await owner.configureRemote({});
+  resume();
+  const receipt = await original;
+  expect(receipt).toMatchObject({
+    state: "completed",
+    outcome: { ok: true, result: { status: "delivered" } },
+  });
+  expect(sends).toEqual([
+    {
+      name: "original",
+      scope: {
+        kind: "workspace",
+        resourceId: scope.resourceId,
+        resourceGeneration: 1,
+        authorizationGeneration: 1,
+        environmentIdentity: health.environmentIdentity,
+      },
+      bytes: Buffer.from("same owner bytes"),
+    },
+  ]);
+  const recordPath = join(value.stateRoot, "communication", input.requestId + ".json");
+  const originalBytes = await readFile(recordPath);
+  expect(await owner.inspectCommunication(input.requestId)).toEqual(receipt);
+  expect(await owner.submitCommunication(input)).toEqual(receipt);
+  await expect(
+    owner.submitCommunication({ ...input, requestId: "ws1-" + randomUUID() }),
+  ).rejects.toMatchObject({ publicCode: "COMMUNICATION_OWNER_UNAVAILABLE" });
+  await expect(owner.publish({ path: "effects", fileName: "effects.txt" })).rejects.toMatchObject({
+    publicCode: "FILE_PUBLICATION_UNAVAILABLE",
+  });
+  await owner.configureRemote({
+    publicationScope: nextScope,
+    communicationTransport: transport("successor"),
+  });
+  expect(
+    await owner.submitCommunication({ ...input, requestId: "ws1-" + randomUUID() }),
+  ).toMatchObject({ outcome: { ok: true } });
+  expect(sends[1]).toMatchObject({
+    name: "successor",
+    scope: { resourceGeneration: 2, authorizationGeneration: 2 },
+  });
+  expect(await owner.inspect(input.requestId)).toEqual(receipt);
+  expect(await readFile(recordPath)).toEqual(originalBytes);
+  await owner.configureRemote({
+    publicationScope: nextScope,
+    communicationTransport: transport("uncertain"),
+  });
+  const published = await owner.semantic("file_download", { path: "effects" });
+  const uncertain = await owner.semantic("communication_deliver_publication", {
+    publication: published.structuredContent.file.reference_id,
+    kind: "document",
+  });
+  expect(uncertain).toMatchObject({
+    state: "unconfirmed",
+    original: { outcome: { ok: false, error: { code: "WORKSPACE_OUTCOME_UNCONFIRMED" } } },
+  });
+  const discovered = await owner.semantic("operation_find", { kind: "delivery" });
+  expect(
+    discovered.operations.find((entry) => entry.operation === uncertain.operation),
+  ).toMatchObject({ state: "unconfirmed" });
+  expect(await owner.semantic("operation_get", { reference: uncertain.operation })).toEqual(
+    uncertain,
+  );
+  expect(sends).toHaveLength(3);
+  await expect(
+    owner.configureRemote({ publicationScope: { ...nextScope, resourceId: randomUUID() } }),
+  ).rejects.toMatchObject({ publicCode: "FILE_PUBLICATION_SCOPE_CHANGED" });
+  expect(await owner.health()).toEqual(health);
+  await writeFile(releasePath, "release");
+  let result;
+  do {
+    result = await owner.observe(commandId, 1000);
+  } while (result.state === "running" || result.state === "starting");
+  expect(result).toMatchObject({ requestId: commandId, state: "succeeded" });
+  expect(await readFile(join(value.binding.root, "effects"), "utf8")).toBe("once\n");
 });
 
 test("workspace collection reads the original communication receipt without a second logical result", async () => {
@@ -189,9 +457,21 @@ test("lost vendor reply survives owner reopen and pure collection never resends 
     outcome: { ok: false, error: { code: "WORKSPACE_OUTCOME_UNCONFIRMED" } },
     stages: [{ status: "unconfirmed" }],
   });
+  expect((await value.owner.find()).operations).toMatchObject([
+    { requestId: value.input.requestId, state: "unconfirmed" },
+  ]);
   await value.owner.close();
   const reopened = await value.open();
   cleanup.push(() => reopened.close());
+  const retained = await readFile(
+    join(value.root, "communication", value.input.requestId + ".json"),
+  );
+  expect((await reopened.find()).operations).toMatchObject([
+    { requestId: value.input.requestId, state: "unconfirmed" },
+  ]);
+  expect(
+    await readFile(join(value.root, "communication", value.input.requestId + ".json")),
+  ).toEqual(retained);
   expect(await reopened.inspect(value.input.requestId)).toMatchObject({
     requestId: value.input.requestId,
     outcome: { ok: false, error: { code: "WORKSPACE_OUTCOME_UNCONFIRMED" } },
