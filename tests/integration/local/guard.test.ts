@@ -8,6 +8,7 @@ import {
   mkdir,
   readFile,
   realpath,
+  rename,
   rm,
   writeFile,
   copyFile,
@@ -79,6 +80,7 @@ const f=require('node:fs');const path=${JSON.stringify(observation)};
 const args=process.argv.slice(2);const current=()=>JSON.parse(f.readFileSync(path));
 f.appendFileSync(path+'.calls',JSON.stringify(args)+'\\n');
 const peersPath=path+'.peers';const peers=()=>f.existsSync(peersPath)?JSON.parse(f.readFileSync(peersPath)):[];
+const publishPeers=rows=>{const temporary=peersPath+'.'+process.pid;f.writeFileSync(temporary,JSON.stringify(rows));f.renameSync(temporary,peersPath);};
 const sdkRows=()=>[...(current().status==='absent'?[]:[{id:${JSON.stringify(sdkId)},name:${JSON.stringify(local.space.name)},agent:'shell',status:current().status}]),...peers()];
 const cid=name=>require('node:crypto').createHash('sha256').update(name).digest('hex');
 process.on('exit',()=>{
@@ -134,15 +136,15 @@ else if(args[0]==='api-guest'){
 }
 else if(args[0]==='api-start'){
   if(args[1]===${JSON.stringify(local.space.name)})f.writeFileSync(path,JSON.stringify({status:'running'}));
-  f.writeFileSync(peersPath,JSON.stringify(peers().map(row=>row.name===args[1]?{...row,status:'running'}:row)));
+  publishPeers(peers().map(row=>row.name===args[1]?{...row,status:'running'}:row));
 }
 else if(args[0]==='api-create'){
   const body=JSON.parse(args[1]);if(body.name!==${JSON.stringify(local.space.name)}||body.agent!=='shell'||body.workspace!==''||body.cpus!==${local.policy.runtime.cpuCores}||body.template!==${JSON.stringify(local.policy.runtime.template)}||Object.keys(body.environment).length||body.kits.length||body.credential_values.length)process.exit(2);
   const complete=()=>{f.writeFileSync(path,JSON.stringify({status:'running'}));f.writeFileSync(path+'.create-response',JSON.stringify({name:body.name,agent:'shell',workspace:'',status:'created'}));};
   ${pendingCreation ? `f.writeFileSync(path,JSON.stringify({status:'starting'}));f.writeFileSync(pending,JSON.stringify({pid:process.pid}));f.writeFileSync(pending+'.'+body.name,JSON.stringify({pid:process.pid}));const timer=setInterval(()=>{if(f.existsSync(release)){clearInterval(timer);complete();f.writeFileSync(sentinel,'late side effect');}},10);` : `complete();`}
 }
-else if(args[0]==='stop'){const lag=f.existsSync(path+'.stop-sdk-lag');if(args[1]===${JSON.stringify(local.space.name)})f.writeFileSync(path,JSON.stringify(lag?{status:'running',engineState:'exited'}:{status:current().stopKeepsCreated?'created':'stopped'}));f.writeFileSync(peersPath,JSON.stringify(peers().map(peer=>peer.name===args[1]?{...peer,status:lag?'running':'stopped',engineState:'exited'}:peer)));}
-else if(args[0]==='rm'){const name=args.at(-1);if(name===${JSON.stringify(local.space.name)})f.writeFileSync(path,JSON.stringify({status:'absent'}));f.writeFileSync(peersPath,JSON.stringify(peers().filter(peer=>peer.name!==name)));}
+else if(args[0]==='stop'){const lag=f.existsSync(path+'.stop-sdk-lag');if(args[1]===${JSON.stringify(local.space.name)})f.writeFileSync(path,JSON.stringify(lag?{status:'running',engineState:'exited'}:{status:current().stopKeepsCreated?'created':'stopped'}));publishPeers(peers().map(peer=>peer.name===args[1]?{...peer,status:lag?'running':'stopped',engineState:'exited'}:peer));}
+else if(args[0]==='rm'){const name=args.at(-1);if(name===${JSON.stringify(local.space.name)})f.writeFileSync(path,JSON.stringify({status:'absent'}));publishPeers(peers().filter(peer=>peer.name!==name));}
 else if(args[0]==='daemon'&&args[1]==='status'){
   const held=f.existsSync(path+'.daemon-ready-wait');
   if(held)f.writeFileSync(path+'.daemon-observed','waiting');
@@ -152,7 +154,7 @@ else if(args[0]==='daemon'&&args[1]==='status'){
     const timer=setInterval(()=>{if(f.existsSync(release)){clearInterval(timer);f.writeFileSync(sentinel,'late status');emit();}},10);
   }else emit();
 }
-else if(args[0]==='daemon'&&args[1]==='stop'){if(current().status!=='absent')f.writeFileSync(path,JSON.stringify({status:'stopped'}));f.writeFileSync(path+'.daemon-stopped','stopped');f.writeFileSync(peersPath,JSON.stringify(peers().map(peer=>({...peer,status:'stopped'}))));}
+else if(args[0]==='daemon'&&args[1]==='stop'){if(current().status!=='absent')f.writeFileSync(path,JSON.stringify({status:'stopped'}));f.writeFileSync(path+'.daemon-stopped','stopped');publishPeers(peers().map(peer=>({...peer,status:'stopped'})));}
 else if(args[0]==='exec'||args[0]==='create'){
   if(args[0]==='exec'){
     if(args[4]==='-e'){process.exit(0);}
@@ -229,8 +231,9 @@ int main(int argc,char **argv){
   if(vm)unlink(path);
   int fd=socket(AF_UNIX,vm?SOCK_DGRAM:SOCK_STREAM,0);if(bind(fd,(struct sockaddr*)&a,sizeof(a))||(!vm&&listen(fd,8)))return 2;
   int docker=-1;char engine[1024];if(!vm){snprintf(engine,sizeof(engine),"%s",path);char *s=strrchr(engine,'/');strcpy(s+1,"docker.sock");struct sockaddr_un d={.sun_family=AF_UNIX};strcpy(d.sun_path,engine);docker=socket(AF_UNIX,SOCK_STREAM,0);if(bind(docker,(struct sockaddr*)&d,sizeof(d))||listen(docker,8))return 2;}
-  signal(SIGTERM,stop);puts("ready");fflush(stdout);
+  signal(SIGTERM,stop);
   if(!vm){char *initial[]={argv[0],"initial-worker",0};if(!command(2,initial))ensure_worker(argv[0],path,${JSON.stringify(local.space.name)});}
+  puts("ready");fflush(stdout);
   while(!stopped){if(!vm)reconcile_workers();struct pollfd p[2]={{.fd=fd,.events=POLLIN},{.fd=docker,.events=POLLIN}};if(poll(p,vm?1:2,100)>0&&!vm){int c=accept((p[0].revents&POLLIN)?fd:docker,0,0);if(c>=0){
     struct pollfd client={.fd=c,.events=POLLIN};if(poll(&client,1,1000)>0){char request[32768];ssize_t n=read_request(c,request,sizeof(request));if(n>0){request[n]=0;
       if(!strncmp(request,"POST /sandbox/",14)&&strstr(request,"/exec/attach ")){char name[39]={0};memcpy(name,request+14,38);char *args[]={argv[0],"worker-id",name,0};if(!command(3,args)){char id[65]={0};FILE *record=fopen(${JSON.stringify(observation + ".worker-id")},"r");if(record){fread(id,1,64,record);fclose(record);}pid_t child=fork();if(!child){close(fd);close(docker);attach_guest(c,argv[0],name,strstr(request,"/service/local-bootstrap.mjs")?"bootstrap":strstr(request,"kernel/random/boot_id")?"probe":strstr(request,"--configure")?"configure":strstr(request,"--health")?"health":strstr(request,"--start-if-configured")?"start-service":"install");close(c);_exit(0);}if(child>0){guests[guest_count]=child;strcpy(guest_ids[guest_count++],id);}}}
@@ -279,6 +282,17 @@ int main(int argc,char **argv){
   });
   daemons.push(daemon);
   expect((await once(daemon.stdout!, "data"))[0].toString()).toBe("ready\n");
+  // Readiness includes the initial worker decision, before packaging can conceal startup races.
+  const cid = createHash("sha256").update(local.space.name).digest("hex");
+  const initialWorker = await lstat(
+    join(home, ".sbx", `run_${namespace}`, `${cid.slice(0, 12)}-vm.sock`),
+  ).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+  expect(initialWorker?.isSocket() ?? false).toBe(
+    !pendingCreation && !stoppedInventory && !createdInventory,
+  );
   await build({
     entryPoints: [
       "packages/local/src/guard.ts",
@@ -517,7 +531,7 @@ async function addPeer(local: Awaited<ReturnType<typeof fixture>>) {
   };
   await local.records.put(peer);
   await writeFile(
-    local.observation + ".peers",
+    local.observation + ".peers." + process.pid,
     JSON.stringify([
       {
         id: peer.runtimeId,
@@ -529,6 +543,7 @@ async function addPeer(local: Awaited<ReturnType<typeof fixture>>) {
       },
     ]),
   );
+  await rename(local.observation + ".peers." + process.pid, local.observation + ".peers");
   await execute(process.execPath, [
     join(root, "runtime-api.js"),
     join(local.policy.runtime.storageRoot, "runtime"),
@@ -804,7 +819,9 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
       try {
         const healthy=await device.space(${JSON.stringify(local.space.id)});
         const peers=JSON.parse(await f.readFile(${JSON.stringify(local.observation + ".peers")},'utf8'));
-        await f.writeFile(${JSON.stringify(local.observation + ".peers")},JSON.stringify(peers.map(row=>({...row,status:'error',engineState:'running'}))));
+        const peersTemporary=${JSON.stringify(local.observation + ".peers.")}+process.pid;
+        await f.writeFile(peersTemporary,JSON.stringify(peers.map(row=>({...row,status:'error',engineState:'running'}))));
+        await f.rename(peersTemporary,${JSON.stringify(local.observation + ".peers")});
         const rows=await device.observe();if(rows.find(row=>row.name===${JSON.stringify(peer.name)})?.status!=='unknown')throw new Error('Error VM was pretended usable');
         await device.retire(${JSON.stringify(peer.id)},1);
         await healthy.validate();
@@ -838,9 +855,11 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
       try {
         const stage=async(label,work)=>{try{return await work();}catch(error){throw new Error(label,{cause:error});}};
         const healthy=await stage('initial healthy admission',()=>device.space(${JSON.stringify(local.space.id)}));
+        const peersTemporary=${JSON.stringify(local.observation + ".peers.")}+process.pid;
         if(${JSON.stringify(kind)}==='sdk-error') {
           const peers=JSON.parse(await f.readFile(${JSON.stringify(local.observation + ".peers")},'utf8'));
-          await f.writeFile(${JSON.stringify(local.observation + ".peers")},JSON.stringify(peers.map(row=>({...row,status:'error',engineState:'running'}))));
+          await f.writeFile(peersTemporary,JSON.stringify(peers.map(row=>({...row,status:'error',engineState:'running'}))));
+          await f.rename(peersTemporary,${JSON.stringify(local.observation + ".peers")});
         } else await f.writeFile(${JSON.stringify(local.observation + ".container-error-name")},${JSON.stringify(peer.name)});
         const rows=await device.observe();
         if(rows.find(row=>row.name===${JSON.stringify(peer.name)})?.status!=='unknown'||rows.find(row=>row.name===${JSON.stringify(local.space.name)})?.status!=='running')throw new Error('Bad peer observation contaminated healthy state');
@@ -848,7 +867,8 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
         const fresh=await stage('fresh healthy admission during peer error',()=>device.space(${JSON.stringify(local.space.id)}));await stage('fresh healthy validation during peer error',()=>fresh.validate());
         await device.space(${JSON.stringify(peer.id)}).then(space=>space.validate()).then(()=>{throw new Error('Bad peer admitted work');},error=>{if(error.code!=='LOCAL_OBSERVATION_UNKNOWN')throw error;});
         const peers=JSON.parse(await f.readFile(${JSON.stringify(local.observation + ".peers")},'utf8'));
-        await f.writeFile(${JSON.stringify(local.observation + ".peers")},JSON.stringify(peers.map(row=>({...row,status:'running',engineState:'running'}))));
+        await f.writeFile(peersTemporary,JSON.stringify(peers.map(row=>({...row,status:'running',engineState:'running'}))));
+        await f.rename(peersTemporary,${JSON.stringify(local.observation + ".peers")});
         await f.rm(${JSON.stringify(local.observation + ".container-error-name")},{force:true});
         await stage('restored peer admission and validation',async()=>{await (await device.space(${JSON.stringify(peer.id)})).validate();});
       } finally {await device.stop();}
@@ -1003,7 +1023,9 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
         await healthy.validate();
         const rows=await device.observe();if(rows.find(row=>row.name===${JSON.stringify(peer.name)})?.status!=='unknown')throw new Error('Lagging stop was not scoped unknown');
         const peers=JSON.parse(await f.readFile(${JSON.stringify(local.observation + ".peers")},'utf8'));
-        await f.writeFile(${JSON.stringify(local.observation + ".peers")},JSON.stringify(peers.map(row=>({...row,status:'stopped',engineState:'exited'}))));
+        const peersTemporary=${JSON.stringify(local.observation + ".peers.")}+process.pid;
+        await f.writeFile(peersTemporary,JSON.stringify(peers.map(row=>({...row,status:'stopped',engineState:'exited'}))));
+        await f.rename(peersTemporary,${JSON.stringify(local.observation + ".peers")});
         await f.rm(${JSON.stringify(local.observation + ".stop-sdk-lag")});
         await device.retire(${JSON.stringify(peer.id)},2);
         await healthy.validate();
