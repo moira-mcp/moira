@@ -14,11 +14,17 @@ import { CodespaceManagement } from "../../../packages/web-frontend/src/pages/se
 import { CodespaceBillingFromData } from "../../../packages/web-frontend/src/pages/settings/CodespaceBillingPanel";
 import { GitHubCodespaceSettings } from "../../../packages/web-frontend/src/pages/settings/GitHubCodespaceSettings";
 import { apiClient, MoiraApiClient } from "../../../packages/web-frontend/src/services/api-client";
+import { authClient } from "../../../packages/web-frontend/src/auth/better-auth-client";
 import type {
   CodespaceManagementView,
   WorkspaceOperationView,
 } from "../../../packages/web-frontend/src/types/api-types";
 import { encodeReference } from "@mcp-moira/shared/workspace-references";
+import {
+  observeReadSession,
+  observeReadCapabilities,
+  suspendReadSession,
+} from "../../../packages/web-frontend/src/services/read-scope";
 import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -116,18 +122,39 @@ const management = {
       lifecycle_error: null,
     },
   ],
-  provider_billing: "unavailable",
-  controllers: [{ device_id: DEVICE_ID, label: "Controller", available: true, controller }],
+  has_diagnostics: false,
+  controllers: [{ device_id: DEVICE_ID, label: "Controller", controller }],
 } satisfies CodespaceManagementView;
 
 const originalReact = (globalThis as typeof globalThis & { React?: typeof React }).React;
 
 beforeEach(async () => {
   (globalThis as typeof globalThis & { React?: typeof React }).React = React;
+  jest.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    if (!String(input).includes("/get-session")) throw new Error("Unexpected auth fixture request");
+    return Response.json({
+      user: {
+        id: "discovery-owner",
+        name: "Owner",
+        email: "owner@example.test",
+        emailVerified: true,
+      },
+      session: {
+        id: "discovery-session",
+        userId: "discovery-owner",
+        token: "fixture-token",
+        createdAt: "2026-01-01",
+        updatedAt: "2026-01-01",
+        expiresAt: "2099-01-01",
+      },
+    });
+  });
+  await authClient.$store.atoms.session.get().refetch();
+  await waitFor(() => expect(authClient.$store.atoms.session.get().isRefetching).toBe(false));
   await i18n.changeLanguage("en");
   jest.spyOn(apiClient, "getGitHubCodespaceConnection").mockResolvedValue(connection);
-  jest.spyOn(apiClient, "getGitHubCodespaces").mockResolvedValue(management);
-  jest.spyOn(apiClient, "refreshGitHubCodespaces").mockResolvedValue({
+  jest.spyOn(apiClient, "getCodespaces").mockResolvedValue(management);
+  jest.spyOn(apiClient, "refreshCodespaces").mockResolvedValue({
     ...management,
     codespaces: [],
   });
@@ -150,6 +177,319 @@ function renderSettings(content: React.ReactNode) {
 }
 
 describe("GitHub Codespaces Settings", () => {
+  test.each(["success", "error"] as const)(
+    "renewed connection authority ignores a late old %s",
+    async (late) => {
+      act(() => observeReadSession("discovery-owner", "connection-before"));
+      let resolve!: (value: CodespaceConnectionView) => void;
+      let reject!: (error: Error) => void;
+      jest
+        .mocked(apiClient.getGitHubCodespaceConnection)
+        .mockImplementationOnce(
+          () =>
+            new Promise((yes, no) => {
+              resolve = yes;
+              reject = no;
+            }),
+        )
+        .mockResolvedValue({ ...connection, account: { id: "202", login: "current-owner" } });
+      renderSettings(<GitHubCodespaceSettings />);
+      await waitFor(() => expect(apiClient.getGitHubCodespaceConnection).toHaveBeenCalledTimes(1));
+      act(() => observeReadSession("discovery-owner", "connection-after"));
+      await screen.findByText("@current-owner");
+      await act(async () =>
+        late === "error" ? reject(new Error("Old credential read failed")) : resolve(connection),
+      );
+      expect(screen.getByText("@current-owner")).toBeInTheDocument();
+      expect(screen.queryByText("@owner")).toBeNull();
+      expect(screen.getByTestId("github-connection-region")).toHaveAttribute("aria-busy", "false");
+      expect(
+        within(screen.getByTestId("github-connection-region")).queryByRole("alert"),
+      ).toBeNull();
+    },
+  );
+
+  test("suspended discovery hides private rows, performs no read and restores the draft after same-owner renewal", async () => {
+    act(() => observeReadSession("discovery-owner", "before-suspension"));
+    renderSettings(<GitHubCodespaceManagement />);
+    await screen.findByTestId(`github-codespace-${CODESPACE_ID}`);
+    fireEvent.change(screen.getByTestId("github-codespace-ref"), {
+      target: { value: "feature/suspended-draft" },
+    });
+    act(() => suspendReadSession());
+    expect(screen.queryByTestId(`github-codespace-${CODESPACE_ID}`)).toBeNull();
+    expect(
+      jest
+        .mocked(apiClient.getCodespaces)
+        .mock.calls.filter(([provider]) => provider === "github-codespaces"),
+    ).toHaveLength(1);
+    act(() => observeReadSession("discovery-owner", "after-suspension"));
+    expect(await screen.findByTestId("github-codespace-ref")).toHaveValue(
+      "feature/suspended-draft",
+    );
+    expect(
+      jest
+        .mocked(apiClient.getCodespaces)
+        .mock.calls.filter(([provider]) => provider === "github-codespaces"),
+    ).toHaveLength(2);
+  });
+
+  test.each([
+    ["credential", "success"],
+    ["credential", "error"],
+    ["capability", "success"],
+    ["capability", "error"],
+  ] as const)(
+    "same-owner %s renewal revalidates retained data and ignores a late old %s without losing the draft",
+    async (change, late) => {
+      act(() => observeReadSession("discovery-owner", "initial-session"));
+      let current = management;
+      jest.mocked(apiClient.getCodespaces).mockImplementation(async () => current);
+      let resolve!: (value: CodespaceManagementView) => void;
+      let reject!: (error: Error) => void;
+      jest.mocked(apiClient.refreshCodespaces).mockImplementationOnce(
+        () =>
+          new Promise((yes, no) => {
+            resolve = yes;
+            reject = no;
+          }),
+      );
+      renderSettings(<GitHubCodespaceManagement />);
+      await screen.findByTestId(`github-codespace-${CODESPACE_ID}`);
+      const draft = screen.getByTestId("github-codespace-ref");
+      fireEvent.change(draft, { target: { value: "feature/unsaved" } });
+      fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+      current = {
+        ...management,
+        codespaces: [{ ...management.codespaces[0], current_ref: "feature/current-scope" }],
+      };
+      act(() =>
+        change === "credential"
+          ? observeReadSession("discovery-owner", "renewed-session")
+          : observeReadCapabilities(`renewed-${late}`, "discovery-regression"),
+      );
+      await waitFor(() =>
+        expect(
+          jest
+            .mocked(apiClient.getCodespaces)
+            .mock.calls.filter(([provider]) => provider === "github-codespaces"),
+        ).toHaveLength(2),
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId(`github-codespace-${CODESPACE_ID}`)).toHaveTextContent(
+          "feature/current-scope",
+        ),
+      );
+      await act(async () =>
+        late === "error" ? reject(new Error("Retired read failed")) : resolve(management),
+      );
+      expect(screen.getByTestId(`github-codespace-${CODESPACE_ID}`)).toHaveTextContent(
+        "feature/current-scope",
+      );
+      expect(screen.queryByText("Failed to load cloud codespaces")).toBeNull();
+      expect(screen.getByTestId("github-codespace-ref")).toBe(draft);
+      expect(draft).toHaveValue("feature/unsaved");
+    },
+  );
+
+  test("an explicitly selected registered offline controller and branch survive a diagnostics visit", async () => {
+    const secondDevice = "99999999-9999-4999-8999-999999999999";
+    const secondController = {
+      deviceId: secondDevice,
+      connectionId: "22222222-2222-4222-8222-222222222222",
+    };
+    const secondTarget = encodeReference("target", {
+      provider: "github-codespaces",
+      repositoryId: "301",
+      controller: secondController,
+    });
+    const current: CodespaceManagementView = {
+      ...management,
+      controllers: [
+        ...management.controllers,
+        {
+          device_id: secondDevice,
+          label: "Second offline controller",
+          available: false,
+          controller: encodeReference("controller", secondController),
+        },
+      ],
+      repositories: [
+        ...management.repositories,
+        {
+          ...management.repositories[0],
+          device_id: secondDevice,
+          target: secondTarget,
+          controller: encodeReference("controller", secondController),
+        },
+      ],
+    };
+    jest.mocked(apiClient.getCodespaces).mockResolvedValue(current);
+    const create = jest
+      .spyOn(apiClient, "createWorkspace")
+      .mockResolvedValue({ operation, state: "pending" });
+    const originalScroll = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = () => undefined;
+    try {
+      renderSettings(<GitHubCodespaceManagement />);
+      const selected = await screen.findByRole("combobox", {
+        name: i18n.t("localDevices.provisioning.controller"),
+      });
+      fireEvent.keyDown(selected, { key: "ArrowDown" });
+      fireEvent.click(await screen.findByRole("option", { name: "Second offline controller" }));
+      const draft = await screen.findByTestId("github-codespace-ref");
+      fireEvent.change(draft, { target: { value: "feature/retained" } });
+      fireEvent.click(screen.getByRole("button", { name: "Diagnostics" }));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Diagnostics" })).toHaveAttribute(
+          "aria-pressed",
+          "true",
+        ),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Current environments" }));
+      await waitFor(() =>
+        expect(screen.getByTestId("github-codespace-ref")).toHaveValue("feature/retained"),
+      );
+      expect(
+        screen.getByRole("combobox", { name: i18n.t("localDevices.provisioning.controller") }),
+      ).toHaveTextContent("Second offline controller");
+      fireEvent.click(screen.getByTestId("github-codespace-create-submit"));
+      await waitFor(() =>
+        expect(create).toHaveBeenCalledWith({ target: secondTarget, branch: "feature/retained" }),
+      );
+      expect(create).toHaveBeenCalledTimes(1);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScroll;
+    }
+  });
+
+  test.each(["github-codespaces", "local-sandboxes"] as const)(
+    "%s can remain pending without delaying its independent peer or reading hidden billing",
+    async (heldProvider) => {
+      const localId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+      const local = {
+        ...management,
+        readiness: { ...management.readiness, provider: "local-sandboxes" },
+        repositories: [],
+        codespaces: [
+          {
+            ...management.codespaces[0],
+            codespace_id: localId,
+            provider: "local-sandboxes",
+            repository_id: `local:${DEVICE_ID}:44444444-4444-4444-8444-444444444444`,
+          },
+        ],
+      };
+      const held = new Promise<CodespaceManagementView>(() => undefined);
+      jest
+        .mocked(apiClient.getCodespaces)
+        .mockImplementation(async (provider) =>
+          provider === heldProvider ? held : provider === "local-sandboxes" ? local : management,
+        );
+      const billing = jest
+        .spyOn(apiClient, "getCodespaceBilling")
+        .mockImplementation(() => new Promise(() => undefined));
+      renderSettings(
+        <>
+          <GitHubCodespaceManagement />
+          <CodespaceManagement
+            scope={{
+              provider: "local-sandboxes",
+              computer: {
+                deviceId: DEVICE_ID,
+                status: "active",
+                owner: {
+                  state: "available",
+                  local: { state: "configured", policy: { enabled: true } },
+                  github: { resources: [] },
+                },
+              } as LocalDeviceView,
+            }}
+          />
+          <CodespaceBillingFromData active={false} />
+        </>,
+      );
+      const visibleId = heldProvider === "github-codespaces" ? localId : CODESPACE_ID;
+      expect(await screen.findByTestId(`github-codespace-${visibleId}`)).toBeInTheDocument();
+      expect(
+        screen.queryByTestId(
+          `github-codespace-${heldProvider === "github-codespaces" ? CODESPACE_ID : localId}`,
+        ),
+      ).toBeNull();
+      expect(apiClient.getCodespaces).toHaveBeenCalledWith("local-sandboxes", "actionable");
+      expect(apiClient.getCodespaces).toHaveBeenCalledWith("github-codespaces", "actionable");
+      expect(billing).not.toHaveBeenCalled();
+    },
+  );
+
+  test("diagnostics and history remain explicit, collect only returned originals and refresh their selected view", async () => {
+    const unavailableId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const diagnostic: CodespaceManagementView = {
+      ...management,
+      codespaces: [],
+      unavailable: [
+        {
+          codespace_id: unavailableId,
+          provider: "github-codespaces",
+          repository_id: "301",
+          repository: "owner/uncertain",
+          requested_ref: "main",
+          created_at: 1,
+          identity: encodeReference("workspace-identity", {
+            resourceId: unavailableId,
+            provider: "github-codespaces",
+          }),
+          pending_operations: [operation],
+          error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" },
+        },
+      ],
+    };
+    const history: CodespaceManagementView = {
+      ...management,
+      codespaces: [{ ...management.codespaces[0], state: "deleted" }],
+    };
+    let resolveDiagnostics!: (value: CodespaceManagementView) => void;
+    const delayedDiagnostics = new Promise<CodespaceManagementView>((resolve) => {
+      resolveDiagnostics = resolve;
+    });
+    jest
+      .mocked(apiClient.getCodespaces)
+      .mockImplementation(async (_provider, view) =>
+        view === "diagnostics"
+          ? delayedDiagnostics
+          : view === "history"
+            ? history
+            : { ...management, has_diagnostics: true },
+      );
+    jest.mocked(apiClient.refreshCodespaces).mockResolvedValue(diagnostic);
+    const collect = jest
+      .spyOn(apiClient, "getWorkspaceOperation")
+      .mockResolvedValue({ operation, state: "unconfirmed" });
+    const change = jest.spyOn(apiClient, "changeWorkspace");
+    renderSettings(<GitHubCodespaceManagement />);
+    await screen.findByTestId(`github-codespace-${CODESPACE_ID}`);
+    expect(screen.queryByTestId(`codespace-unavailable-${unavailableId}`)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Diagnostics" }));
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    const archived = await screen.findByTestId(`github-codespace-${CODESPACE_ID}`);
+    expect(within(archived).queryByRole("button", { name: "Start" })).toBeNull();
+    expect(within(archived).queryByRole("button", { name: "Delete" })).toBeNull();
+    await act(async () => resolveDiagnostics(diagnostic));
+    expect(screen.getByRole("button", { name: "History" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByTestId(`codespace-unavailable-${unavailableId}`)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Diagnostics" }));
+    const row = await screen.findByTestId(`codespace-unavailable-${unavailableId}`);
+    expect(within(row).queryByRole("button", { name: "Delete" })).toBeNull();
+    fireEvent.click(within(row).getByRole("button", { name: "Check original result" }));
+    await waitFor(() => expect(collect).toHaveBeenCalledWith(operation));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() =>
+      expect(apiClient.refreshCodespaces).toHaveBeenCalledWith("github-codespaces", "diagnostics"),
+    );
+    expect(change).not.toHaveBeenCalled();
+    expect(within(row).getByRole("button", { name: "Check original result" })).toBeEnabled();
+  });
+
   test.each([
     ["unconfigured", true],
     ["enrollment_unavailable", true],
@@ -170,8 +510,8 @@ describe("GitHub Codespaces Settings", () => {
           },
         ],
       };
-      jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(current);
-      jest.mocked(apiClient.refreshGitHubCodespaces).mockResolvedValue(current);
+      jest.mocked(apiClient.getCodespaces).mockResolvedValue(current);
+      jest.mocked(apiClient.refreshCodespaces).mockResolvedValue(current);
       const change = jest
         .spyOn(apiClient, "changeWorkspace")
         .mockResolvedValue({ operation, state: "pending" });
@@ -212,7 +552,7 @@ describe("GitHub Codespaces Settings", () => {
         .spyOn(apiClient, "changeWorkspace")
         .mockResolvedValue(stage === "admission" ? receipt : { operation, state: "pending" });
       jest.spyOn(apiClient, "getWorkspaceOperation").mockResolvedValue(receipt);
-      jest.mocked(apiClient.refreshGitHubCodespaces).mockResolvedValue(management);
+      jest.mocked(apiClient.refreshCodespaces).mockResolvedValue(management);
       renderSettings(<GitHubCodespaceManagement />);
       const stop = await screen.findByTestId(`github-codespace-stop-${CODESPACE_ID}`);
       await act(async () => fireEvent.click(stop));
@@ -291,8 +631,8 @@ describe("GitHub Codespaces Settings", () => {
             : {}),
         };
         const current = { ...management, codespaces: [workspace] };
-        jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(current);
-        jest.mocked(apiClient.refreshGitHubCodespaces).mockResolvedValue(current);
+        jest.mocked(apiClient.getCodespaces).mockResolvedValue(current);
+        jest.mocked(apiClient.refreshCodespaces).mockResolvedValue(current);
         const loseReply = async () => {
           await owner("run", { action, resourceId: CODESPACE_ID, generation: 1 });
           throw new Error("Completed first reply lost");
@@ -380,13 +720,14 @@ describe("GitHub Codespaces Settings", () => {
           fireEvent.click(cancel);
           await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
         } else if (action === "adopt") {
-          await act(async () =>
-            fireEvent.click(
-              within(screen.getByTestId(`github-codespace-${CODESPACE_ID}`)).getByRole("button", {
-                name: i18n.t("localDevices.provisioning.adopt"),
-              }),
-            ),
+          const adopt = within(screen.getByTestId(`github-codespace-${CODESPACE_ID}`)).getByRole(
+            "button",
+            {
+              name: i18n.t("localDevices.provisioning.adopt"),
+            },
           );
+          await waitFor(() => expect(adopt).toBeEnabled());
+          await act(async () => fireEvent.click(adopt));
         } else {
           await act(async () =>
             fireEvent.click(
@@ -454,7 +795,11 @@ describe("GitHub Codespaces Settings", () => {
         fireEvent.click(screen.getByTestId(`github-codespace-stop-${CODESPACE_ID}`));
       });
       expect(change).toHaveBeenCalledWith(management.codespaces[0].workspace, "stop");
-      expect(apiClient.getGitHubCodespaces).toHaveBeenCalledTimes(1);
+      expect(
+        jest
+          .mocked(apiClient.getCodespaces)
+          .mock.calls.filter(([provider]) => provider === "github-codespaces"),
+      ).toHaveLength(1);
       expect(screen.queryByTestId(`github-codespace-${foreignId}`)).toBeNull();
       expect(screen.getByTestId(`github-codespace-${CODESPACE_ID}`)).toBe(originalCard);
     },
@@ -493,8 +838,8 @@ describe("GitHub Codespaces Settings", () => {
           },
         ],
       };
-      jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(next);
-      jest.mocked(apiClient.refreshGitHubCodespaces).mockResolvedValue({
+      jest.mocked(apiClient.getCodespaces).mockResolvedValue(next);
+      jest.mocked(apiClient.refreshCodespaces).mockResolvedValue({
         ...next,
         unavailable: [],
         codespaces: [
@@ -535,7 +880,7 @@ describe("GitHub Codespaces Settings", () => {
     },
   );
   test("shows provider failures without borrowing healthy peer metadata or claiming an empty list", async () => {
-    jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue({
+    jest.mocked(apiClient.getCodespaces).mockResolvedValue({
       ...management,
       readiness: undefined,
       connection: undefined,
@@ -544,29 +889,13 @@ describe("GitHub Codespaces Settings", () => {
       provider_errors: [
         { provider: "github-codespaces", error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" } },
       ],
-      providers: [
-        {
-          provider: "github-codespaces",
-          error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" },
-        },
-        {
-          provider: "local-sandboxes",
-          readiness: { ...management.readiness, provider: "local-sandboxes" },
-          connection,
-          repositories: [],
-          repositories_stale: false,
-          resources_stale: false,
-        },
-      ],
     });
     renderSettings(
       <>
         <GitHubCodespaceManagement />
-        <CodespaceBillingFromData />
       </>,
     );
     expect(await screen.findByText("Provider data could not be loaded")).toBeInTheDocument();
-    expect(screen.getByTestId("github-codespace-billing-unavailable")).toBeInTheDocument();
     expect(screen.queryByTestId("github-codespace-instance-state")).toBeNull();
     expect(screen.queryByTestId("github-codespace-empty")).toBeNull();
     expect(screen.queryByTestId("github-codespace-create")).toBeNull();
@@ -576,7 +905,7 @@ describe("GitHub Codespaces Settings", () => {
   });
   test("an in-flight refresh that loses an observation disables an already opened delete confirmation", async () => {
     let complete!: (next: CodespaceManagementView) => void;
-    jest.mocked(apiClient.refreshGitHubCodespaces).mockImplementationOnce(
+    jest.mocked(apiClient.refreshCodespaces).mockImplementationOnce(
       () =>
         new Promise((resolve) => {
           complete = resolve;
@@ -620,7 +949,7 @@ describe("GitHub Codespaces Settings", () => {
   });
   test("the GitHub list excludes local codespaces even when the management response contains both providers", async () => {
     const localId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
-    jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue({
+    jest.mocked(apiClient.getCodespaces).mockResolvedValue({
       ...management,
       codespaces: [
         ...management.codespaces,
@@ -672,29 +1001,12 @@ describe("GitHub Codespaces Settings", () => {
       },
     ];
     const disconnected = { ...connection, state: "disconnected" as const };
-    jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue({
+    jest.mocked(apiClient.getGitHubCodespaceConnection).mockResolvedValue(disconnected);
+    jest.mocked(apiClient.getCodespaces).mockResolvedValue({
       ...management,
-      connection: disconnected,
+      readiness: { ...management.readiness, provider: "local-sandboxes" },
+      connection,
       repositories,
-      providers: [
-        {
-          provider: "github-codespaces",
-          readiness: management.readiness,
-          repositories_stale: false,
-          resources_stale: false,
-          connection: disconnected,
-          repositories: [],
-          provider_billing: "unavailable",
-        },
-        {
-          provider: "local-sandboxes",
-          readiness: { ...management.readiness, provider: "local-sandboxes" },
-          repositories_stale: false,
-          resources_stale: false,
-          connection,
-          repositories,
-        },
-      ],
     });
     const originalAdapter = axios.defaults.adapter;
     const originalScroll = HTMLElement.prototype.scrollIntoView;
@@ -776,7 +1088,7 @@ describe("GitHub Codespaces Settings", () => {
     expect(await within(card).findByTestId(`github-codespace-${CODESPACE_ID}`)).toBeInTheDocument();
 
     fireEvent.click(within(card).getByRole("button", { name: "Refresh" }));
-    await waitFor(() => expect(apiClient.refreshGitHubCodespaces).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiClient.refreshCodespaces).toHaveBeenCalledTimes(1));
     await waitFor(() =>
       expect(screen.queryByTestId(`github-codespace-${CODESPACE_ID}`)).not.toBeInTheDocument(),
     );
@@ -848,7 +1160,7 @@ describe("GitHub Codespaces Settings", () => {
 
   test("provider refresh failure keeps codespaces, the branch draft and focus, then retries", async () => {
     let reject!: (error: unknown) => void;
-    jest.mocked(apiClient.refreshGitHubCodespaces).mockImplementationOnce(
+    jest.mocked(apiClient.refreshCodespaces).mockImplementationOnce(
       () =>
         new Promise((_yes, no) => {
           reject = no;

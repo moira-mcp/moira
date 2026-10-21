@@ -47,6 +47,7 @@ export type {
 import type {
   CodespaceConnectionView,
   CodespaceReadinessView,
+  CodespaceProviderBillingView,
   AnalyticsQuery,
   AnalyticsOverview,
   AnalyticsUsers,
@@ -209,6 +210,8 @@ import {
   NodeTypeCatalog,
   CodespaceManagementView,
   WorkspaceOperationView,
+  WorkspaceDiscoveryProvider,
+  WorkspaceDiscoveryView,
 } from "../types";
 
 /**
@@ -1051,16 +1054,31 @@ export class MoiraApiClient {
     return response.data.data!;
   }
 
-  async getGitHubCodespaces(): Promise<CodespaceManagementView> {
+  async getCodespaces(
+    provider: WorkspaceDiscoveryProvider,
+    view: WorkspaceDiscoveryView = "actionable",
+  ): Promise<CodespaceManagementView> {
     const response = await this.client.get<ApiResponse<CodespaceManagementView>>(
       "/integrations/github/codespaces",
+      { params: { provider, view } },
     );
     return response.data.data!;
   }
 
-  async refreshGitHubCodespaces(): Promise<CodespaceManagementView> {
+  async refreshCodespaces(
+    provider: WorkspaceDiscoveryProvider,
+    view: WorkspaceDiscoveryView = "actionable",
+  ): Promise<CodespaceManagementView> {
     const response = await this.client.post<ApiResponse<CodespaceManagementView>>(
       "/integrations/github/codespaces/refresh",
+      { provider, view },
+    );
+    return response.data.data!;
+  }
+
+  async getCodespaceBilling(): Promise<CodespaceProviderBillingView> {
+    const response = await this.client.get<ApiResponse<CodespaceProviderBillingView>>(
+      "/integrations/github/codespaces/billing",
     );
     return response.data.data!;
   }

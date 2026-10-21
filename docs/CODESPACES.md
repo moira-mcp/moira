@@ -172,8 +172,10 @@ control-plane state and active/staged installation selection. Local service read
 that every VM or the remote route is available. Reconnection uses the owner's durable original
 request journal, so a lost response does not authorize redispatch.
 
-Select a returned target with `workspace_targets` for creation, or a workspace observation with
-`workspace_list`/`workspace_observe` for lifecycle work. `workspace_lifecycle` and
+Select a provider with `workspace_targets({provider:"local-sandboxes"})` or
+`workspace_targets({provider:"github-codespaces"})` and use a returned target for creation.
+`workspace_list` also requires `provider`; `workspace_observe` addresses a returned observation.
+Use its captured workspace reference for lifecycle work. `workspace_lifecycle` and
 `workspace_delete` consume that captured workspace reference; they do not refresh its comparison
 generation before admission. Internal request identities are minted before effects and returned as
 operation references. Use `operation_get` to collect an original, including creation before a
@@ -394,9 +396,12 @@ The MCP caller cannot enable that consent, change
 its account or supply rights. New-private consent authorizes the
 separate `repository_create` action; it does not authorize adding unrelated existing repositories.
 
-`workspace_targets` returns selected controller and repository-target references, contact status,
-and eligible personal GitHub App installation references.
-A warning asks for missing GitHub setup while devices remain discoverable. Applied delegation
+`workspace_targets({provider:"local-sandboxes"})` returns approved Local repository targets
+and controllers with observed contact status, without awaiting GitHub installations.
+`workspace_targets({provider:"github-codespaces"})` returns GitHub repository targets,
+registered controller choices and eligible personal GitHub App installation references.
+GitHub controller registration does not prove reachability; dispatch still requires the selected
+live owner. A warning asks for missing GitHub setup while registered devices remain discoverable. Applied delegation
 and detailed owner permissions are inspected in Settings, not returned in this compact discovery.
 `repository_admit` takes that `controller` reference and the existing GitHub numeric `repository` ID.
 Its adapter mints the internal admission identity. It verifies the current GitHub App installation grant, repository ID, owner,
@@ -902,10 +907,21 @@ when only one candidate is found. No match or an absent receipt leaves the actio
 Errors remain scoped to their resource. Local browser deletion additionally needs explicit
 confirmation and current web-control approval, without broadening permanent agent permissions.
 
-Connection, repository, resource and billing reads retain independent error/refresh states.
-Management returns `providers`, minimal live `controllers` and `provider_billing`, with no Moira
-aggregate limit view. `CodespaceBillingPanel` shows personal monthly compute, storage, allowances,
-cost, payer and retrieval time, or unavailable. Missing `Plan: read` does not deny management.
+Each provider has independent discovery and error/refresh state. Both provider requests can start
+on mount, but Local results and their follow-up reads do not await GitHub or billing. The normal
+`actionable` view contains current useful environments, including known incomplete setup.
+Select `diagnostics` for unavailable, authority-lost or creation-unknown identities and their
+original-operation references; these identities have no fabricated lifecycle generation.
+Select `history` for confirmed retired environments. `has_diagnostics` signals preserved diagnostic
+identities even when the actionable list is empty. Selected-provider failures remain explicit.
+Changing views neither deletes retained records nor authorizes uncertain work to run again.
+
+Management returns one selected `provider` and its controllers. The website's view selectors and
+`workspace_list({provider:"local-sandboxes",view:"diagnostics"})` use the same separation.
+Environment Refresh reads only that provider/view. Billing has a separate authenticated read and
+loads when Settings → Development → GitHub is active. `CodespaceBillingPanel` shows personal
+monthly compute, storage, allowances, cost, payer and retrieval time, or unavailable, with its own
+retry. Missing `Plan: read` does not deny environment discovery or management.
 Automatic pause selects provider timeout for new resources, without a cloud idle timer.
 
 The website's `/api/integrations/github/codespaces` management projection adds returned
@@ -992,9 +1008,9 @@ source test does not establish that the live App has them. Original OAuth/refres
 Enable "Request user authorization (OAuth) during installation" and expiring user
 authorization tokens; the callback URL is the exact same-origin Moira path below.
 Adding `Account: Plan` does not by itself require reinstalling the App. The
-connection card's **Refresh** re-reads repository grants, while the Development environments
-card's **Refresh** also re-reads billing; both use the existing token and cannot add
-a permission to it. For organization repositories, an organization owner
+connection card's **Refresh** re-reads repository grants. Environment **Refresh** reads the
+selected provider/view without billing; the billing panel has its own read and retry.
+These reads use existing authority and cannot add a permission to it. For organization repositories, an organization owner
 must install or approve the App on that organization and grant the selected
 repositories; Moira's connected user account is still the only supported payer.
 

@@ -95,7 +95,9 @@ test.describe("Settings page structure", () => {
     ["en", "When to use an API token", "The Settings page", "Jump between sections"],
     ["ru", "Когда нужен API-токен", "Страница настроек", "Переход между разделами"],
   ] as const) {
-    test(`help and the page tour open with localized words (${lang})`, async ({ page }) => {
+    test(`help and the page tour open with localized words (${lang})`, async ({
+      page,
+    }, testInfo) => {
       await loginAsAdmin(page);
       await openSettings(page, `?lang=${lang}`);
       await page.getByTestId("settings-nav-access").click();
@@ -121,6 +123,42 @@ test.describe("Settings page structure", () => {
         "data-guide-anchor",
         "settings.account",
       );
+      for (const step of ["security", "notifications", "github", "environment-views"]) {
+        await page.getByTestId("guide-next").click();
+        await expect(card).toHaveAttribute("data-guide-step", step);
+      }
+      await expect(card).toContainText(
+        lang === "en"
+          ? "Current environments, diagnostics and history"
+          : "Текущие среды, диагностика и история",
+      );
+      await expect(page.locator('[data-guide~="settings.environment-views"]')).toHaveCount(1);
+      await expect(page.getByTestId("guide-spotlight")).toHaveAttribute(
+        "data-guide-anchor",
+        "settings.environment-views",
+      );
+      await expect
+        .poll(() =>
+          page.evaluate(() => {
+            const target = document.querySelector('[data-guide~="settings.environment-views"]');
+            const spotlight = document.querySelector('[data-testid="guide-spotlight"] > div');
+            if (!target || !spotlight) return false;
+            const actual = spotlight.getBoundingClientRect();
+            const expected = target.getBoundingClientRect();
+            return (
+              Math.abs(actual.left - (expected.left - 6)) < 1 &&
+              Math.abs(actual.top - (expected.top - 6)) < 1 &&
+              Math.abs(actual.width - (expected.width + 12)) < 1 &&
+              Math.abs(actual.height - (expected.height + 12)) < 1
+            );
+          }),
+        )
+        .toBe(true);
+      await expect(card).toHaveCSS("opacity", "1");
+      await testInfo.attach(`settings-environment-views-${lang}`, {
+        body: await page.screenshot(),
+        contentType: "image/png",
+      });
       await page.getByTestId("guide-close").click();
       await expect(card).toBeHidden();
       expect(new URL(page.url()).searchParams.has("guide")).toBe(false);

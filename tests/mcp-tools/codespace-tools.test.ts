@@ -73,12 +73,16 @@ describe("Semantic workspace MCP HTTP boundary without configured GitHub or pair
   });
   test("lists compact available and unavailable identities without billing or credentials", async () => {
     const result = CallToolResultSchema.parse(
-      await client.callTool({ name: "workspace_list", arguments: {} }),
+      await client.callTool({
+        name: "workspace_list",
+        arguments: { provider: "github-codespaces" },
+      }),
     );
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent).toEqual({
       workspaces: [],
       unavailable: [],
+      has_diagnostics: false,
       provider_errors: [],
     });
     expect(JSON.stringify(result)).not.toMatch(
@@ -87,7 +91,10 @@ describe("Semantic workspace MCP HTTP boundary without configured GitHub or pair
   });
   test("discovers returned targets/controllers and setup guidance without provisioning", async () => {
     const targets = CallToolResultSchema.parse(
-      await client.callTool({ name: "workspace_targets", arguments: {} }),
+      await client.callTool({
+        name: "workspace_targets",
+        arguments: { provider: "github-codespaces" },
+      }),
     );
     expect(targets.structuredContent).toMatchObject({
       targets: [],

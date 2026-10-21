@@ -4,6 +4,7 @@ import { encodeReference } from "../../packages/shared/src/codespaces/workspace-
 import type { ManagedWorkspaceView } from "../../packages/web-frontend/src/types/api-types.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
+import type { Route } from "./fixtures.js";
 
 const baseUrl = getTestBaseUrl();
 const settingsUrl = `${baseUrl}/settings#integrations-github`;
@@ -62,16 +63,50 @@ const readiness: CodespaceReadinessView = {
 };
 
 const managementMetadata = {
-  provider_billing: "unavailable",
+  has_diagnostics: false,
+  repositories_stale: false,
+  resources_stale: false,
+  unavailable: [],
+  provider_errors: [],
   controllers: [
     {
       device_id: DEVICE_ID,
       label: "Paired controller",
-      available: true,
       controller: controllerRef,
     },
   ],
 };
+
+/** Discovery is provider-scoped; a hidden peer must not borrow these GitHub rows. */
+async function fulfillAuxiliaryRead(route: Route): Promise<boolean> {
+  const request = route.request();
+  const url = new URL(request.url());
+  if (request.method() === "GET" && url.pathname.endsWith("/billing")) {
+    await route.fulfill({ json: { success: true, data: "unavailable" } });
+    return true;
+  }
+  const refresh = request.method() === "POST" && url.pathname.endsWith("/refresh");
+  if (!refresh && !(request.method() === "GET" && url.pathname.endsWith("/codespaces")))
+    return false;
+  const selection = refresh ? request.postDataJSON() : Object.fromEntries(url.searchParams);
+  expect(["github-codespaces", "local-sandboxes"]).toContain(selection.provider);
+  expect(["actionable", "diagnostics", "history"]).toContain(selection.view ?? "actionable");
+  if (selection.provider !== "local-sandboxes") return false;
+  await route.fulfill({
+    json: {
+      success: true,
+      data: {
+        ...managementMetadata,
+        provider: selection.provider,
+        readiness: { ...readiness, provider: selection.provider },
+        connection,
+        repositories: [],
+        codespaces: [],
+      },
+    },
+  });
+  return true;
+}
 
 function codespace(
   overrides: Partial<ManagedWorkspaceView> = {},
@@ -133,6 +168,7 @@ test("codespaces are created, stopped and deleted with confirmation from Setting
     route.fulfill({ json: { success: true, data: connection } }),
   );
   await page.route("**/api/integrations/github/codespaces**", async (route) => {
+    if (await fulfillAuxiliaryRead(route)) return;
     const request = route.request();
     requests.push(`${request.method()} ${new URL(request.url()).pathname}`);
     const url = new URL(request.url());
@@ -381,6 +417,7 @@ test("a failed codespace request is explained in Russian, for a known and an unk
     route.fulfill({ json: { success: true, data: connection } }),
   );
   await page.route("**/api/integrations/github/codespaces**", async (route) => {
+    if (await fulfillAuxiliaryRead(route)) return;
     const request = route.request();
     if (request.method() === "POST") {
       const failure = failures.shift()!;
@@ -433,6 +470,7 @@ test("a codespace the server finished disappears from the card", async ({ page }
     route.fulfill({ json: { success: true, data: connection } }),
   );
   await page.route("**/api/integrations/github/codespaces**", async (route) => {
+    if (await fulfillAuxiliaryRead(route)) return;
     const request = route.request();
     const url = new URL(request.url());
     if (request.method() === "GET" && url.pathname.endsWith("/codespaces")) {
@@ -506,8 +544,9 @@ test("unconfigured instances explain themselves in both languages", async ({ pag
       json: { success: true, data: { ...connection, state: "disabled", reason: "NOT_CONFIGURED" } },
     }),
   );
-  await page.route("**/api/integrations/github/codespaces", (route) =>
-    route.fulfill({
+  await page.route("**/api/integrations/github/codespaces**", async (route) => {
+    if (await fulfillAuxiliaryRead(route)) return;
+    await route.fulfill({
       json: {
         success: true,
         data: {
@@ -518,8 +557,8 @@ test("unconfigured instances explain themselves in both languages", async ({ pag
           codespaces: [],
         },
       },
-    }),
-  );
+    });
+  });
   await page.goto(`${baseUrl}/settings?lang=en#development-environments`);
   await expect(page.getByTestId("github-codespace-management")).toContainText(
     "An administrator must configure the GitHub App",
@@ -567,6 +606,7 @@ test("a lost create reply collects the original owner request without another cr
     route.fulfill({ json: { success: true, data: connection } }),
   );
   await page.route("**/api/integrations/github/codespaces**", async (route) => {
+    if (await fulfillAuxiliaryRead(route)) return;
     if (
       route.request().method() === "POST" &&
       new URL(route.request().url()).pathname.endsWith("/workspace_create")
@@ -701,6 +741,7 @@ test("a lost completed start reply is explicitly recovered without another start
     route.fulfill({ json: { success: true, data: connection } }),
   );
   await page.route("**/api/integrations/github/codespaces**", async (route) => {
+    if (await fulfillAuxiliaryRead(route)) return;
     const request = route.request();
     const path = new URL(request.url()).pathname;
     if (request.method() === "POST" && path.endsWith("/workspace_lifecycle")) {

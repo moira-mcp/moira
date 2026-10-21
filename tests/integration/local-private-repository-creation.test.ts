@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
@@ -977,6 +977,79 @@ describe("Private repository creation precedes local admission without repeating
     expect(completed.machine).toEqual(original.machine);
     expect(completed.enabled).toBe(original.enabled);
     expect(f.state.posts).toBe(1);
+  });
+  test("Local device targets complete while GitHub installations are held and GitHub metadata never probes the Local owner", async () => {
+    const f = await fixture();
+    const installations = [
+      { installation_id: "8", owner: "owner", repository_selection: "selected" as const },
+    ];
+    let entered!: () => void, release!: (value: typeof installations) => void;
+    const requested = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const held = new Promise<typeof installations>((resolve) => {
+      release = resolve;
+    });
+    const listInstallations = jest.fn(async () => {
+      entered();
+      return held;
+    });
+    const discovery = new LocalRepositoryAdmissionService({
+      devices: f.devices,
+      verifyAccount: async () => ({ githubUserId: "42", owner: "owner" }),
+      verifyRepository: async () => {
+        throw new Error("No repository verification during discovery");
+      },
+      listInstallations,
+    });
+    const snapshot = jest.spyOn(f.devices, "snapshot");
+    let metadataCompleted = false;
+    const metadata = discovery.listDevices("owner", { observeDevices: false }).then((value) => {
+      metadataCompleted = true;
+      return value;
+    });
+    try {
+      await requested;
+      expect(snapshot).not.toHaveBeenCalled();
+      const observation = f.devices.createObservation("owner");
+      const local = await discovery.listDevices("owner", {
+        includeInstallations: false,
+        observation,
+      });
+      expect(local).toMatchObject({
+        installations: [],
+        github_setup_required: false,
+        devices: [
+          {
+            device_id: f.deviceId,
+            owner_available: true,
+            local: {
+              state: "configured",
+              enabled: true,
+              delegation: f.settings.agentRepositoryManagement,
+            },
+          },
+        ],
+      });
+      expect(metadataCompleted).toBe(false);
+      expect(listInstallations).toHaveBeenCalledTimes(1);
+      expect(snapshot).toHaveBeenCalledTimes(1);
+      release(installations);
+      expect(await metadata).toMatchObject({
+        installations,
+        github_setup_required: false,
+        devices: [
+          { device_id: f.deviceId, owner_available: false, local: { state: "unavailable" } },
+        ],
+      });
+      expect(snapshot).toHaveBeenCalledTimes(1);
+      expect(f.state.posts).toBe(0);
+      expect(f.state.puts).toBe(0);
+    } finally {
+      release(installations);
+      await metadata;
+      snapshot.mockRestore();
+    }
   });
   test("personal installation projection excludes organizations and stale connected accounts", async () => {
     const f = await fixture();

@@ -1871,22 +1871,41 @@ host paths or credentials.
 
 ### GET /api/integrations/github/codespaces
 
-Returns `{success:true,data:…}` with provider readiness/connection, repository targets,
-`repositories_stale`, `resources_stale`, observed `codespaces`, `unavailable` owned
-identities, `providers`, `controllers`, `provider_errors` and optional billing.
+Requires the query parameter `provider=local-sandboxes|github-codespaces` and accepts
+`view=actionable|diagnostics|history`, defaulting to `actionable`. For example,
+`GET /api/integrations/github/codespaces?provider=local-sandboxes&view=diagnostics`.
+`POST /api/integrations/github/codespaces/refresh` accepts the same selection as a strict
+JSON body, such as `{"provider":"local-sandboxes","view":"actionable"}`.
+
+Returns `{success:true,data:…}` with the selected `provider`, readiness/connection,
+repository targets, `repositories_stale`, `resources_stale`, observed `codespaces`,
+`unavailable` owned identities, `controllers`, `provider_errors` and `has_diagnostics`.
 Repository choices include returned `target` and `controller` references. Failed
 observations never fabricate state, machine or lifecycle authority: unavailable entries
 carry an observation-only `identity`, a closed error code and any known original
-operation references. Healthy peers remain available beside unavailable resources or
-failed providers. Provider metadata is not borrowed from a healthy peer.
+operation references, without a lifecycle generation. Use explicit original collection
+or `workspace_observe` for that identity; it cannot authorize a lifecycle mutation.
+
+The actionable view contains currently observed useful environments, including known
+incomplete setup. Diagnostics contains uncertain, unavailable or authority-lost identities;
+history contains confirmed retired environments. `has_diagnostics` signals that diagnostic
+identities exist. View selection never deletes identities or receipts.
+A failed selected-provider read stays explicit rather than becoming a healthy empty list.
+The request does not wait for another provider or billing.
 
 Readiness is a configuration projection `disabled|misconfigured|ready`, not an SSH
-or guest probe. `POST /refresh` forces repository-grant refresh. GET and Refresh still
-compose authorized monthly billing reads; no independent billing-cache or latency
-contract applies. Optional `provider_billing` reports personal-account compute/storage
-usage and USD amounts, or `"unavailable"`. It requires GitHub Plan read permission and
+or guest probe. Refresh reads the selected provider and view; GitHub refresh also forces
+its repository-grant refresh. Local discovery reuses one request-local owner observation
+for resources, repositories and device projection, rechecking current registration before
+reuse. This observation is not mutation authority. Registered GitHub controllers remain
+selectable without a Local owner probe; their metadata does not certify reachability.
+
+### GET /api/integrations/github/codespaces/billing
+
+Returns `{success:true,data:…}` with personal-account compute/storage usage and USD
+amounts, or `"unavailable"`. This separate read requires GitHub Plan read permission and
 the same current account/credential generation after the read. No cloud lifecycle queue
-or resource-limit view is returned.
+or resource-limit view is returned. List and Refresh do not read billing.
 
 ### POST /api/integrations/github/codespaces/operations/:purpose
 

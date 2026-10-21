@@ -61,6 +61,16 @@
     "title": "Codespaces on this computer",
     "description": "Each codespace is a separate working environment. You can create several for the same repository.",
     "loadFailed": "Could not load this computer's codespaces.",
+    "billingFailed": "Could not load GitHub billing.",
+    "views": {
+      "label": "Environment view",
+      "actionable": "Current environments",
+      "diagnostics": "Diagnostics",
+      "history": "History",
+      "diagnosticsEmpty": "No environments need diagnosis in this observation.",
+      "historyEmpty": "No retired environments were found.",
+      "diagnosticsHint": "Some registered environments need attention. Open Diagnostics to inspect their retained identities and original operations."
+    },
     "accessDisabled": "Agent access is unavailable. Check the computer's connection and access switch.",
     "computerSettings": "Computer settings and access",
     "resources": "{{cpu}} CPU · {{memory}} GiB RAM",

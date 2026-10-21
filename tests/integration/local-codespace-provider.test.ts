@@ -84,6 +84,132 @@ async function create(requestId = createWorkspaceRequestId()) {
 }
 
 describe("Local cloud facade routes to the authoritative owner", () => {
+  test("one discovery observation shares exact device evidence while individual get and lifecycle remain fresh", async () => {
+    const first = await create(),
+      second = await create(),
+      observation = devices.createObservation("owner"),
+      before = await observation.localSnapshot(deviceId);
+    await resource.stopCodespace(
+      "owner",
+      second.codespace_id,
+      createWorkspaceRequestId(),
+      second.generation,
+    );
+    const [listed, repositories, owned] = await Promise.all([
+      resource.listResources("owner", { observation }),
+      resource.listRepositories("owner", { observation }),
+      observation.listOwned(),
+    ]);
+    expect(listed.codespaces).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ codespace_id: first.codespace_id, state: "usable" }),
+        expect.objectContaining({ codespace_id: second.codespace_id, state: "usable" }),
+      ]),
+    );
+    expect(listed.codespaces).toHaveLength(2);
+    expect(repositories.map((repository) => repository.id)).toContain(target);
+    expect(owned.devices[0].owner).toMatchObject({
+      state: "available",
+      observedAt: before.observedAt,
+    });
+    expect(await observation.localSnapshot(deviceId)).toEqual(before);
+    const fresh = await resource.getCodespace("owner", second.codespace_id);
+    expect(fresh).toMatchObject({ state: "stopped", generation: second.generation + 1 });
+    await expect(
+      resource.startCodespace(
+        "owner",
+        second.codespace_id,
+        createWorkspaceRequestId(),
+        second.generation,
+      ),
+    ).rejects.toMatchObject({ code: "CODESPACE_GENERATION_CONFLICT" });
+    expect((await resource.getCodespace("owner", second.codespace_id)).state).toBe("stopped");
+    await expect(resource.listResources("other", { observation })).rejects.toMatchObject({
+      code: "LOCAL_UNAUTHORIZED",
+    });
+  });
+  test("cached and in-flight request observations refuse a changed registration rather than adopting its response", async () => {
+    const observation = devices.createObservation("owner");
+    await observation.snapshot(deviceId);
+    const original = owner!.client.json;
+    let entered!: () => void, release!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    owner!.client.json = async (...args) => {
+      const response = await original(...args);
+      if (args[2].path === "/v1/controller") {
+        entered();
+        await held;
+      }
+      return response;
+    };
+    const pending = devices.createObservation("owner").snapshot(deviceId);
+    await started;
+    db.prepare("UPDATE codespaceLocalDevice SET generation=generation+1 WHERE id=?").run(deviceId);
+    release();
+    await expect(pending).rejects.toMatchObject({ code: "LOCAL_UNAUTHORIZED" });
+    await expect(observation.snapshot(deviceId)).rejects.toMatchObject({
+      code: "LOCAL_UNAUTHORIZED",
+    });
+    await expect(observation.localSnapshot(deviceId)).rejects.toMatchObject({
+      code: "LOCAL_UNAUTHORIZED",
+    });
+    await expect(observation.listOwned()).rejects.toMatchObject({ code: "LOCAL_UNAUTHORIZED" });
+  });
+  test("actionable setup, unknown diagnostics and proven retirement stay separate without changing original records", async () => {
+    const healthy = await create(),
+      incomplete = await create(),
+      retired = await create(),
+      binding = (await owner!.controller.state.binding(incomplete.codespace_id, owner!.identity))!,
+      space = (await owner!.records.get(binding.localSpaceId!))!;
+    await owner!.records.put({
+      ...space,
+      phase: "failed",
+      failure: "LOCAL_SETUP_INCOMPLETE",
+      lastStartedAt: null,
+    });
+    await resource.deleteCodespace("owner", retired.codespace_id, retired.generation, {
+      requestId: createWorkspaceRequestId(),
+      ownerConfirmed: true,
+    });
+    const unknownId = createWorkspaceRequestId(),
+      originalCreate = owner!.manager.create;
+    owner!.manager.create = async () => {
+      throw new LocalRefusal("LOCAL_CREATE_UNKNOWN", "Controlled unknown");
+    };
+    await expect(create(unknownId)).rejects.toMatchObject({
+      code: "CODESPACE_LOCAL_CREATION_UNKNOWN",
+    });
+    owner!.manager.create = originalCreate;
+    const identities = resource.repository.listOwned("owner"),
+      original = await devices.getOperation("owner", deviceId, unknownId),
+      actionable = await resource.listResources("owner"),
+      diagnostics = await resource.listResources("owner", { view: "diagnostics" }),
+      history = await resource.listResources("owner", { view: "history" });
+    expect(actionable.codespaces.map((row) => row.codespace_id).sort()).toEqual(
+      [healthy.codespace_id, incomplete.codespace_id].sort(),
+    );
+    expect(actionable.unavailable).toEqual([]);
+    expect(actionable.has_diagnostics).toBe(true);
+    expect(diagnostics.codespaces).toEqual([]);
+    expect(diagnostics.unavailable).toEqual([
+      expect.objectContaining({ codespace_id: unknownId.slice(4) }),
+    ]);
+    expect(diagnostics.unavailable[0]).not.toHaveProperty("generation");
+    expect(diagnostics.unavailable[0]).not.toHaveProperty("state");
+    expect(history.codespaces).toEqual([
+      expect.objectContaining({ codespace_id: retired.codespace_id, state: "deleted" }),
+    ]);
+    await expect(resource.getCodespace("other", healthy.codespace_id)).rejects.toMatchObject({
+      code: "CODESPACE_NOT_FOUND",
+    });
+    expect(resource.repository.listOwned("owner")).toEqual(identities);
+    expect(await devices.getOperation("owner", deviceId, unknownId)).toEqual(original);
+  });
   test("setup recovery addresses the same known VM and preserves the failed original create receipt", async () => {
     const createId = createWorkspaceRequestId(),
       originalCreate = owner!.manager.create;
@@ -233,7 +359,9 @@ describe("Local cloud facade routes to the authoritative owner", () => {
         generation: healthy.generation,
       }),
     ]);
-    expect(view.unavailable).toEqual([
+    expect(view.unavailable).toEqual([]);
+    expect(view.has_diagnostics).toBe(true);
+    expect((await resource.listResources("owner", { view: "diagnostics" })).unavailable).toEqual([
       {
         codespace_id: failedId,
         provider: "local-sandboxes",
@@ -247,8 +375,10 @@ describe("Local cloud facade routes to the authoritative owner", () => {
       },
     ]);
     expect(JSON.stringify(view)).not.toContain("private-create-diagnostic");
-    expect(await resource.refreshProviderState("owner")).toEqual({ stale: true });
-    expect(await resource.listResources("other")).toEqual({ codespaces: [], unavailable: [] });
+    expect(await resource.listResources("other")).toMatchObject({
+      codespaces: [],
+      unavailable: [],
+    });
     expect(resource.repository.listOwned("owner")).toEqual(identities);
     expect(await owner!.state.keys("controller-operation-")).toEqual(journals);
     expect(attempts).toBe(1);
@@ -516,7 +646,7 @@ describe("Local cloud facade routes to the authoritative owner", () => {
     await expect(resource.getCodespace("owner", created.codespace_id)).rejects.toMatchObject({
       code: "CODESPACE_PROVIDER_UNAVAILABLE",
     });
-    expect(await resource.listResources("owner")).toEqual({
+    expect(await resource.listResources("owner", { view: "diagnostics" })).toMatchObject({
       codespaces: [],
       unavailable: [
         {
@@ -600,7 +730,7 @@ describe("Local cloud facade routes to the authoritative owner", () => {
     expect((await devices.localSnapshot("owner", deviceId)).pendingResourceOperations).toEqual([
       { resourceId, requestIds: [requestId] },
     ]);
-    expect((await resource.listResources("owner")).unavailable).toEqual([
+    expect((await resource.listResources("owner", { view: "diagnostics" })).unavailable).toEqual([
       expect.objectContaining({
         codespace_id: resourceId,
         device_id: deviceId,
@@ -618,18 +748,17 @@ describe("Local cloud facade routes to the authoritative owner", () => {
       label: "Changed binding",
     });
     await devices.confirmEnrollment("owner", pairing.pairingId, 2);
-    const observe = resource.getCodespace.bind(resource);
-    resource.getCodespace = async (...args) => {
-      try {
-        return await observe(...args);
-      } catch (error) {
+    const observe = owner!.client.json;
+    owner!.client.json = async (...args) => {
+      const result = await observe(...args);
+      if (args[2].path === "/v1/controller") {
         db.prepare(
           "UPDATE codespaceLocalResourceBinding SET deviceId=? WHERE resourceId=? AND userId='owner'",
         ).run(nextDevice, resourceId);
-        throw error;
       }
+      return result;
     };
-    const raced = await resource.listResources("owner");
+    const raced = await resource.listResources("owner", { view: "diagnostics" });
     expect(devices.getBinding("owner", resourceId)?.deviceId).toBe(nextDevice);
     expect(raced.unavailable).toEqual([
       expect.objectContaining({

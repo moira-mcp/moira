@@ -4,7 +4,11 @@ import { createTestUser, login, loginAsAdmin } from "./helpers/auth-helper.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import type { LocalDeviceView } from "@mcp-moira/shared";
 import { encodeReference } from "../../packages/shared/src/codespaces/workspace-references.mjs";
-import type { ManagedWorkspaceView } from "../../packages/web-frontend/src/types/api-types.js";
+import type {
+  CodespaceManagementView,
+  ManagedWorkspaceView,
+} from "../../packages/web-frontend/src/types/api-types.js";
+import type { Route } from "./fixtures.js";
 
 for (const language of ["en", "ru"] as const)
   test(`persistent Local permission and independent setup/readiness states are visible in ${language}`, async ({
@@ -130,7 +134,7 @@ for (const language of ["en", "ru"] as const)
                   connectionId: devices[0].connectionId!,
                 },
                 requestId: "ws1-66666666-6666-4666-8666-666666666666",
-                kind: "lifecycle",
+                kind: "unknown",
               }),
             ]
           : [],
@@ -143,27 +147,99 @@ for (const language of ["en", "ru"] as const)
         ? { remote: { state: "enrollment_unavailable" as const } }
         : {}),
     }));
+    const unknown = codespaces[3];
+    const unavailable: NonNullable<CodespaceManagementView["unavailable"]>[number] = {
+      codespace_id: unknown.codespace_id,
+      provider: unknown.provider,
+      repository_id: unknown.repository_id,
+      repository: unknown.repository,
+      requested_ref: unknown.requested_ref,
+      created_at: unknown.created_at,
+      identity: encodeReference("workspace-identity", {
+        resourceId: unknown.codespace_id,
+        provider: "local-sandboxes",
+        deviceId: devices[0].deviceId,
+      }),
+      pending_operations: unknown.pending_operations,
+      error: { code: "CODESPACE_LOCAL_CREATION_UNKNOWN" },
+    };
+    const collected: string[] = [];
+    const archived: ManagedWorkspaceView = {
+      ...codespaces[0],
+      codespace_id: "77777777-7777-4777-8777-777777777777",
+      repository: "fixture/retired",
+      state: "deleted",
+      desired_state: "deleted",
+      observed_state: "absent",
+      lifecycle_error: null,
+      setup_failure: undefined,
+      workspace: encodeReference("workspace", {
+        resourceId: "77777777-7777-4777-8777-777777777777",
+        provider: "local-sandboxes",
+        deviceId: devices[0].deviceId,
+        generation: 4,
+      }),
+    };
+    const heldGitHub: Route[] = [];
+    let billingReads = 0;
     await page.route("**/api/integrations/local/devices", (route) =>
       route.fulfill({ json: { success: true, data: { devices, pairings: [] } } }),
     );
     await page.route("**/api/integrations/github", (route) =>
       route.fulfill({ json: { success: true, data: { state: "disconnected" } } }),
     );
-    await page.route("**/api/integrations/github/codespaces**", (route) =>
-      route.fulfill({
+    await page.route("**/api/integrations/github/codespaces**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname.endsWith("/operation_get")) {
+        expect(route.request().method()).toBe("POST");
+        expect(route.request().postDataJSON()).toEqual({
+          reference: unavailable.pending_operations[0],
+        });
+        collected.push(unavailable.pending_operations[0]);
+        await route.fulfill({
+          json: {
+            success: true,
+            data: { operation: unavailable.pending_operations[0], state: "unconfirmed" },
+          },
+        });
+        return;
+      }
+      if (url.pathname.endsWith("/billing")) {
+        billingReads++;
+        await route.fulfill({ json: { success: true, data: "unavailable" } });
+        return;
+      }
+      const provider = url.searchParams.get("provider");
+      if (provider === "github-codespaces") {
+        heldGitHub.push(route);
+        return;
+      }
+      expect(provider).toBe("local-sandboxes");
+      const view = url.searchParams.get("view") ?? "actionable";
+      expect(["actionable", "diagnostics", "history"]).toContain(view);
+      await route.fulfill({
         json: {
           success: true,
           data: {
-            codespaces,
-            unavailable: [],
+            provider,
+            codespaces:
+              view === "history"
+                ? [archived]
+                : view === "diagnostics"
+                  ? []
+                  : codespaces.filter((row) => row.state !== "ambiguous"),
+            has_diagnostics: true,
+            resources_stale: false,
+            repositories_stale: false,
+            unavailable: view === "diagnostics" ? [unavailable] : [],
             provider_errors: [],
             repositories: [],
             readiness: { state: "ready" },
             connection: { state: "connected" },
           },
         },
-      }),
-    );
+      });
+    });
     await page.goto(`${getTestBaseUrl()}/settings?lang=${language}#integrations-local`);
     for (const [index, state] of states.entries()) {
       const card = page.getByTestId(`local-device-${devices[index].deviceId}`);
@@ -223,7 +299,22 @@ for (const language of ["en", "ru"] as const)
     // Controlled presentation fixtures distinguish known setup recovery from an unknown
     // original create and do not claim that these cards are physical VM observations.
     for (const [index, state] of setupStates.entries()) {
-      const card = page.getByTestId(`github-codespace-${codespaces[index].codespace_id}`);
+      if (state === "unknown") {
+        expect(billingReads).toBe(0);
+        await expect(
+          page.getByTestId(`github-codespace-${codespaces[index].codespace_id}`),
+        ).toHaveCount(0);
+        await page
+          .getByTestId(`local-codespaces-${devices[0].deviceId}`)
+          .getByRole("button", {
+            name: language === "en" ? "Diagnostics" : "Диагностика",
+            exact: true,
+          })
+          .click();
+      }
+      const card = page.getByTestId(
+        `${state === "unknown" ? "codespace-unavailable" : "github-codespace"}-${codespaces[index].codespace_id}`,
+      );
       await expect(card).toBeVisible();
       const resume = card.getByRole("button", {
         name: language === "en" ? "Resume setup" : "Продолжить подготовку",
@@ -254,12 +345,31 @@ for (const language of ["en", "ru"] as const)
               : "локальная готовность определяется отдельно",
           );
         } else {
+          const collect = card.getByRole("button", {
+            name: language === "en" ? "Check original result" : "Проверить исходный результат",
+            exact: true,
+          });
+          await expect(collect).toBeEnabled();
+          await expect(
+            card.getByText(
+              language === "en"
+                ? "State could not be confirmed"
+                : "Состояние не удалось подтвердить",
+              { exact: true },
+            ),
+          ).toBeVisible();
+          await expect(card.getByText(/State confirmed|Состояние подтверждено/)).toHaveCount(0);
+          await expect(page.getByTestId(`github-codespace-${unknown.codespace_id}`)).toHaveCount(0);
+          await expect(card.getByRole("button")).toHaveCount(1);
+          await collect.click();
+          await expect.poll(() => collected).toEqual(unavailable.pending_operations);
+          await expect(collect).toBeEnabled();
           await expect(
             card.getByRole("button", {
-              name: language === "en" ? "Check state again" : "Проверить состояние снова",
+              name: language === "en" ? "Delete" : "Удалить",
               exact: true,
             }),
-          ).toBeEnabled();
+          ).toHaveCount(0);
         }
       }
       const bounds = await card.boundingBox();
@@ -275,6 +385,32 @@ for (const language of ["en", "ru"] as const)
         contentType: "image/png",
       });
     }
+    const environments = page.getByTestId(`local-codespaces-${devices[0].deviceId}`);
+    await environments
+      .getByRole("button", { name: language === "en" ? "History" : "История", exact: true })
+      .click();
+    const historical = page.getByTestId(`github-codespace-${archived.codespace_id}`);
+    await expect(historical).toBeVisible();
+    await expect(
+      historical.getByRole("button", {
+        name: language === "en" ? "Start" : "Запустить",
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    await expect(
+      historical.getByRole("button", {
+        name: language === "en" ? "Delete" : "Удалить",
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    await historical.scrollIntoViewIfNeeded();
+    await testInfo.attach(`local-history-${language}`, {
+      body: await historical.screenshot(),
+      contentType: "image/png",
+    });
+    expect(heldGitHub.length).toBeGreaterThan(0);
+    expect(billingReads).toBe(0);
+    for (const route of heldGitHub) await route.abort();
   });
 
 /** No simulated heartbeat: the paired controller is offline throughout this browser check. */

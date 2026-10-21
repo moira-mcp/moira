@@ -179,6 +179,15 @@ npm run test:integration -- --file tests/integration/local-device-control.test.t
 Host service fixtures require Git and ripgrep; the TLS router fixture also uses OpenSSL
 to create its disposable certificate. They use the repository's Node runtime.
 
+Discovery tests distinguish provider independence with deliberately unresolved GitHub,
+installation and billing reads while selected Local discovery completes. The provider and
+private-repository integrations check shared request-local observations, current registration
+fences, actionable known setup, diagnostic originals without lifecycle generations and retained
+history. Frontend settings tests check separate provider/view completion, lazy billing on the
+GitHub subsection, and rejection of late success or failure after same-account credential or
+capability changes. Browser scenarios exercise the current-view controls and original collection;
+these controlled responses do not prove live external provider availability.
+
 The common fixture in `tests/fixtures/workspace-service.cjs` owns a temporary Git
 repository, private state and Unix HTTP socket. Service cases observe real commands,
 exact binary and Unicode input/output, sessions, guarded files and direct CLI calls.

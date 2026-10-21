@@ -33,9 +33,12 @@ beforeAll(async () => {
 
 describe("codespace management on a default-disabled installation", () => {
   test("lists a disabled readiness decision with no codespaces and no secrets", async () => {
-    const response = await fetch(`${baseUrl}/api/integrations/github/codespaces`, {
-      headers: { Cookie: userCookie },
-    });
+    const response = await fetch(
+      `${baseUrl}/api/integrations/github/codespaces?provider=github-codespaces`,
+      {
+        headers: { Cookie: userCookie },
+      },
+    );
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.data).toMatchObject({
@@ -47,8 +50,14 @@ describe("codespace management on a default-disabled installation", () => {
       connection: { state: "disabled" },
       repositories: [],
       codespaces: [],
-      provider_billing: "unavailable",
+      has_diagnostics: false,
     });
+    expect(body.data).not.toHaveProperty("provider_billing");
+    const billing = await fetch(`${baseUrl}/api/integrations/github/codespaces/billing`, {
+      headers: { Cookie: userCookie },
+    });
+    expect(billing.status).toBe(200);
+    expect((await billing.json()).data).toBe("unavailable");
     expect(body.data).not.toHaveProperty("limits");
     expect(JSON.stringify(body)).not.toMatch(/accessToken|refreshToken|clientSecret|vaultKey/);
   });

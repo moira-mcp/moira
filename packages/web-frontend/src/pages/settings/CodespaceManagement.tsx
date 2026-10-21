@@ -21,7 +21,7 @@ import { apiClient } from "@/services/api-client";
 import type { ManagedWorkspaceView, WorkspaceOperationView } from "@/types/api-types";
 import { cn } from "@/lib/utils";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { useGitHubCodespaces } from "./GitHubCodespacesData";
+import { useCodespaceDiscovery } from "./GitHubCodespacesData";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -148,25 +148,23 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
       computer.owner.state === "available" &&
       localCapability?.control?.optedIn === true);
   const {
-    management: view,
-    managementLoading: loading,
-    managementError: loadError,
-    reloadManagement,
-    setManagement: setView,
-  } = useGitHubCodespaces();
+    result: { data: view, pending: loading, error: loadError },
+    view: discoveryView,
+    reload: reloadManagement,
+    update: setView,
+    select: selectDiscoveryView,
+  } = useCodespaceDiscovery(provider);
   const [repositoryId, setRepositoryId] = useState("");
   // Repository metadata has no default branch; require a ref instead of guessing one.
   const [ref, setRef] = useState("");
   const [controllerId, setControllerId] = useState("");
   const [devcontainerPath, setDevcontainerPath] = useState("");
   const [providerName, setProviderName] = useState("");
-  const availableControllers = useMemo(
-    () => view?.controllers?.filter((entry) => entry.available) ?? [],
-    [view?.controllers],
-  );
+  const availableControllers = useMemo(() => view?.controllers ?? [], [view?.controllers]);
   useEffect(() => {
+    if (!view?.controllers) return;
     setControllerId((current) =>
-      view?.controllers?.some((entry) => entry.device_id === current && entry.available)
+      view?.controllers?.some((entry) => entry.device_id === current)
         ? current
         : availableControllers.length === 1
           ? availableControllers[0].device_id
@@ -192,6 +190,8 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
     ...new Set([
       ...(retainedRef.current[target]?.operation ? [retainedRef.current[target].operation!] : []),
       ...(view?.codespaces.find((entry) => entry.codespace_id === target)?.pending_operations ??
+        []),
+      ...(view?.unavailable?.find((entry) => entry.codespace_id === target)?.pending_operations ??
         []),
     ]),
   ];
@@ -585,6 +585,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
     const captured = pendingDelete;
     if (
       !captured ||
+      discoveryView !== "actionable" ||
       deleteNeedsRefresh ||
       !ownerDeleteEnabled ||
       !view?.codespaces.some((entry) => entry.codespace_id === captured.codespace_id)
@@ -626,10 +627,31 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
     }
   };
 
+  const discoveryControls = (
+    <div
+      className="flex flex-wrap gap-2"
+      role="group"
+      aria-label={t("localDevices.codespaces.views.label")}
+      {...(!computer ? guideAnchor("settings.environment-views") : {})}
+    >
+      {(["actionable", "diagnostics", "history"] as const).map((target) => (
+        <Button
+          key={target}
+          size="sm"
+          variant={discoveryView === target ? "default" : "outline"}
+          aria-pressed={discoveryView === target}
+          onClick={() => selectDiscoveryView(target)}
+        >
+          {t(`localDevices.codespaces.views.${target}`)}
+        </Button>
+      ))}
+    </div>
+  );
   if (loading && !view) {
     return (
       <Card data-testid={regionId} {...(!computer ? guideAnchor("settings.codespaces") : {})}>
-        <CardContent className="flex min-h-32 items-center justify-center p-6">
+        <CardContent className="min-h-32 space-y-4 p-6">
+          {discoveryControls}
           <Loader2 className="h-5 w-5 animate-spin" aria-label={t("common.loading")} />
         </CardContent>
       </Card>
@@ -640,6 +662,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
     return (
       <Card data-testid={regionId} {...(!computer ? guideAnchor("settings.codespaces") : {})}>
         <CardContent className="space-y-4 p-6">
+          {discoveryControls}
           <Alert variant="destructive">
             <AlertCircle aria-hidden="true" />
             <AlertTitle>{loadFailed}</AlertTitle>
@@ -655,18 +678,11 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
     );
   }
 
-  const selectedProvider = view.providers?.find((entry) => entry.provider === provider);
-  const metadata =
-    selectedProvider && !("error" in selectedProvider)
-      ? selectedProvider
-      : view.providers
-        ? undefined
-        : view;
-  const readiness = metadata?.readiness;
-  const connection = metadata?.connection;
+  const readiness = view.readiness;
+  const connection = view.connection;
   const providerError = view.provider_errors?.find((entry) => entry.provider === provider)?.error;
-  const repositoriesStale = metadata?.repositories_stale ?? view.repositories_stale;
-  const resourcesStale = metadata?.resources_stale ?? view.resources_stale;
+  const repositoriesStale = view.repositories_stale;
+  const resourcesStale = view.resources_stale;
   const codespaces = view.codespaces.filter(
     (codespace) =>
       codespace.provider === provider &&
@@ -680,6 +696,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
   const ready = readiness?.state === "ready";
   const connected = connection?.state === "connected";
   const canCreate =
+    discoveryView === "actionable" &&
     ready &&
     connected &&
     accessEnabled &&
@@ -721,6 +738,12 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {discoveryControls}
+        {discoveryView === "actionable" && view.has_diagnostics && (
+          <p role="status" className="text-sm text-muted-foreground">
+            {t("localDevices.codespaces.views.diagnosticsHint")}
+          </p>
+        )}
         <DataRegion
           hasResult
           pending={loading || refreshing}
@@ -921,7 +944,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
             </form>
           )}
 
-          {!computer && connected && controllerId && (
+          {discoveryView === "actionable" && !computer && connected && controllerId && (
             <form
               className="space-y-2 rounded-md border p-3"
               onSubmit={(event) => {
@@ -1060,7 +1083,11 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
 
           {codespaces.length === 0 && unavailable.length === 0 && !providerError ? (
             <p className="text-sm text-muted-foreground" data-testid="github-codespace-empty">
-              {t("pages.settings.codespaces.empty")}
+              {t(
+                discoveryView === "actionable"
+                  ? "pages.settings.codespaces.empty"
+                  : `localDevices.codespaces.views.${discoveryView}Empty`,
+              )}
             </p>
           ) : (
             <ul className="space-y-2" data-testid="github-codespace-list">
@@ -1193,86 +1220,104 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                       </p>
                     )}
                     <div className="mt-3 flex flex-wrap items-center gap-2">
-                      {(computer || codespace.controller) &&
-                        setupIncomplete &&
-                        codespace.desired_state !== "deleted" && (
+                      {discoveryView !== "actionable" ? (
+                        codespace.pending_operations.length > 0 && (
                           <Button
                             size="sm"
                             variant="outline"
-                            disabled={requestBusy || !accessEnabled || outcomeUnconfirmed}
-                            onClick={() => void lifecycle(codespace, "resume_setup")}
-                            data-testid={`codespace-resume-setup-${codespace.codespace_id}`}
+                            onClick={() =>
+                              void collectOperation(codespace.codespace_id).catch(() =>
+                                toast.error(t("localDevices.editor.unconfirmed")),
+                              )
+                            }
                           >
-                            <Play className="mr-1 h-4 w-4" aria-hidden="true" />
-                            {t("localDevices.codespaces.resumeSetup")}
+                            {t("localDevices.codespaces.collectOriginal")}
                           </Button>
-                        )}
-                      {!computer && codespace.state !== "usable" && !outcomeUnconfirmed && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={requestBusy || adopting || !controllerId}
-                          onClick={() => void adopt(codespace)}
-                        >
-                          {t("localDevices.provisioning.adopt")}
-                        </Button>
-                      )}
-                      {(errorMessage ||
-                        outcomeUnconfirmed ||
-                        (computer && BUSY_STATES.has(codespace.state))) && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={requestBusy}
-                          onClick={(event) => void checkState(codespace, event.currentTarget)}
-                          data-testid={`codespace-reconcile-${codespace.codespace_id}`}
-                        >
-                          {checkingCodespaces.has(codespace.codespace_id) && (
-                            <Loader2 className="mr-1 size-4 animate-spin" />
+                        )
+                      ) : (
+                        <>
+                          {(computer || codespace.controller) &&
+                            setupIncomplete &&
+                            codespace.desired_state !== "deleted" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={requestBusy || !accessEnabled || outcomeUnconfirmed}
+                                onClick={() => void lifecycle(codespace, "resume_setup")}
+                                data-testid={`codespace-resume-setup-${codespace.codespace_id}`}
+                              >
+                                <Play className="mr-1 h-4 w-4" aria-hidden="true" />
+                                {t("localDevices.codespaces.resumeSetup")}
+                              </Button>
+                            )}
+                          {!computer && codespace.state !== "usable" && !outcomeUnconfirmed && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={requestBusy || adopting || !controllerId}
+                              onClick={() => void adopt(codespace)}
+                            >
+                              {t("localDevices.provisioning.adopt")}
+                            </Button>
                           )}
-                          {t("localDevices.codespaces.reconcile")}
-                        </Button>
+                          {(errorMessage ||
+                            outcomeUnconfirmed ||
+                            (computer && BUSY_STATES.has(codespace.state))) && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={requestBusy}
+                              onClick={(event) => void checkState(codespace, event.currentTarget)}
+                              data-testid={`codespace-reconcile-${codespace.codespace_id}`}
+                            >
+                              {checkingCodespaces.has(codespace.codespace_id) && (
+                                <Loader2 className="mr-1 size-4 animate-spin" />
+                              )}
+                              {t("localDevices.codespaces.reconcile")}
+                            </Button>
+                          )}
+                          {codespace.state === "stopped" && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={busy || setupIncomplete || outcomeUnconfirmed}
+                              onClick={() => void lifecycle(codespace, "start")}
+                              data-testid={`github-codespace-start-${codespace.codespace_id}`}
+                            >
+                              <Play className="mr-1 h-4 w-4" aria-hidden="true" />
+                              {t("pages.settings.codespaces.start")}
+                            </Button>
+                          )}
+                          {(codespace.state === "usable" ||
+                            (!computer &&
+                              ["create_pending", "create_submitted", "start_pending"].includes(
+                                codespace.state,
+                              ))) && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={busy || outcomeUnconfirmed}
+                              onClick={() => void lifecycle(codespace, "stop")}
+                              data-testid={`github-codespace-stop-${codespace.codespace_id}`}
+                            >
+                              <Square className="mr-1 h-4 w-4" aria-hidden="true" />
+                              {t("pages.settings.codespaces.stop")}
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            disabled={requestBusy || !ownerDeleteEnabled || outcomeUnconfirmed}
+                            onClick={(event) => {
+                              openDeleteDialog(codespace, event.currentTarget);
+                            }}
+                            data-testid={`github-codespace-delete-${codespace.codespace_id}`}
+                          >
+                            <Trash2 className="mr-1 h-4 w-4" aria-hidden="true" />
+                            {t("pages.settings.codespaces.delete")}
+                          </Button>
+                        </>
                       )}
-                      {codespace.state === "stopped" && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={busy || setupIncomplete || outcomeUnconfirmed}
-                          onClick={() => void lifecycle(codespace, "start")}
-                          data-testid={`github-codespace-start-${codespace.codespace_id}`}
-                        >
-                          <Play className="mr-1 h-4 w-4" aria-hidden="true" />
-                          {t("pages.settings.codespaces.start")}
-                        </Button>
-                      )}
-                      {(codespace.state === "usable" ||
-                        (!computer &&
-                          ["create_pending", "create_submitted", "start_pending"].includes(
-                            codespace.state,
-                          ))) && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={busy || outcomeUnconfirmed}
-                          onClick={() => void lifecycle(codespace, "stop")}
-                          data-testid={`github-codespace-stop-${codespace.codespace_id}`}
-                        >
-                          <Square className="mr-1 h-4 w-4" aria-hidden="true" />
-                          {t("pages.settings.codespaces.stop")}
-                        </Button>
-                      )}
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        disabled={requestBusy || !ownerDeleteEnabled || outcomeUnconfirmed}
-                        onClick={(event) => {
-                          openDeleteDialog(codespace, event.currentTarget);
-                        }}
-                        data-testid={`github-codespace-delete-${codespace.codespace_id}`}
-                      >
-                        <Trash2 className="mr-1 h-4 w-4" aria-hidden="true" />
-                        {t("pages.settings.codespaces.delete")}
-                      </Button>
                     </div>
                     <Collapsible className="mt-2">
                       <CollapsibleTrigger
@@ -1342,6 +1387,19 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                     {t("localDevices.codespaces.unavailableIdentity")}
                   </p>
                   <p className="mt-1 break-all font-mono text-xs">{entry.codespace_id}</p>
+                  {entry.pending_operations.length > 0 && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        void collectOperation(entry.codespace_id).catch(() =>
+                          toast.error(t("localDevices.editor.unconfirmed")),
+                        )
+                      }
+                    >
+                      {t("localDevices.codespaces.collectOriginal")}
+                    </Button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -1370,6 +1428,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
         variant="destructive"
         onConfirm={remove}
         confirmDisabled={
+          discoveryView !== "actionable" ||
           deleteNeedsRefresh ||
           !ownerDeleteEnabled ||
           !view.codespaces.some((entry) => entry.codespace_id === pendingDelete?.codespace_id)

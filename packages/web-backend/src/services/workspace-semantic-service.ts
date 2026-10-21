@@ -19,6 +19,7 @@ import {
   controllerOperationSchema,
   type CodespaceSummaryView,
   type CodespaceUnavailableResourceView,
+  type CodespaceDiscoveryView,
   type LocalDeviceService,
 } from "@mcp-moira/shared";
 import {
@@ -40,6 +41,7 @@ import { getWorkspaceClient, getControllerClient } from "./workspace-client.js";
 import type { WorkspaceClient } from "./workspace-router.js";
 import { getLocalRepositoryAdmissionService } from "./local-repository-admission-factory.js";
 import { getLocalPrivateRepositoryCreationService } from "./local-private-repository-creation-factory.js";
+import { LocalCodespaceResourceService } from "./local-codespace-resource-service.js";
 
 type Input = Record<string, unknown>;
 export interface ResolvedWorkspace {
@@ -480,113 +482,102 @@ export function createWorkspaceSemanticServices(dependencies: WorkspaceSemanticD
       invalid("Choose a supported workspace purpose.");
     input = WORKSPACE_TOOL_SCHEMAS[tool as WorkspaceToolName].parse(input);
     if (tool === "workspace_list") {
-      const results = await Promise.all(
-        dependencies.providers.map(async (provider) => {
-          try {
-            if (!provider.resource)
-              return { workspaces: [], unavailable: [], provider: provider.provider };
-            await provider.connection.refreshGrants(userId);
-            const found = await provider.resource.listResources(userId);
-            return {
-              provider: provider.provider,
-              workspaces: found.codespaces.map((v) => project(userId, v)),
-              unavailable: found.unavailable.map((v) => projectUnavailable(userId, v)),
-            };
-          } catch (error) {
-            return {
-              provider: provider.provider,
-              workspaces: [],
-              unavailable: [],
-              error: { code: codespaceObservationErrorCode(error) },
-            };
-          }
-        }),
-      );
-      return {
-        workspaces: results.flatMap((v) => v.workspaces),
-        unavailable: results.flatMap((v) => v.unavailable),
-        ...(results.length > 0 && results.every((v) => "error" in v)
-          ? {
-              error: {
-                code: "CODESPACE_PROVIDER_UNAVAILABLE",
-                message:
-                  "No provider observation is available; original workspace identities remain retained.",
-              },
-            }
-          : {}),
-        provider_errors: results
-          .filter((v) => "error" in v)
-          .map((v) => ({ provider: v.provider, error: v.error })),
-      };
+      const provider = dependencies.providers.find((p) => p.provider === input.provider);
+      if (!provider) unavailable("The selected workspace provider is unavailable.");
+      try {
+        if (!provider.resource)
+          return { workspaces: [], unavailable: [], has_diagnostics: false, provider_errors: [] };
+        const found = await provider.resource.listResources(userId, {
+          view: input.view as CodespaceDiscoveryView | undefined,
+        });
+        return {
+          workspaces: found.codespaces.map((v) => project(userId, v)),
+          unavailable: found.unavailable.map((v) => projectUnavailable(userId, v)),
+          has_diagnostics: found.has_diagnostics ?? found.unavailable.length > 0,
+          provider_errors: [],
+        };
+      } catch (error) {
+        return {
+          workspaces: [],
+          unavailable: [],
+          has_diagnostics: false,
+          error: {
+            code: "CODESPACE_PROVIDER_UNAVAILABLE",
+            message:
+              "The selected provider observation is unavailable; original workspace identities remain retained.",
+          },
+          provider_errors: [
+            { provider: provider.provider, error: { code: codespaceObservationErrorCode(error) } },
+          ],
+        };
+      }
     }
     if (tool === "workspace_targets") {
-      const discovery = await dependencies.repositories.listDevices(userId);
-      const controllers = discovery.devices.map((device) => ({
-        controller: encodeReference("controller", controllerIdentity(userId, device.device_id)),
-        label: device.label,
-        available: device.owner_available,
-      }));
-      const results = await Promise.all(
-        dependencies.providers.map(async (provider) => {
-          try {
-            await provider.connection.refreshGrants(userId);
-            const repositories = (await provider.resource?.listRepositories(userId)) ?? [];
-            return {
-              targets: repositories.flatMap((repository) => {
-                const selectedControllers =
-                  provider.provider === "local-sandboxes"
-                    ? [
-                        controllerIdentity(
-                          userId,
-                          parseLocalRepositoryTargetId(repository.id).deviceId,
-                        ),
-                      ]
-                    : controllers
-                        .filter((c) => c.available)
-                        .map((c) => decodeReference(c.controller, "controller"));
-                return selectedControllers.map((controller) => ({
-                  target: encodeReference("target", {
-                    provider: provider.provider as "local-sandboxes" | "github-codespaces",
-                    repositoryId: repository.id,
-                    controller,
-                  }),
-                  repository: repository.fullName,
-                  private: repository.private,
-                }));
+      const provider = dependencies.providers.find((p) => p.provider === input.provider);
+      if (!provider) unavailable("The selected repository provider is unavailable.");
+      const observation =
+        provider.provider === "local-sandboxes" ? devices.createObservation(userId) : undefined;
+      const discovery = await dependencies.repositories.listDevices(userId, {
+        includeInstallations: input.provider === "github-codespaces",
+        observeDevices: input.provider === "local-sandboxes",
+        ...(observation ? { observation } : {}),
+      });
+      const controllers = discovery.devices
+        .filter((device) => device.status === "active")
+        .map((device) => ({
+          controller: encodeReference("controller", controllerIdentity(userId, device.device_id)),
+          label: device.label,
+          ...(observation ? { available: device.owner_available } : {}),
+        }));
+      try {
+        if (!observation) await provider.connection.refreshGrants(userId);
+        const repositories =
+          provider.resource instanceof LocalCodespaceResourceService && observation
+            ? await provider.resource.listRepositories(userId, { observation })
+            : ((await provider.resource?.listRepositories(userId)) ?? []);
+        return {
+          targets: repositories.flatMap((repository) => {
+            const selectedControllers =
+              provider.provider === "local-sandboxes"
+                ? [controllerIdentity(userId, parseLocalRepositoryTargetId(repository.id).deviceId)]
+                : controllers.map((c) => decodeReference(c.controller, "controller"));
+            return selectedControllers.map((controller) => ({
+              target: encodeReference("target", {
+                provider: provider.provider as "local-sandboxes" | "github-codespaces",
+                repositoryId: repository.id,
+                controller,
               }),
-            };
-          } catch (error) {
-            return {
-              targets: [],
-              provider: provider.provider,
-              error: { code: codespaceObservationErrorCode(error) },
-            };
-          }
-        }),
-      );
-      return {
-        targets: results.flatMap((r) => r.targets),
-        controllers,
-        installations: discovery.installations.flatMap((installation) =>
-          controllers.map((c) => ({
-            installation: encodeReference("installation", {
-              controller: decodeReference(c.controller, "controller"),
-              installationId: installation.installation_id,
-            }),
-            owner: installation.owner,
-            computer: c.label,
-          })),
-        ),
-        provider_errors: results.filter((r) => "error" in r),
-        ...(results.length > 0 && results.every((v) => "error" in v)
-          ? {
-              error: {
-                code: "CODESPACE_PROVIDER_UNAVAILABLE",
-                message: "No repository provider observation is available.",
-              },
-            }
-          : {}),
-      };
+              repository: repository.fullName,
+              private: repository.private,
+            }));
+          }),
+          controllers,
+          installations: discovery.installations.flatMap((installation) =>
+            controllers.map((c) => ({
+              installation: encodeReference("installation", {
+                controller: decodeReference(c.controller, "controller"),
+                installationId: installation.installation_id,
+              }),
+              owner: installation.owner,
+              computer: c.label,
+            })),
+          ),
+          provider_errors: [],
+        };
+      } catch (error) {
+        return {
+          targets: [],
+          controllers,
+          installations: [],
+          provider_errors: [
+            { provider: provider.provider, error: { code: codespaceObservationErrorCode(error) } },
+          ],
+          error: {
+            code: "CODESPACE_PROVIDER_UNAVAILABLE",
+            message: "The selected repository provider observation is unavailable.",
+          },
+        };
+      }
     }
     if (tool === "workspace_setup_help") {
       const target = input.target ? decodeReference(String(input.target), "target") : undefined;

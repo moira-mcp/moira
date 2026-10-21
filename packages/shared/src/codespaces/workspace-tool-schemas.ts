@@ -90,9 +90,11 @@ const deliveryFields = {
   silent: z.boolean().optional(),
   channel,
 };
+const discoveryProvider = z.enum(["local-sandboxes", "github-codespaces"]);
+const discoveryView = z.enum(["actionable", "diagnostics", "history"]).optional();
 export const WORKSPACE_TOOL_SCHEMAS = {
-  workspace_list: z.object({}).strict(),
-  workspace_targets: z.object({}).strict(),
+  workspace_list: z.object({ provider: discoveryProvider, view: discoveryView }).strict(),
+  workspace_targets: z.object({ provider: discoveryProvider }).strict(),
   workspace_observe: z.object({ workspace: reference("workspace", "workspace-identity") }).strict(),
   workspace_create: z
     .object({

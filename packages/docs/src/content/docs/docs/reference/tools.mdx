@@ -231,10 +231,26 @@ curl -X POST "${uploadUrl}" -F "workflow=@your-workflow.json"
 
 ### Development codespaces
 
-`workspace_list` discovers owned Local and GitHub environments and separates unavailable
-identities from observed workspaces. `workspace_targets` returns approved repositories,
-controllers and installation choices. An unavailable identity is observe-only, without an
-invented state, machine or generation. Provider failures remain explicit alongside healthy peers.
+Choose one provider for discovery; another provider or billing does not delay its response:
+
+```javascript
+workspace_list({ provider: "local-sandboxes" });
+workspace_list({ provider: "local-sandboxes", view: "diagnostics" });
+workspace_list({ provider: "github-codespaces", view: "history" });
+workspace_targets({ provider: "github-codespaces" });
+```
+
+The default `actionable` view contains current useful environments, including known incomplete
+setup. `diagnostics` exposes uncertain or unavailable owned identities with safe errors and
+original-operation references; `history` contains confirmed retired environments.
+`has_diagnostics` signals preserved diagnostic identities outside the ordinary list.
+An unavailable identity supports observation and original collection without an invented state,
+machine or lifecycle generation. A selected-provider failure remains explicit, not a healthy
+empty list. Changing views never deletes identities or retries their effects.
+
+`workspace_targets` requires the same provider selection. Local targets include observed controller
+contact status without awaiting GitHub installations. GitHub targets include registered controllers
+and eligible personal installation choices; registration alone does not certify reachability.
 
 Use `workspace_create` with a returned target and branch. `workspace_lifecycle` starts,
 stops or resumes incomplete Local or GitHub setup against its captured workspace reference.

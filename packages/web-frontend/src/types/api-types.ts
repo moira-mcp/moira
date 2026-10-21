@@ -7,10 +7,11 @@ import type {
   CodespacePublicReadinessView,
   CodespaceReadinessView,
   CodespaceSummaryView,
-  CodespaceProviderBillingView,
   CodespaceUnavailableResourceView,
   CodespaceProviderErrorView,
+  CodespaceDiscoveryView,
 } from "@mcp-moira/shared";
+import type { WorkspaceReference } from "@mcp-moira/shared/workspace-references";
 
 export interface ManagedWorkspaceView extends Omit<
   CodespaceSummaryView,
@@ -30,8 +31,11 @@ export interface WorkspaceOperationView {
   error?: { code: string; message: string };
 }
 
-/** Website codespace management view returned by GET /api/integrations/github/codespaces. */
+export type WorkspaceDiscoveryProvider = WorkspaceReference["provider"];
+export type WorkspaceDiscoveryView = CodespaceDiscoveryView;
+/** One provider/view observation; billing has its own read boundary. */
 export interface CodespaceManagementView {
+  has_diagnostics: boolean;
   readiness?: CodespaceReadinessView;
   connection?: CodespaceConnectionView;
   repositories: Array<{
@@ -44,18 +48,6 @@ export interface CodespaceManagementView {
     target: string;
     controller: string;
   }>;
-  providers?: Array<
-    | CodespaceProviderErrorView
-    | {
-        provider: string;
-        readiness: CodespaceReadinessView;
-        connection: CodespaceConnectionView;
-        repositories: CodespaceManagementView["repositories"];
-        provider_billing?: CodespaceProviderBillingView;
-        repositories_stale: boolean;
-        resources_stale: boolean;
-      }
-  >;
   repositories_stale: boolean;
   resources_stale: boolean;
   codespaces: ManagedWorkspaceView[];
@@ -66,8 +58,12 @@ export interface CodespaceManagementView {
     }
   >;
   provider_errors?: CodespaceProviderErrorView[];
-  provider_billing?: CodespaceProviderBillingView;
-  controllers?: Array<{ device_id: string; label: string; available: boolean; controller: string }>;
+  controllers?: Array<{
+    device_id: string;
+    label: string;
+    available?: boolean;
+    controller: string;
+  }>;
 }
 import { WorkflowValidationStatus } from "./react-flow-types.js";
 import { WorkflowGraph, ValidationResult, WorkflowFileInfo } from "./workflow-types.js";

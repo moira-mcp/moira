@@ -3715,9 +3715,13 @@
           "title": "Development environments",
           "body": "GitHub Codespaces are listed separately. Choose a repository and branch to create one; Stop keeps its files and Delete removes them. Refresh checks changes on GitHub. For local development, open Local computers and manage codespaces under the computer they belong to."
         },
+        "environment-views": {
+          "title": "Current environments, diagnostics and history",
+          "body": "Current environments shows environments you can work with. Diagnostics keeps unavailable or uncertain identities; History shows deleted environments. These views load separately for GitHub and local computers. Diagnostics and History let you check a returned original operation, without starting, stopping or deleting an environment or repeating its operation."
+        },
         "local-devices": {
           "title": "Connect your computer",
-          "body": "Connect your computer once and confirm its identity here. Its local service reports current permissions, settings and codespaces. Each codespace has its own repository, branch, state, CPU and memory; several may use the same repository. Create, start, stop or delete them here. Check state again reads the original operation's result and refreshes the computer's state; it does not repeat creation, start, stop or deletion. If the local service is unavailable, current permissions and settings cannot be confirmed and changes cannot be submitted. Your unsaved draft stays on this page; reconnect the service and refresh before saving. Computer settings control agent access, CPU, memory and Docker storage defaults for new codespaces, and shared storage for all local codespaces on this computer. Approve web settings management and its maximum resources on the computer itself. Separately allow adding existing private repositories, creating new ones and pushing commits in your connected personal GitHub account. Work remains enabled until you explicitly disable it. Public services for different technologies are available; agents cannot change computer settings or access the private network. The connected computer applies settings and confirms their result. If the result is uncertain, Check settings result reads the original request without applying it again. Disconnecting the computer blocks further agent work and preserves local files."
+          "body": "Connect your computer once and confirm its identity here. Its local service reports current permissions, settings and codespaces. Each codespace has its own repository, branch, state, CPU and memory; several may use the same repository. Create, start, stop or delete them in Current environments. Each computer also has Diagnostics for unavailable or uncertain identities and History for deleted codespaces; those views only collect original results. Check state again reads the original operation's result and refreshes the computer's state; it does not repeat creation, start, stop or deletion. If the local service is unavailable, current permissions and settings cannot be confirmed and changes cannot be submitted. Your unsaved draft stays on this page; reconnect the service and refresh before saving. Computer settings control agent access, CPU, memory and Docker storage defaults for new codespaces, and shared storage for all local codespaces on this computer. Approve web settings management and its maximum resources on the computer itself. Separately allow adding existing private repositories, creating new ones and pushing commits in your connected personal GitHub account. Work remains enabled until you explicitly disable it. Public services for different technologies are available; agents cannot change computer settings or access the private network. The connected computer applies settings and confirms their result. If the result is uncertain, Check settings result reads the original request without applying it again. Disconnecting the computer blocks further agent work and preserves local files."
         },
         "apps": {
           "title": "Connected apps",
@@ -3747,11 +3751,7 @@
         },
         "codespaces": {
           "title": "Create a codespace",
-          "body": "Open the GitHub Codespaces tab and pick a repository and branch to create a personally billed codespace. Agents discover it with workspace_list and use its returned workspace reference. Stop keeps its files; Delete removes them. Refresh checks GitHub for changes made outside Moira. Local codespaces are listed under their computer in Local computers."
-        },
-        "limits": {
-          "title": "Know your limits",
-          "body": "GitHub's monthly personal compute, storage and billed amount appear above Moira's own limits when the App has Plan: read access. Stopped codespaces still use Moira's held slots."
+          "body": "Open the GitHub Codespaces tab and pick a repository and branch to create a personally billed codespace. Agents choose GitHub Codespaces to find current environments and use the returned workspace reference. Stop keeps its files; Delete removes them. Refresh checks GitHub for changes made outside Moira. Local codespaces are listed under their computer in Local computers."
         },
         "autopause": {
           "title": "Pause idle codespaces",

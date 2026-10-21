@@ -626,6 +626,19 @@ commands, native URLs, source text or returned references. Native image/resource
 passes through by object identity without cloud rendering or file acquisition. File
 parameter metadata participates in `MCP_TOOLS_REVISION`.
 
+`workspace_list` and `workspace_targets` require one provider. List and website management
+share `selectCodespaceDiscoveryView`: actionable is the default, diagnostics retains
+uncertain/unavailable identities without lifecycle generations, and history selects confirmed
+retirement. Known current incomplete setup remains actionable. The diagnostic-presence flag
+and selected-provider errors distinguish hidden diagnostics or failure from healthy absence.
+View selection does not delete records or change exact observation/mutation authority.
+Billing is a separate read, outside discovery completion.
+
+Local discovery composes one request-local observation from `LocalDeviceService` for owned
+devices, resources and repository targets, with current registration checked before reuse.
+No persistent cache or mutation authority is created. GitHub targets use active registration
+metadata without Local owner probes; that selection does not certify an available route.
+
 `workspace-references.mjs` supplies canonical typed addresses for workspaces, selected
 controllers, repository targets, operations, processes, files and cursors. They are not
 credentials. A workspace reference retains its observed generation; mutation never

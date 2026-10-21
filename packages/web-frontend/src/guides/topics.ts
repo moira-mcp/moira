@@ -96,6 +96,7 @@ export const REQUIRED_TOPICS: Readonly<Record<string, Readonly<Record<string, st
     security: "security",
     "notifications-purpose": "notifications",
     github: "github",
+    "environment-views": "environment-views",
     apps: "apps",
     tokens: "tokens",
     preferences: "preferences",

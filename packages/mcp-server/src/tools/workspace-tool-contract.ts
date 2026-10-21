@@ -31,12 +31,12 @@ export const WORKSPACE_EFFECTS = new Set<WorkspaceToolName>([
 ]);
 const purposes: Record<WorkspaceToolName, [string, string]> = {
   workspace_list: [
-    "List owned workspaces and separate unavailable identities.",
-    "Показывает собственные среды и отдельно недоступные идентичности.",
+    "List actionable owned workspaces for one provider; explicitly select diagnostics or history for retained unavailable or deleted identities. Other providers and billing are not awaited.",
+    "Показывает рабочие среды выбранного провайдера; диагностика и история явно открывают сохранённые недоступные или удалённые идентичности. Другие провайдеры и оплата не задерживают ответ.",
   ],
   workspace_targets: [
-    "Discover repository targets and registered controllers for new work.",
-    "Находит репозитории и зарегистрированные контроллеры для новой работы.",
+    "Discover repository targets and registered controllers for new work at one selected provider.",
+    "Находит репозитории и зарегистрированные контроллеры выбранного провайдера для новой работы.",
   ],
   workspace_observe: [
     "Observe a workspace and return a fresh reference for a deliberate next action.",
@@ -183,8 +183,8 @@ const exampleNative = {
   download_url: "https://files.oaiusercontent.com/example",
 };
 const examples: Record<WorkspaceToolName, Record<string, unknown>> = {
-  workspace_list: {},
-  workspace_targets: {},
+  workspace_list: { provider: "local-sandboxes" },
+  workspace_targets: { provider: "local-sandboxes" },
   workspace_observe: { workspace: exampleWorkspace },
   workspace_create: {
     target: encodeReference("target", {

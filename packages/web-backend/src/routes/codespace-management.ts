@@ -18,10 +18,12 @@ import {
   codespaceObservationErrorCode,
   type CodespaceProviderErrorView,
   type CodespaceConnectionService,
+  type LocalDeviceService,
+  type CodespaceDiscoveryView,
 } from "@mcp-moira/shared";
 import type { AuthenticatedRequest } from "../types/express-types.js";
 import { asyncHandler } from "../middleware/error-middleware.js";
-import { GitHubResourceService } from "../services/github-resource-service.js";
+import { LocalCodespaceResourceService } from "../services/local-codespace-resource-service.js";
 import { getWorkspaceSemanticServices } from "../services/workspace-semantic-service.js";
 import {
   getCodespaceConnectionService,
@@ -40,23 +42,20 @@ export interface CodespaceManagementServices {
   >;
   provider?: string;
   providers?: CodespaceManagementServices[];
-  select?: (
-    userId: string,
-    input: { repositoryId?: string; codespaceId?: string },
-  ) => CodespaceManagementServices;
   repositoryMetadata?: (
     userId: string,
     repositoryId: string,
   ) => { device_id: string; device_label: string };
   billing?: typeof getCodespaceProviderBilling;
+  devices?: Pick<LocalDeviceService, "createObservation">;
   controllers?: (
     userId: string,
-  ) => Promise<Array<{ device_id: string; label: string; available: boolean }>>;
+  ) => Promise<Array<{ device_id: string; label: string; available?: boolean }>>;
   connection: Pick<CodespaceConnectionService, "getStatus" | "refreshGrants">;
   observability: ReturnType<typeof selectCodespaceProviderServices>["observability"];
   resource: Pick<
     NonNullable<ReturnType<typeof selectCodespaceProviderServices>["resource"]>,
-    "listRepositories" | "listResources" | "refreshProviderState" | "getCodespace"
+    "listRepositories" | "listResources"
   > | null;
 }
 
@@ -84,14 +83,16 @@ function defaultServices(): CodespaceManagementServices {
     observability: getCodespaceObservabilityService(),
     resource: getCodespaceResourceService(),
     billing: getCodespaceProviderBilling,
+    devices: getLocalDeviceService(),
     controllers: async (userId) =>
-      (await getLocalDeviceService().listOwned(userId)).devices.map((device) => ({
-        device_id: device.deviceId,
-        label: device.label,
-        available: device.status === "active" && device.owner.state === "available",
-      })),
+      getLocalDeviceService()
+        .listRegistered(userId)
+        .devices.filter((device) => device.status === "active")
+        .map((device) => ({
+          device_id: device.deviceId,
+          label: device.label,
+        })),
     providers: getCodespaceProviderBundles().map((provider) => ({ ...provider, semantic })),
-    select: (userId, input) => ({ ...selectCodespaceProviderServices(userId, input), semantic }),
     repositoryMetadata: (userId, repositoryId) => {
       const target = parseLocalRepositoryTargetId(repositoryId);
       return {
@@ -129,7 +130,7 @@ export function createCodespaceManagementRoutes(
     userId: string,
     provider: string,
     repositories: Record<string, unknown>[],
-    controllers: Array<{ device_id: string; label: string; available: boolean }>,
+    controllers: Array<{ device_id: string; label: string; available?: boolean }>,
   ) =>
     repositories.flatMap((repository) => {
       const candidates =
@@ -140,11 +141,9 @@ export function createCodespaceManagementRoutes(
                 parseLocalRepositoryTargetId(String(repository.repository_id)).deviceId,
               ),
             ]
-          : controllers
-              .filter((controller) => controller.available)
-              .map((controller) =>
-                services.semantic.controllerIdentity(userId, controller.device_id),
-              );
+          : controllers.map((controller) =>
+              services.semantic.controllerIdentity(userId, controller.device_id),
+            );
       return candidates.map((controller) => ({
         ...repository,
         provider,
@@ -167,7 +166,7 @@ export function createCodespaceManagementRoutes(
         success: false,
         error: {
           code: "CODESPACE_RESOURCE_INVALID",
-          message: "The lifecycle request is invalid",
+          message: "The workspace request is invalid",
         },
       });
       return true;
@@ -238,117 +237,78 @@ export function createCodespaceManagementRoutes(
   const managementData = async (
     userId: string,
     refresh: boolean,
-    selected = services,
+    input: { provider: string; view?: CodespaceDiscoveryView },
   ): Promise<Record<string, unknown>> => {
-    if (selected.providers) {
-      const providers: Array<Record<string, unknown> & { provider: string | undefined }> =
-        await Promise.all(
-          selected.providers.map(async (bundle) => {
-            try {
-              return {
-                ...(await managementData(userId, refresh, bundle)),
-                provider: bundle.provider,
-              };
-            } catch (error) {
-              return {
-                provider: bundle.provider,
-                error: { code: codespaceObservationErrorCode(error) },
-              };
-            }
-          }),
-        );
-      const successful = providers.filter((bundle) => !bundle.error);
-      const providerErrors: CodespaceProviderErrorView[] = providers
-        .filter((bundle) => bundle.error)
-        .map((bundle) => ({
-          provider: bundle.provider ?? "unknown",
-          error: { code: codespaceObservationErrorCode(bundle.error) },
-        }));
-      const preferred =
-        successful.find(
-          (bundle) => (bundle.connection as { state?: string } | undefined)?.state === "connected",
-        ) ?? successful[0];
-      let controllers: Awaited<
-        ReturnType<NonNullable<CodespaceManagementServices["controllers"]>>
-      > = [];
-      try {
-        controllers = (await selected.controllers?.(userId)) ?? [];
-      } catch (error) {
-        providerErrors.push({
-          provider: "local-sandboxes",
-          error: { code: codespaceObservationErrorCode(error) },
-        });
-      }
-      return {
-        ...preferred,
-        controllers: controllers.map((controller) => ({
-          ...controller,
-          controller: encodeReference(
-            "controller",
-            services.semantic.controllerIdentity(userId, controller.device_id),
+    const selected = services.providers
+      ? services.providers.find((provider) => provider.provider === input.provider)
+      : services.provider === input.provider
+        ? services
+        : undefined;
+    if (!selected)
+      throw new CodespaceResourceError(
+        "CODESPACE_PROVIDER_UNAVAILABLE",
+        "The selected provider is unavailable.",
+      );
+    const observation =
+      input.provider === "local-sandboxes"
+        ? services.devices?.createObservation(userId)
+        : undefined;
+    const owned = observation ? await observation.listOwned() : undefined;
+    const grants = owned
+      ? {
+          stale: owned.devices.some(
+            (device) => device.status === "active" && device.owner.state !== "available",
           ),
-        })),
-        providers: providers.map((bundle) =>
-          "error" in bundle
-            ? bundle
-            : {
-                ...bundle,
-                repositories: repositoryTargets(
-                  userId,
-                  String(bundle.provider),
-                  (bundle.repositories ?? []) as Record<string, unknown>[],
-                  controllers,
-                ),
-              },
-        ),
-        provider_errors: providerErrors,
-        repositories: successful.flatMap((bundle) =>
-          repositoryTargets(
-            userId,
-            String(bundle.provider),
-            (bundle.repositories ?? []) as Record<string, unknown>[],
-            controllers,
-          ),
-        ),
-        codespaces: successful.flatMap((bundle) => (bundle.codespaces ?? []) as unknown[]),
-        unavailable: successful.flatMap((bundle) => (bundle.unavailable ?? []) as unknown[]),
-        repositories_stale:
-          providerErrors.length > 0 ||
-          successful.some((bundle) => bundle.repositories_stale === true),
-        resources_stale:
-          providerErrors.length > 0 ||
-          successful.some(
-            (bundle) =>
-              bundle.resources_stale === true ||
-              (bundle.unavailable as unknown[] | undefined)?.length,
-          ),
-      };
+        }
+      : input.provider === "local-sandboxes"
+        ? { stale: false }
+        : refresh
+          ? await selected.connection.refreshGrants(userId, { force: true })
+          : await selected.connection.refreshGrants(userId);
+    const listed = (await selected.resource?.listResources(userId, {
+      view: input.view,
+      ...(observation ? { observation } : {}),
+    })) ?? { codespaces: [], unavailable: [], has_diagnostics: false };
+    const repositories =
+      selected.resource instanceof LocalCodespaceResourceService && observation
+        ? await selected.resource.listRepositories(userId, { observation })
+        : ((await selected.resource?.listRepositories(userId)) ?? []);
+    const providerErrors: CodespaceProviderErrorView[] = [];
+    let controllers: Array<{ device_id: string; label: string; available?: boolean }> = [];
+    try {
+      controllers = owned
+        ? owned.devices
+            .filter((device) => device.status === "active")
+            .map((device) => ({
+              device_id: device.deviceId,
+              label: device.label,
+              available: device.owner.state === "available",
+            }))
+        : ((await services.controllers?.(userId)) ?? []);
+    } catch (error) {
+      providerErrors.push({
+        provider: input.provider,
+        error: { code: codespaceObservationErrorCode(error) },
+      });
     }
-    const grants = refresh
-      ? await selected.connection.refreshGrants(userId, { force: true })
-      : await selected.connection.refreshGrants(userId);
-    const resources =
-      refresh &&
-      !grants.stale &&
-      selected.resource &&
-      !(selected.resource instanceof GitHubResourceService)
-        ? await selected.resource.refreshProviderState(userId, { authorizationFresh: true })
-        : { stale: refresh && grants.stale };
-    const listed = (await selected.resource?.listResources(userId)) ?? {
-      codespaces: [],
-      unavailable: [],
-    };
+    const hasDiagnostics = listed.has_diagnostics ?? listed.unavailable.length > 0;
     return {
+      provider: input.provider,
       readiness: await selected.observability.readiness(),
       connection: selected.connection.getStatus(userId),
-      repositories:
-        (await selected.resource?.listRepositories(userId))?.map((repository) => ({
+      repositories: repositoryTargets(
+        userId,
+        input.provider,
+        repositories.map((repository) => ({
           repository_id: repository.id,
           name: repository.fullName,
           private: repository.private,
-        })) ?? [],
-      repositories_stale: grants.stale,
-      resources_stale: resources.stale || listed.unavailable.length > 0,
+        })),
+        controllers,
+      ),
+      repositories_stale: grants.stale || providerErrors.length > 0,
+      resources_stale: grants.stale || hasDiagnostics,
+      has_diagnostics: hasDiagnostics,
       codespaces: listed.codespaces.map((codespace) => ({
         ...services.semantic.project(userId, codespace),
         codespace_id: codespace.codespace_id,
@@ -365,16 +325,38 @@ export function createCodespaceManagementRoutes(
         ...services.semantic.projectUnavailable(userId, resource),
         codespace_id: resource.codespace_id,
       })),
-      ...(selected.billing ? { provider_billing: await selected.billing(userId) } : {}),
-      controllers: (await selected.controllers?.(userId)) ?? [],
+      controllers: controllers.map((controller) => ({
+        ...controller,
+        controller: encodeReference(
+          "controller",
+          services.semantic.controllerIdentity(userId, controller.device_id),
+        ),
+      })),
+      provider_errors: providerErrors,
     };
   };
+
+  router.get(
+    "/billing",
+    asyncHandler(async (req, res) => {
+      const userId = (req as AuthenticatedRequest).userId;
+      res.json({
+        success: true,
+        data: services.billing ? await services.billing(userId) : "unavailable",
+      });
+    }),
+  );
 
   router.get(
     "/",
     asyncHandler(async (req, res) => {
       const userId = (req as AuthenticatedRequest).userId;
-      res.json({ success: true, data: await managementData(userId, false) });
+      try {
+        const input = WORKSPACE_TOOL_SCHEMAS.workspace_list.parse(req.query);
+        res.json({ success: true, data: await managementData(userId, false, input) });
+      } catch (error) {
+        if (!handleError(userId, error, res)) throw error;
+      }
     }),
   );
 
@@ -382,7 +364,12 @@ export function createCodespaceManagementRoutes(
     "/refresh",
     asyncHandler(async (req, res) => {
       const userId = (req as AuthenticatedRequest).userId;
-      res.json({ success: true, data: await managementData(userId, true) });
+      try {
+        const input = WORKSPACE_TOOL_SCHEMAS.workspace_list.parse(req.body);
+        res.json({ success: true, data: await managementData(userId, true, input) });
+      } catch (error) {
+        if (!handleError(userId, error, res)) throw error;
+      }
     }),
   );
 

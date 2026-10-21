@@ -462,9 +462,15 @@ reload. A lost first reply instead offers `operation_find` on the selected contr
 explicit candidate selection. `absent` or newer metadata does not re-enable an uncertain mutation.
 
 Cloud registration is a route, not a machine observation. `workspace_observe` can report
-`CODESPACE_PROVIDER_UNAVAILABLE` without inventing state or generation. `workspace_list` keeps
-unavailable owned identities read-only alongside healthy peers, with safe error codes and separate
-provider failures. All-provider failure is not an empty inventory. A pending unknown creation
+`CODESPACE_PROVIDER_UNAVAILABLE` without inventing state or generation. Call
+`workspace_list({ provider: "local-sandboxes", view: "diagnostics" })` for Local diagnostics, or
+select `provider: "github-codespaces"` for GitHub. The normal actionable list keeps current useful
+environments and known incomplete setup; diagnostics preserves uncertain or unavailable identities,
+safe errors and original-operation references without lifecycle generations. `has_diagnostics`
+points to retained diagnostics; `view: "history"` exposes confirmed retired environments.
+A selected-provider failure is not an empty inventory, and Local does not await GitHub or billing.
+In Settings, select Diagnostics or History for that provider; billing has its own read and retry
+in the GitHub subsection. A pending unknown creation
 remains collectable as its original operation, not a replacement VM. A nullable machine is not a
 default profile or permission to start.
 

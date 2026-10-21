@@ -411,9 +411,11 @@ identity when available; the computer's Git configuration is not copied.
 
 With local web control approved, the owner can enable repository-management delegation here.
 It defaults off and binds the verified personal GitHub account, separate existing/new-private
-permissions and optional push. `workspace_targets` returns registered controllers, approved
-repository targets and eligible personal App installations. A GitHub setup warning does not
-erase registered controller choices. Availability is decided by actual dispatch, without fallback.
+permissions and optional push. `workspace_targets({ provider: "local-sandboxes" })` returns approved
+Local repository targets and observed controller contact status without GitHub installation reads.
+Use `workspace_targets({ provider: "github-codespaces" })` for GitHub targets, registered controllers
+and eligible personal App installations. A GitHub setup warning does not erase registered choices;
+registration does not certify reachability. Availability is decided by actual dispatch, without fallback.
 
 Use `repository_admit({ controller, repository })` with a returned controller and the GitHub
 repository ID. Only confirmed owner application grants access. For a new empty private repository,
@@ -529,8 +531,9 @@ edge or pixel-count ceiling. PNG/JPEG validation checks structure, not decoded p
 See [the tools reference](/docs/reference/tools/#development-codespaces).
 
 In **Settings → Development → Local computers**, open a computer's codespaces and choose an
-approved repository. `workspace_targets` returns the corresponding target references; computers
-offering the same repository remain distinct. `workspace_list` and `workspace_observe` return
+approved repository. `workspace_targets({ provider: "local-sandboxes" })` returns its target references;
+computers offering the same repository remain distinct. `workspace_list({ provider: "local-sandboxes" })`
+and `workspace_observe` return
 workspace references for explicit lifecycle decisions. Browser revocation denies new server work
 but cannot prove physical shutdown of an offline computer; local disable enforces shutdown.
 
@@ -744,7 +747,15 @@ The selected controller reads personal-payer preflight and offered machines, the
 machine choice and applicable idle/retention settings before the fixed create request. The cloud
 rechecks current authority and settings; it does not choose a different machine or controller.
 
-Use `workspace_list`, `workspace_targets` and `workspace_setup_help` for discovery.
+Use `workspace_list({ provider: "github-codespaces" })`,
+`workspace_targets({ provider: "github-codespaces" })` and `workspace_setup_help` for discovery.
+Lists default to `view: "actionable"`, including known incomplete setup. Select
+`view: "diagnostics"` for uncertain or unavailable identities and their original-operation
+references, or `view: "history"` for confirmed retirement. These views are also available in
+Settings. Diagnostic identities have no lifecycle generation; collect their original operations
+or request an observation instead of inventing mutation authority. Provider failures stay explicit.
+Local discovery does not await GitHub or billing. Billing loads separately when the GitHub
+settings subsection is active; Environment Refresh does not read it.
 Create with a returned target; start/stop/delete use the captured workspace reference.
 `workspace_adopt` uses an observed workspace and explicitly selected controller;
 `workspace_adopt_external` uses the selected controller and known owned provider name.

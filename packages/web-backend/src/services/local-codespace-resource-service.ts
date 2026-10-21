@@ -10,6 +10,9 @@ import {
   localRepositoryTargetId,
   parseLocalRepositoryTargetId,
   codespaceObservationErrorCode,
+  selectCodespaceDiscoveryView,
+  type CodespaceDiscoveryView,
+  type LocalDeviceObservation,
   type LocalDeviceService,
   type CodespaceSummaryView,
   type CodespaceResourceListView,
@@ -39,8 +42,16 @@ export class LocalCodespaceResourceService {
     ) => Promise<void>,
   ) {}
 
-  async listRepositories(userId: string): Promise<CodespaceRepositoryTarget[]> {
-    const owned = await this.devices.listOwned(userId);
+  private discoveryObservation(userId: string, observation?: LocalDeviceObservation) {
+    if (observation && observation.userId !== userId)
+      throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Observation belongs to another caller.");
+    return observation ?? this.devices.createObservation(userId);
+  }
+  async listRepositories(
+    userId: string,
+    options: { observation?: LocalDeviceObservation } = {},
+  ): Promise<CodespaceRepositoryTarget[]> {
+    const owned = await this.discoveryObservation(userId, options.observation).listOwned();
     return owned.devices.flatMap((device) =>
       device.owner.state === "available" && device.owner.local.state === "configured"
         ? device.owner.local.policy.repositories.map((repository) => ({
@@ -51,10 +62,16 @@ export class LocalCodespaceResourceService {
         : [],
     );
   }
-  async listResources(userId: string): Promise<CodespaceResourceListView> {
-    const identities = this.repository.listOwned(userId);
+  async listResources(
+    userId: string,
+    options: { view?: CodespaceDiscoveryView; observation?: LocalDeviceObservation } = {},
+  ): Promise<CodespaceResourceListView> {
+    const identities = this.repository
+      .listOwned(userId)
+      .filter((resource) => (options.view === "history") === (resource.retiredAt !== null));
+    const observation = this.discoveryObservation(userId, options.observation);
     const observations = await Promise.allSettled(
-      identities.map((resource) => this.getCodespace(userId, resource.id)),
+      identities.map((resource) => this.observeCodespace(userId, resource.id, observation)),
     );
     const result: CodespaceResourceListView = { codespaces: [], unavailable: [] };
     observations.forEach((observation, index) => {
@@ -81,7 +98,7 @@ export class LocalCodespaceResourceService {
         error: { code: codespaceObservationErrorCode(error) },
       });
     });
-    return result;
+    return selectCodespaceDiscoveryView(result, options.view);
   }
   private summary(
     resource: LocalResourceIdentity,
@@ -105,6 +122,13 @@ export class LocalCodespaceResourceService {
     };
   }
   async getCodespace(userId: string, resourceId: string): Promise<CodespaceSummaryView> {
+    return this.observeCodespace(userId, resourceId);
+  }
+  private async observeCodespace(
+    userId: string,
+    resourceId: string,
+    observation?: LocalDeviceObservation,
+  ): Promise<CodespaceSummaryView> {
     const resource = this.repository.getOwned(userId, resourceId);
     if (!resource)
       throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Local resource was not found.");
@@ -123,7 +147,9 @@ export class LocalCodespaceResourceService {
         "Local resource binding is missing.",
       );
     try {
-      const snapshot = await this.devices.localSnapshot(userId, binding.deviceId);
+      const snapshot = observation
+        ? await observation.localSnapshot(binding.deviceId)
+        : await this.devices.localSnapshot(userId, binding.deviceId);
       const ownedResource = snapshot.resources.find((entry) => entry.resourceId === resourceId);
       const pendingRequestIds =
         snapshot.pendingResourceOperations.find((entry) => entry.resourceId === resourceId)
@@ -209,10 +235,6 @@ export class LocalCodespaceResourceService {
     } catch (error) {
       this.failure(error);
     }
-  }
-  async refreshProviderState(userId: string, _options: { authorizationFresh?: boolean } = {}) {
-    const resources = await this.listResources(userId);
-    return { stale: resources.unavailable.length > 0 };
   }
   async create(userId: string, repositoryId: string, requestedRef: string, requestId?: string) {
     const operationId = this.requestIdentity(requestId);

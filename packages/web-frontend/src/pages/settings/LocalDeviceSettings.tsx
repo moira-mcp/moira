@@ -67,7 +67,11 @@ function DevicePermissions({ device }: { device: LocalDeviceView }) {
 export function LocalDeviceSettings({ active = true }: { active?: boolean }) {
   const { t, i18n } = useTranslation();
   const guard = useReadOwnerGuard();
-  const { reloadManagement } = useGitHubCodespaces();
+  const { reloadManagement: reloadProvider } = useGitHubCodespaces();
+  const reloadManagement = useCallback(
+    (options?: { silent?: boolean }) => reloadProvider("local-sandboxes", options),
+    [reloadProvider],
+  );
   const resource = useResource(
     "local-device-settings",
     () => apiClient.getLocalDevices(),

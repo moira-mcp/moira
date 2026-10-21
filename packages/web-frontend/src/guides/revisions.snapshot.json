@@ -271,9 +271,13 @@
     "revision": 3,
     "fingerprint": "ec54a42a"
   },
+  "settings.environment-views": {
+    "revision": 1,
+    "fingerprint": "775b6e97"
+  },
   "settings.local-devices": {
-    "revision": 10,
-    "fingerprint": "a7673adc"
+    "revision": 11,
+    "fingerprint": "541d2de8"
   },
   "settings.apps": {
     "revision": 1,
@@ -296,8 +300,8 @@
     "fingerprint": "52012de3"
   },
   "settings-github.codespaces": {
-    "revision": 5,
-    "fingerprint": "e3dc63f2"
+    "revision": 6,
+    "fingerprint": "56633af6"
   },
   "settings-github.autopause": {
     "revision": 2,

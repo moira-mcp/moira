@@ -100,7 +100,8 @@ function fixture() {
   let createResponse: () => Promise<Response> = async () => {
     throw new Error("Provider creation reply lost");
   };
-  let providerResponse: () => Promise<Response> = async () => new Response(null, { status: 404 });
+  let providerResponse: (name: string) => Promise<Response> = async () =>
+    new Response(null, { status: 404 });
   let listResponse: () => Promise<Response> = async () => Response.json({ codespaces: [] });
   let beforeCreate: (() => Promise<void>) | undefined;
   const permissionReads: Array<{
@@ -167,7 +168,8 @@ function fixture() {
       await beforeCreate?.();
       return createResponse();
     }
-    if (target.pathname.startsWith("/user/codespaces/")) return providerResponse();
+    if (target.pathname.startsWith("/user/codespaces/"))
+      return providerResponse(decodeURIComponent(target.pathname.split("/").at(-1)!));
     if (target.pathname === "/user/codespaces") return listResponse();
     throw new Error("Unexpected provider request");
   });
@@ -256,7 +258,7 @@ function fixture() {
     setCreateResponse(value: () => Promise<Response>) {
       createResponse = value;
     },
-    setProviderResponse(value: () => Promise<Response>) {
+    setProviderResponse(value: (name: string) => Promise<Response>) {
       providerResponse = value;
     },
     setListResponse(value: () => Promise<Response>) {
@@ -462,6 +464,16 @@ describe("GitHub cloud identity and fixed provider broker", () => {
       expect(value.permissionReads.filter((entry) => entry.path.endsWith("/new"))).toHaveLength(2);
       const offers = value.requests.filter((entry) => entry.path.endsWith("/machines")).length;
       boundary.restart();
+      expect(await value.service.listResources("owner")).toEqual({
+        codespaces: [],
+        unavailable: [],
+        has_diagnostics: true,
+      });
+      const diagnostics = await value.service.listResources("owner", { view: "diagnostics" });
+      expect(diagnostics.unavailable).toEqual([
+        expect.objectContaining({ codespace_id: id, pending_request_ids: [requestId] }),
+      ]);
+      expect(diagnostics.unavailable[0]).not.toHaveProperty("generation");
       await request(boundary.app)
         .get(`/api/integrations/local/devices/${value.deviceId}/operations/${requestId}`)
         .expect(200);
@@ -531,7 +543,7 @@ describe("GitHub cloud identity and fixed provider broker", () => {
       value.sqlite.close();
     }
   });
-  test("one unavailable provider observation retains its owned identity beside an independent summary without leaking diagnostics or replaying work", async () => {
+  test("unavailable provider observation and unproved creation are explicit identity-only diagnostics without leaking details or replaying work", async () => {
     const value = fixture(),
       requestId = "ws1-" + randomUUID(),
       peerRequest = "ws1-" + randomUUID();
@@ -561,26 +573,29 @@ describe("GitHub cloud identity and fixed provider broker", () => {
         throw new Error("private-provider-token-and-URL");
       });
       const view = await value.service.listResources("owner");
-      expect(view.codespaces).toEqual([
-        expect.objectContaining({
-          codespace_id: peerRequest.slice(4),
-          generation: 1,
-        }),
-      ]);
-      expect(view.unavailable).toEqual([
-        {
-          codespace_id: original.codespace_id,
-          provider: "github-codespaces",
-          repository_id: "201",
-          repository: "person/project",
-          requested_ref: "HEAD",
-          created_at: original.created_at,
-          device_id: value.deviceId,
-          error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" },
-        },
-      ]);
-      expect(JSON.stringify(view)).not.toContain("private-provider-token-and-URL");
-      expect(await value.service.refreshProviderState("owner")).toEqual({ stale: true });
+      expect(view).toEqual({ codespaces: [], unavailable: [], has_diagnostics: true });
+      const diagnostics = await value.service.listResources("owner", { view: "diagnostics" });
+      expect(diagnostics.codespaces).toEqual([]);
+      expect(diagnostics.unavailable).toEqual(
+        expect.arrayContaining([
+          {
+            codespace_id: original.codespace_id,
+            provider: "github-codespaces",
+            repository_id: "201",
+            repository: "person/project",
+            requested_ref: "HEAD",
+            created_at: original.created_at,
+            device_id: value.deviceId,
+            error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" },
+          },
+          expect.objectContaining({ codespace_id: peerRequest.slice(4) }),
+        ]),
+      );
+      expect(diagnostics.unavailable).toHaveLength(2);
+      for (const identity of diagnostics.unavailable)
+        expect(identity).not.toHaveProperty("generation");
+      expect(JSON.stringify(diagnostics)).not.toContain("private-provider-token-and-URL");
+      expect(await value.service.listResources("owner")).toMatchObject({ has_diagnostics: true });
       await expect(value.service.getCodespace("owner", original.codespace_id)).rejects.toThrow();
       expect(value.identities.listOwned("owner")).toEqual(identities);
       expect(value.requests.every((entry) => entry.method === "GET")).toBe(true);
@@ -592,6 +607,12 @@ describe("GitHub cloud identity and fixed provider broker", () => {
       expect(await value.service.listResources("other")).toEqual({
         codespaces: [],
         unavailable: [],
+        has_diagnostics: false,
+      });
+      await expect(
+        value.service.getCodespace("other", original.codespace_id),
+      ).rejects.toMatchObject({
+        code: "CODESPACE_NOT_FOUND",
       });
     } finally {
       value.sqlite.close();
@@ -995,6 +1016,132 @@ describe("GitHub cloud identity and fixed provider broker", () => {
     });
     return { ...value, id };
   }
+  test("GitHub discovery separates observed setup and preparation from unknown identities and reads retired history without external observation", async () => {
+    const value = await ownedFixture();
+    const original = value.identities.getOwned("owner", value.id)!;
+    const cases = [
+      { name: "owned-space", state: "stopped", providerState: "Shutdown", retirement: "owned" },
+      { name: "setup-space", state: "running", providerState: "Available", retirement: "owned" },
+      {
+        name: "preparing-space",
+        state: "provisioning",
+        providerState: "Provisioning",
+        retirement: "owned",
+      },
+      { name: "unknown-space", state: "creating", providerState: null, retirement: "unknown" },
+      { name: "uncreated-space", state: "creating", providerState: null, retirement: "uncreated" },
+      { name: "authority-lost", state: "running", providerState: "Available", retirement: "owned" },
+      { name: "retired-space", state: "deleted", providerState: null, retirement: "retired" },
+    ] as const;
+    const ids = new Map<string, string>();
+    const resources: GitHubControllerResource[] = [];
+    try {
+      for (const [index, entry] of cases.entries()) {
+        const id = index === 0 ? value.id : randomUUID();
+        ids.set(entry.name, id);
+        if (index !== 0)
+          value.identities.reserve({
+            ...original,
+            id,
+            operationMarker: "moira-" + createHash("sha256").update(id).digest("hex").slice(0, 24),
+            providerResourceName: entry.providerState ? entry.name : null,
+            retirement: entry.retirement,
+            revokedAt: entry.name === "authority-lost" ? 1 : null,
+          });
+        resources.push({
+          resourceId: id,
+          resourceGeneration: 1,
+          authorizationGeneration: 1,
+          repositoryId: original.repositoryId,
+          repositoryFullName: original.repositoryFullName,
+          requestedRef: original.requestedRef,
+          operationMarker: value.identities.getOwned("owner", id)!.operationMarker,
+          providerResourceName: entry.providerState ? entry.name : null,
+          retirement: entry.retirement,
+          state: entry.state,
+          desiredState:
+            entry.state === "stopped"
+              ? "stopped"
+              : entry.state === "deleted"
+                ? "deleted"
+                : "running",
+          environmentIdentity: entry.state === "running" ? "a".repeat(64) : null,
+          observedAt: null,
+          providerResource: null,
+          pendingRequestIds: entry.state === "creating" ? [`ws1-${id}`] : [],
+          ...(entry.name === "setup-space" ? { remote: { state: "enrollment_unavailable" } } : {}),
+        });
+      }
+      value.setOwnerResources(resources);
+      value.setProviderResponse(async (name) => {
+        const entry = cases.find((candidate) => candidate.name === name);
+        if (!entry?.providerState) throw new Error("Unexpected historical provider observation");
+        return Response.json({
+          name,
+          display_name: original.operationMarker,
+          owner: { id: 101 },
+          billable_owner: { id: 101 },
+          repository: { id: 201, full_name: "person/project" },
+          state: entry.providerState,
+          created_at: "2026-10-14T00:00:00Z",
+        });
+      });
+      const retained = value.identities.listOwned("owner");
+      const actionable = await value.service.listResources("owner");
+      expect(actionable.codespaces.map((entry) => entry.codespace_id).sort()).toEqual(
+        [ids.get("owned-space"), ids.get("setup-space"), ids.get("preparing-space")].sort(),
+      );
+      expect(
+        actionable.codespaces.find((entry) => entry.codespace_id === ids.get("setup-space")),
+      ).toMatchObject({ lifecycle_error: "CODESPACE_LOCAL_SETUP_INCOMPLETE" });
+      expect(actionable).toMatchObject({ unavailable: [], has_diagnostics: true });
+      const diagnostics = await value.service.listResources("owner", { view: "diagnostics" });
+      expect(diagnostics.codespaces).toEqual([]);
+      expect(diagnostics.unavailable.map((entry) => entry.codespace_id).sort()).toEqual(
+        [ids.get("unknown-space"), ids.get("uncreated-space"), ids.get("authority-lost")].sort(),
+      );
+      for (const entry of diagnostics.unavailable) expect(entry).not.toHaveProperty("generation");
+      expect(
+        diagnostics.unavailable.find((entry) => entry.codespace_id === ids.get("unknown-space")),
+      ).toMatchObject({ pending_request_ids: [`ws1-${ids.get("unknown-space")}`] });
+      const snapshot = jest.spyOn(value.devices, "snapshot");
+      const providerRequests = value.requests.slice();
+      try {
+        const history = await value.service.listResources("owner", { view: "history" });
+        expect(history).toMatchObject({
+          codespaces: [
+            expect.objectContaining({ codespace_id: ids.get("retired-space"), state: "deleted" }),
+          ],
+          unavailable: [],
+          has_diagnostics: false,
+        });
+        expect(snapshot).not.toHaveBeenCalled();
+        expect(value.requests).toEqual(providerRequests);
+      } finally {
+        snapshot.mockRestore();
+      }
+      expect(value.identities.listOwned("owner")).toEqual(retained);
+      expect(value.requests.every((entry) => entry.method === "GET")).toBe(true);
+      value.sqlite.prepare("UPDATE user SET blocked=1 WHERE id='owner'").run();
+      await expect(
+        value.service.getCodespace("owner", ids.get("retired-space")!),
+      ).rejects.toMatchObject({
+        code: "CODESPACE_AUTHORIZATION_REQUIRED",
+      });
+      expect(await value.service.listResources("owner", { view: "history" })).toMatchObject({
+        codespaces: [],
+        has_diagnostics: true,
+        unavailable: [
+          expect.objectContaining({
+            codespace_id: ids.get("retired-space"),
+            error: { code: "CODESPACE_AUTHORIZATION_REQUIRED" },
+          }),
+        ],
+      });
+    } finally {
+      value.sqlite.close();
+    }
+  });
   test("lost account authority retains only owned unavailable identities while exact get remains refused", async () => {
     const value = await ownedFixture();
     try {
@@ -1026,9 +1173,15 @@ describe("GitHub cloud identity and fixed provider broker", () => {
       });
       value.sqlite.prepare("UPDATE user SET blocked=1 WHERE id='owner'").run();
       const requests = value.requests.slice();
-      const view = await value.service.listResources("owner");
+      expect(await value.service.listResources("owner")).toEqual({
+        codespaces: [],
+        unavailable: [],
+        has_diagnostics: true,
+      });
+      const view = await value.service.listResources("owner", { view: "diagnostics" });
       expect(view).toEqual({
         codespaces: [],
+        has_diagnostics: true,
         unavailable: [
           {
             codespace_id: value.id,
@@ -1045,7 +1198,7 @@ describe("GitHub cloud identity and fixed provider broker", () => {
       await expect(value.service.getCodespace("owner", value.id)).rejects.toMatchObject({
         code: "CODESPACE_AUTHORIZATION_REQUIRED",
       });
-      expect(await value.service.refreshProviderState("owner")).toEqual({ stale: true });
+      expect(await value.service.listResources("owner")).toMatchObject({ has_diagnostics: true });
       expect(value.identities.getOwned("owner", value.id)).toEqual(original);
       expect(value.identities.getOwned("other", foreignId)).not.toBeNull();
       expect(value.requests).toEqual(requests);

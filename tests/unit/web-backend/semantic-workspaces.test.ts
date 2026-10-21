@@ -54,7 +54,10 @@ function fixture(provider = "github-codespaces") {
   let current = view({ provider });
   const resource = {
     listRepositories: jest.fn(() => [{ id: "42", fullName: "owner/repository", private: true }]),
-    listResources: jest.fn(async () => ({ codespaces: [current], unavailable: [] })),
+    listResources: jest.fn(async (..._args: unknown[]) => ({
+      codespaces: [current],
+      unavailable: [],
+    })),
     getCodespace: jest.fn(async () => current),
     create: jest.fn(async (..._args: unknown[]) => current),
     startCodespace: jest.fn(async (..._args: unknown[]) => current),
@@ -105,6 +108,7 @@ function fixture(provider = "github-codespaces") {
     })),
   };
   const devices = {
+    createObservation: jest.fn((userId: string) => ({ userId })),
     repository: { getActiveDevice: jest.fn(() => identity) },
     getDeviceIdentity: jest.fn(() => identity),
     getBinding: jest.fn(() => ({ ...identity, repositoryId: REPOSITORY })),
@@ -130,7 +134,10 @@ function fixture(provider = "github-codespaces") {
   };
   const repositories = {
     listDevices: jest.fn(async () => ({
-      devices: [{ device_id: DEVICE, label: "My computer", owner_available: true }],
+      devices: [
+        { device_id: DEVICE, label: "My computer", status: "active", owner_available: true },
+        { device_id: SPACE, label: "Revoked computer", status: "revoked", owner_available: false },
+      ],
       installations: [{ installation_id: "41", owner: "personal" }],
     })),
     addExistingRepository: jest.fn(async (..._args: unknown[]) => ({
@@ -186,18 +193,45 @@ function fixture(provider = "github-codespaces") {
 }
 
 describe("semantic workspace backend", () => {
-  test("discovery retains healthy peers, unavailable owned identities and every safe provider failure", async () => {
+  test("normal Local discovery completes while the separately selected GitHub observation stays pending", async () => {
     const f = fixture();
     const local = fixture("local-sandboxes");
-    local.bundle.connection.refreshGrants.mockRejectedValue(
-      new CodespaceResourceError(
-        "CODESPACE_AUTHORIZATION_REQUIRED",
-        "private credential diagnostic",
-      ),
-    );
     f.dependencies.providers.push(
       local.bundle as unknown as WorkspaceSemanticDependencies["providers"][number],
     );
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let githubCompleted = false;
+    f.resource.listResources.mockImplementation(async () => {
+      await held;
+      return { codespaces: [view()], unavailable: [] };
+    });
+    const github = f.service
+      .invoke(USER, "workspace_list", { provider: "github-codespaces" })
+      .then((result) => {
+        githubCompleted = true;
+        return result;
+      });
+    try {
+      const result = await f.service.invoke(USER, "workspace_list", {
+        provider: "local-sandboxes",
+      });
+      expect(result).toMatchObject({
+        workspaces: [{ provider: "local-sandboxes", state: "usable" }],
+        provider_errors: [],
+      });
+      expect(githubCompleted).toBe(false);
+      expect(local.bundle.connection.refreshGrants).not.toHaveBeenCalled();
+      expect(f.bundle.connection.refreshGrants).not.toHaveBeenCalled();
+    } finally {
+      release();
+      await github;
+    }
+  });
+  test("explicit diagnostics keeps unavailable owned identities without inventing lifecycle authority", async () => {
+    const f = fixture();
     const unavailable = {
       codespace_id: SPACE,
       provider: "github-codespaces",
@@ -210,33 +244,54 @@ describe("semantic workspace backend", () => {
       device_id: DEVICE,
     };
     f.resource.listResources.mockResolvedValue({
-      codespaces: [view()],
+      codespaces: [],
       unavailable: [unavailable],
+      has_diagnostics: true,
     } as never);
-    const result = (await f.service.invoke(USER, "workspace_list", {})) as {
+    const result = (await f.service.invoke(USER, "workspace_list", {
+      provider: "github-codespaces",
+      view: "diagnostics",
+    })) as {
       workspaces: Record<string, unknown>[];
       unavailable: Record<string, unknown>[];
-      provider_errors: unknown[];
     };
-    expect(decodeReference(String(result.workspaces[0].workspace), "workspace").generation).toBe(3);
-    expect(result.workspaces[0]).not.toHaveProperty("generation");
+    expect(f.resource.listResources).toHaveBeenCalledWith(USER, { view: "diagnostics" });
+    expect(result.workspaces).toEqual([]);
     expect(result.unavailable[0]).not.toHaveProperty("workspace");
     expect(result.unavailable[0]).not.toHaveProperty("state");
+    expect(result.unavailable[0]).not.toHaveProperty("generation");
     expect(
       decodeReference(String(result.unavailable[0].identity), "workspace-identity").resourceId,
     ).toBe(SPACE);
-    expect(result.provider_errors).toEqual([
-      { provider: "local-sandboxes", error: { code: "CODESPACE_AUTHORIZATION_REQUIRED" } },
-    ]);
-    expect(JSON.stringify(result)).not.toContain("private credential diagnostic");
-    f.bundle.connection.refreshGrants.mockRejectedValue(new Error("private transport diagnostic"));
-    const failed = (await f.service.invoke(USER, "workspace_list", {})) as Record<string, unknown>;
+    expect(result.unavailable[0].pending_operations).toHaveLength(1);
+  });
+  test("selected provider failure remains explicit and does not affect a healthy provider observation", async () => {
+    const f = fixture();
+    const local = fixture("local-sandboxes");
+    f.dependencies.providers.push(
+      local.bundle as unknown as WorkspaceSemanticDependencies["providers"][number],
+    );
+    f.resource.listResources.mockRejectedValue(
+      new CodespaceResourceError(
+        "CODESPACE_AUTHORIZATION_REQUIRED",
+        "private credential diagnostic",
+      ),
+    );
+    const failed = await f.service.invoke(USER, "workspace_list", {
+      provider: "github-codespaces",
+    });
     expect(failed).toMatchObject({
       workspaces: [],
       provider_errors: [
-        { provider: "github-codespaces", error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" } },
-        { provider: "local-sandboxes", error: { code: "CODESPACE_AUTHORIZATION_REQUIRED" } },
+        { provider: "github-codespaces", error: { code: "CODESPACE_AUTHORIZATION_REQUIRED" } },
       ],
+    });
+    expect(JSON.stringify(failed)).not.toContain("private credential diagnostic");
+    expect(
+      await f.service.invoke(USER, "workspace_list", { provider: "local-sandboxes" }),
+    ).toMatchObject({
+      workspaces: [{ state: "usable" }],
+      provider_errors: [],
     });
   });
   test("observations whitelist public facts rather than exposing private provider routing", async () => {
@@ -346,7 +401,9 @@ describe("semantic workspace backend", () => {
   });
   test("target discovery returns selected controllers and installation references without internal authority fields", async () => {
     const f = fixture();
-    const result = (await f.service.invoke(USER, "workspace_targets", {})) as {
+    const result = (await f.service.invoke(USER, "workspace_targets", {
+      provider: "github-codespaces",
+    })) as {
       targets: { target: string }[];
       controllers: { controller: string }[];
       installations: { installation: string }[];
@@ -356,11 +413,32 @@ describe("semantic workspace backend", () => {
       repositoryId: "42",
       controller: owner,
     });
-    expect(result.controllers).toEqual([{ controller, label: "My computer", available: true }]);
+    expect(result.controllers).toEqual([{ controller, label: "My computer" }]);
     expect(decodeReference(result.installations[0].installation, "installation")).toEqual({
       controller: owner,
       installationId: "41",
     });
+  });
+  test("Local target discovery returns approved Local references without GitHub installation metadata", async () => {
+    const f = fixture("local-sandboxes");
+    f.resource.listRepositories.mockReturnValue([
+      { id: `local:${DEVICE}:${REPOSITORY}`, fullName: "owner/local", private: true },
+    ]);
+    f.repositories.listDevices.mockResolvedValue({
+      devices: [
+        { device_id: DEVICE, label: "My computer", status: "active", owner_available: true },
+      ],
+      installations: [],
+    });
+    const result = (await f.service.invoke(USER, "workspace_targets", {
+      provider: "local-sandboxes",
+    })) as { targets: { target: string }[]; installations: unknown[] };
+    expect(decodeReference(result.targets[0].target, "target")).toMatchObject({
+      provider: "local-sandboxes",
+      repositoryId: `local:${DEVICE}:${REPOSITORY}`,
+      controller: owner,
+    });
+    expect(result.installations).toEqual([]);
   });
   test("lost creation replies return an original operation collectable without resubmission or provider reads", async () => {
     const f = fixture();

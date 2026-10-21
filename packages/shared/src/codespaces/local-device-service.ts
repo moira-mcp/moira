@@ -98,6 +98,13 @@ export type LocalControllerSnapshot = Extract<
   { state?: "configured" }
 > &
   Omit<ControllerSnapshot, "local" | "github">;
+/** Read-only owner evidence shared only by projections of one caller request. */
+export interface LocalDeviceObservation {
+  readonly userId: string;
+  snapshot(deviceId: string): Promise<ControllerSnapshot>;
+  localSnapshot(deviceId: string): Promise<LocalControllerSnapshot>;
+  listOwned(): Promise<ReturnType<LocalDeviceService["listRegistered"]>>;
+}
 type ActiveDevice = LocalDeviceView & {
   owner: Extract<LocalDeviceView["owner"], { state: "available" }> & {
     local: Extract<
@@ -141,11 +148,34 @@ export class LocalDeviceService {
     return this.repository.listOwned(userId, this.now());
   }
   async listOwned(userId: string) {
-    const registered = this.listRegistered(userId);
-    return {
-      ...registered,
-      devices: await Promise.all(registered.devices.map((device) => this.project(device))),
+    return this.createObservation(userId).listOwned();
+  }
+  createObservation(userId: string): LocalDeviceObservation {
+    const snapshots = new Map<string, Promise<ControllerSnapshot>>();
+    const observation: LocalDeviceObservation = {
+      userId,
+      snapshot: async (deviceId) => {
+        let pending = snapshots.get(deviceId);
+        if (!pending) {
+          pending = this.snapshot(userId, deviceId);
+          snapshots.set(deviceId, pending);
+        }
+        // A previously validated response is not authority for a new registration.
+        return this.validateSnapshot(userId, deviceId, await pending);
+      },
+      localSnapshot: async (deviceId) =>
+        this.projectLocalSnapshot(await observation.snapshot(deviceId)),
+      listOwned: async () => {
+        const registered = this.listRegistered(userId);
+        return {
+          ...registered,
+          devices: await Promise.all(
+            registered.devices.map((device) => this.project(device, observation)),
+          ),
+        };
+      },
     };
+    return observation;
   }
   beginEnrollment(userId: string) {
     const pairingToken = randomBytes(32).toString("base64url");
@@ -237,7 +267,9 @@ export class LocalDeviceService {
     return snapshot;
   }
   async localSnapshot(userId: string, deviceId: string): Promise<LocalControllerSnapshot> {
-    const snapshot = await this.snapshot(userId, deviceId);
+    return this.projectLocalSnapshot(await this.snapshot(userId, deviceId));
+  }
+  private projectLocalSnapshot(snapshot: ControllerSnapshot): LocalControllerSnapshot {
     if (snapshot.local.state !== "configured")
       throw new LocalDeviceError(
         "LOCAL_UNAVAILABLE",
@@ -254,10 +286,15 @@ export class LocalDeviceService {
       observedAt: snapshot.observedAt,
     };
   }
-  private async project(device: LocalDeviceView): Promise<LocalDeviceView> {
+  private async project(
+    device: LocalDeviceView,
+    observation?: LocalDeviceObservation,
+  ): Promise<LocalDeviceView> {
     if (device.status !== "active") return device;
     try {
-      const snapshot = await this.snapshot(device.userId, device.deviceId);
+      const snapshot = observation
+        ? await observation.snapshot(device.deviceId)
+        : await this.snapshot(device.userId, device.deviceId);
       return this.projectSnapshot(device, snapshot);
     } catch (error) {
       if (!(error instanceof LocalDeviceError) || error.code !== "LOCAL_UNAVAILABLE") throw error;

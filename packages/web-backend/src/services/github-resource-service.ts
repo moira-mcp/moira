@@ -18,6 +18,8 @@ import {
   type CodespaceConnectionService,
   type CodespaceSummaryView,
   type CodespaceResourceListView,
+  type CodespaceDiscoveryView,
+  selectCodespaceDiscoveryView,
   codespaceObservationErrorCode,
   type CodespaceProviderResource,
   type GitHubResourceIdentity,
@@ -202,7 +204,7 @@ export class GitHubResourceService {
     const identity = this.identities.getOwned(userId, id);
     if (!identity) throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Resource is not owned");
     const current = this.identities.hasCurrentAuthorization(userId, id),
-      owner = current ? await this.owner(identity) : null,
+      owner = current && identity.retirement !== "retired" ? await this.owner(identity) : null,
       observed =
         current && identity.retirement !== "retired"
           ? await this.observation(userId, identity)
@@ -324,10 +326,17 @@ export class GitHubResourceService {
         : {}),
     };
   }
-  async listResources(userId: string): Promise<CodespaceResourceListView> {
+  async listResources(
+    userId: string,
+    options: { view?: CodespaceDiscoveryView } = {},
+  ): Promise<CodespaceResourceListView> {
     const identities = this.identities
       .listOwned(userId)
-      .filter((resource) => resource.retirement !== "retired");
+      .filter((resource) =>
+        options.view === "history"
+          ? resource.retirement === "retired"
+          : resource.retirement !== "retired",
+      );
     const observations = await Promise.allSettled(
       identities.map((resource) => this.getCodespace(userId, resource.id)),
     );
@@ -349,11 +358,7 @@ export class GitHubResourceService {
         error: { code: codespaceObservationErrorCode(observation.reason) },
       });
     });
-    return result;
-  }
-  async refreshProviderState(userId: string) {
-    const resources = await this.listResources(userId);
-    return { stale: resources.unavailable.length > 0 };
+    return selectCodespaceDiscoveryView(result, options.view);
   }
   private uncertainty(
     resource: GitHubResourceIdentity,

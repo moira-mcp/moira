@@ -218,15 +218,15 @@ beforeEach(async () => {
   jest
     .spyOn(apiClient, "getGitHubCodespaceConnection")
     .mockResolvedValue({ state: "disconnected" } as never);
-  jest.spyOn(apiClient, "getGitHubCodespaces").mockResolvedValue({
+  jest.spyOn(apiClient, "getCodespaces").mockResolvedValue({
     codespaces: [],
     repositories: [],
     readiness: { state: "ready" },
     connection: { state: "connected" },
   } as never);
   jest
-    .spyOn(apiClient, "refreshGitHubCodespaces")
-    .mockImplementation(() => apiClient.getGitHubCodespaces());
+    .spyOn(apiClient, "refreshCodespaces")
+    .mockImplementation((provider, view) => apiClient.getCodespaces(provider, view));
 });
 afterEach(() => {
   setAuthErrorHandler(null);
@@ -379,7 +379,7 @@ test("computers with equal labels contain only their codespaces and separate VM 
     repositories: [],
     codespaces: [first, sibling, second, cloud],
   };
-  jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(fixture as never);
+  jest.mocked(apiClient.getCodespaces).mockResolvedValue(fixture as never);
   const stop = jest
     .spyOn(apiClient, "changeWorkspace")
     .mockRejectedValue({ code: "CODESPACE_PROVIDER_UNAVAILABLE" });
@@ -421,7 +421,7 @@ test("computers with equal labels contain only their codespaces and separate VM 
     lifecycle_error: null,
   };
   const readonlyRefresh = jest
-    .spyOn(apiClient, "refreshGitHubCodespaces")
+    .spyOn(apiClient, "refreshCodespaces")
     .mockResolvedValue({ ...fixture, codespaces: [first, sibling, confirmed, cloud] } as never);
   fireEvent.click(within(pending).getByTestId(`codespace-reconcile-${second.codespace_id}`));
   await within(secondComputer).findByText("Stopped (data kept)");
@@ -476,10 +476,10 @@ test.each([
       repositories: [],
       codespaces: [row],
     };
-    jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(fixture as never);
+    jest.mocked(apiClient.getCodespaces).mockResolvedValue(fixture as never);
     const remove = jest.spyOn(apiClient, "deleteWorkspace").mockImplementationOnce(async () => {
       // The domain records the delete intent before the companion refuses its permission.
-      jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue({
+      jest.mocked(apiClient.getCodespaces).mockResolvedValue({
         ...fixture,
         codespaces: [
           {
@@ -515,7 +515,7 @@ test.each([
     expect(card).toBeInTheDocument();
     expect(success).not.toHaveBeenCalled();
     expect(within(dialog).getByRole("button", { name: "Delete" })).toBeDisabled();
-    jest.mocked(apiClient.refreshGitHubCodespaces).mockResolvedValue(fixture as never);
+    jest.mocked(apiClient.refreshCodespaces).mockResolvedValue(fixture as never);
     fireEvent.click(within(dialog).getByRole("button", { name: "Check state again" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     remove.mockResolvedValueOnce({
@@ -543,7 +543,7 @@ test("an adapter domain403 keeps the session and requires a fresh destructive de
     repositories: [],
     codespaces: [row],
   };
-  jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(fixture as never);
+  jest.mocked(apiClient.getCodespaces).mockResolvedValue(fixture as never);
   axios.defaults.adapter = async (config) => {
     requests.push({ method: config.method!, url: config.url!, body: JSON.parse(config.data) });
     throw new AxiosError("Forbidden", "ERR_BAD_REQUEST", config, undefined, {
@@ -585,7 +585,7 @@ test("an adapter domain403 keeps the session and requires a fresh destructive de
       body: { workspace: row.workspace, confirm_delete: true },
     },
   ]);
-  expect(apiClient.refreshGitHubCodespaces).not.toHaveBeenCalled();
+  expect(apiClient.refreshCodespaces).not.toHaveBeenCalled();
   fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   expect(card).toBeInTheDocument();
@@ -599,7 +599,7 @@ test("owner deletion remains available with disabled agent work permission", asy
   };
   devices = [computer];
   const row = localCodespace(deviceId, "66666666-6666-4666-8666-666666666666");
-  jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue({
+  jest.mocked(apiClient.getCodespaces).mockResolvedValue({
     readiness: { state: "ready" },
     connection: { state: "connected" },
     repositories: [],
@@ -629,7 +629,7 @@ test.each(["revoked", "pending", "control-disabled"] as const)(
     else computer.owner.local.control!.optedIn = false;
     devices = [computer];
     const row = localCodespace(deviceId, "66666666-6666-4666-8666-666666666666");
-    jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue({
+    jest.mocked(apiClient.getCodespaces).mockResolvedValue({
       readiness: { state: "ready" },
       connection: { state: "connected" },
       repositories: [],
@@ -647,7 +647,7 @@ test("checking an old delete intent requires a new destructive confirmation", as
     ...localCodespace(deviceId, "66666666-6666-4666-8666-666666666666", "delete_pending"),
     desired_state: "deleted" as const,
   };
-  jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue({
+  jest.mocked(apiClient.getCodespaces).mockResolvedValue({
     readiness: { state: "ready" },
     connection: { state: "connected" },
     repositories: [],
@@ -676,7 +676,7 @@ test.each(["generation", "observation", "outcome"] as const)(
       repositories: [],
       codespaces: [row],
     };
-    jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(fixture as never);
+    jest.mocked(apiClient.getCodespaces).mockResolvedValue(fixture as never);
     const stop = jest.spyOn(apiClient, "changeWorkspace").mockResolvedValue({
       operation: operationReference(),
       state: "unconfirmed",
@@ -709,7 +709,7 @@ test.each(["generation", "observation", "outcome"] as const)(
             }),
     };
     jest
-      .spyOn(apiClient, "refreshGitHubCodespaces")
+      .spyOn(apiClient, "refreshCodespaces")
       .mockResolvedValue({ ...fixture, codespaces: [next] } as never);
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => expect(within(card).queryByRole("alert")).toBeNull());
@@ -746,14 +746,14 @@ test("failed deletion never substitutes a refreshed workspace into an existing c
     repositories: [],
     codespaces: [row],
   };
-  jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(fixture as never);
+  jest.mocked(apiClient.getCodespaces).mockResolvedValue(fixture as never);
   const remove = jest
     .spyOn(apiClient, "deleteWorkspace")
     .mockRejectedValueOnce({ code: "CODESPACE_GENERATION_CONFLICT" });
   await show({ openSettings: false });
   const card = await screen.findByTestId(`github-codespace-${row.codespace_id}`);
-  let finish!: (value: Awaited<ReturnType<typeof apiClient.refreshGitHubCodespaces>>) => void;
-  jest.mocked(apiClient.refreshGitHubCodespaces).mockImplementationOnce(
+  let finish!: (value: Awaited<ReturnType<typeof apiClient.refreshCodespaces>>) => void;
+  jest.mocked(apiClient.refreshCodespaces).mockImplementationOnce(
     () =>
       new Promise((resolve) => {
         finish = resolve;
@@ -764,16 +764,16 @@ test("failed deletion never substitutes a refreshed workspace into an existing c
   const dialog = screen.getByRole("alertdialog");
   await act(async () => finish({ ...fixture, codespaces: [next] } as never));
   jest
-    .mocked(apiClient.getGitHubCodespaces)
+    .mocked(apiClient.getCodespaces)
     .mockResolvedValue({ ...fixture, codespaces: [next] } as never);
   jest
-    .mocked(apiClient.refreshGitHubCodespaces)
+    .mocked(apiClient.refreshCodespaces)
     .mockResolvedValue({ ...fixture, codespaces: [next] } as never);
-  await waitFor(() => expect(apiClient.refreshGitHubCodespaces).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(apiClient.refreshCodespaces).toHaveBeenCalledTimes(1));
   fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
   await within(dialog).findByRole("alert");
   expect(remove).toHaveBeenCalledWith(row.workspace);
-  expect(apiClient.refreshGitHubCodespaces).toHaveBeenCalledTimes(1);
+  expect(apiClient.refreshCodespaces).toHaveBeenCalledTimes(1);
   expect(within(dialog).getByRole("button", { name: "Delete" })).toBeDisabled();
   fireEvent.click(within(dialog).getByRole("button", { name: "Check state again" }));
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
@@ -791,7 +791,7 @@ test("a failed state check renders one concrete error and retry while keeping de
     ...localCodespace(deviceId, "66666666-6666-4666-8666-666666666666", "stop_pending"),
     lifecycle_error: "CODESPACE_LOCAL_RUNTIME_ERROR" as const,
   };
-  jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue({
+  jest.mocked(apiClient.getCodespaces).mockResolvedValue({
     readiness: { state: "ready" },
     connection: { state: "connected" },
     repositories: [],
@@ -799,7 +799,7 @@ test("a failed state check renders one concrete error and retry while keeping de
   } as never);
   const stop = jest.spyOn(apiClient, "changeWorkspace");
   jest
-    .spyOn(apiClient, "refreshGitHubCodespaces")
+    .spyOn(apiClient, "refreshCodespaces")
     .mockRejectedValue({ code: "CODESPACE_LOCAL_RUNTIME_ERROR" });
   await show({ openSettings: false });
   const card = await screen.findByTestId(`github-codespace-${row.codespace_id}`);
@@ -825,7 +825,7 @@ test("incomplete preparation blocks Start while permitting confirmed deletion of
     lifecycle_error: "CODESPACE_LOCAL_SETUP_INCOMPLETE" as const,
     setup_failure: "repository_unproven" as const,
   };
-  jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue({
+  jest.mocked(apiClient.getCodespaces).mockResolvedValue({
     readiness: { state: "ready" },
     connection: { state: "connected" },
     repositories: [],
@@ -872,10 +872,10 @@ test.each(["running", "stopped"] as const)(
       repositories: [],
       codespaces: [row],
     };
-    jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(fixture as never);
+    jest.mocked(apiClient.getCodespaces).mockResolvedValue(fixture as never);
     const start = jest.spyOn(apiClient, "changeWorkspace").mockResolvedValue(completed(row));
     const stop = jest.spyOn(apiClient, "changeWorkspace").mockResolvedValue(completed(row));
-    jest.spyOn(apiClient, "refreshGitHubCodespaces").mockResolvedValue({
+    jest.spyOn(apiClient, "refreshCodespaces").mockResolvedValue({
       ...fixture,
       codespaces: [{ ...row, observed_at: 3000 }],
     } as never);
@@ -909,7 +909,7 @@ test.each(["unavailable", "enrollment_unavailable"] as const)(
       repositories: [],
       codespaces: [row],
     };
-    jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(fixture as never);
+    jest.mocked(apiClient.getCodespaces).mockResolvedValue(fixture as never);
     const adapter = axios.defaults.adapter as import("axios").AxiosAdapter;
     axios.defaults.adapter = async (config) => {
       if (!config.url?.endsWith("/workspace_lifecycle")) return adapter(config);
@@ -941,7 +941,7 @@ test.each(["unavailable", "enrollment_unavailable"] as const)(
     };
     const collect = jest.spyOn(apiClient, "getWorkspaceOperation").mockResolvedValue(completed());
     jest
-      .spyOn(apiClient, "refreshGitHubCodespaces")
+      .spyOn(apiClient, "refreshCodespaces")
       .mockResolvedValue({ ...fixture, codespaces: [ready] } as never);
     await show({ openSettings: false });
     const card = await screen.findByTestId(`github-codespace-${row.codespace_id}`);
@@ -986,7 +986,7 @@ test("create requires an explicit repository ref and pending creation is not ann
     ],
     codespaces: [],
   };
-  jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(fixture as never);
+  jest.mocked(apiClient.getCodespaces).mockResolvedValue(fixture as never);
   const create = jest
     .spyOn(apiClient, "createWorkspace")
     .mockResolvedValue({ operation: operationReference(), state: "pending", original: row });
@@ -1697,7 +1697,7 @@ test("Local Stop sends the captured workspace reference through the real HTTP cl
     repositories: [],
     codespaces: [row],
   };
-  jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(view as never);
+  jest.mocked(apiClient.getCodespaces).mockResolvedValue(view as never);
   const adapter = axios.defaults.adapter as import("axios").AxiosAdapter;
   axios.defaults.adapter = async (config) => {
     if (!config.url?.endsWith("/workspace_lifecycle")) return adapter(config);
@@ -1710,7 +1710,7 @@ test("Local Stop sends the captured workspace reference through the real HTTP cl
       observed_state: "stopped" as const,
     };
     jest
-      .mocked(apiClient.getGitHubCodespaces)
+      .mocked(apiClient.getCodespaces)
       .mockResolvedValue({ ...view, codespaces: [stopped] } as never);
     return {
       config,
@@ -1748,12 +1748,12 @@ test("reload collects every returned owner operation without creating new mutati
     repositories: [],
     codespaces: [row],
   };
-  jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(view as never);
+  jest.mocked(apiClient.getCodespaces).mockResolvedValue(view as never);
   const change = jest.spyOn(apiClient, "changeWorkspace");
   const collect = jest
     .spyOn(apiClient, "getWorkspaceOperation")
     .mockImplementation(async (operation) => ({ ...completed(), operation }));
-  jest.spyOn(apiClient, "refreshGitHubCodespaces").mockResolvedValue({
+  jest.spyOn(apiClient, "refreshCodespaces").mockResolvedValue({
     ...view,
     codespaces: [
       {
@@ -1785,7 +1785,7 @@ test.each(["absent", "unconfirmed"] as const)(
       repositories: [],
       codespaces: [row],
     };
-    jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(view as never);
+    jest.mocked(apiClient.getCodespaces).mockResolvedValue(view as never);
     const change = jest.spyOn(apiClient, "changeWorkspace").mockResolvedValueOnce({
       operation: operationReference(),
       state: "unconfirmed",

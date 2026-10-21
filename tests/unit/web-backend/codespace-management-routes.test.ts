@@ -78,6 +78,8 @@ function services(
   overrides: Partial<CodespaceManagementServices> = {},
 ): CodespaceManagementServices {
   return {
+    provider: "github-codespaces",
+    controllers: async () => [{ device_id: DEVICE, label: "Computer" }],
     semantic: {
       ...projection,
       invoke: jest.fn<CodespaceManagementServices["semantic"]["invoke"]>(async () => ({
@@ -104,8 +106,6 @@ function services(
     resource: {
       listRepositories: () => [{ id: "42", fullName: "owner/repository", private: true }],
       listResources: async () => ({ codespaces: [codespace()], unavailable: [] }),
-      refreshProviderState: jest.fn(async () => ({ stale: false })),
-      getCodespace: jest.fn(async () => codespace()),
     },
     ...overrides,
   };
@@ -123,7 +123,84 @@ function appWith(dependencies: CodespaceManagementServices, userId = "user-a") {
 }
 const prefix = "/api/integrations/github/codespaces";
 describe("website codespace management routes", () => {
-  test("keeps observed peers and unavailable identities without fabricating lifecycle authority", async () => {
+  test("normal Local read and refresh finish while GitHub observation and explicit billing stay pending", async () => {
+    const base = services();
+    const local = services({
+      provider: "local-sandboxes",
+      resource: {
+        ...base.resource!,
+        listRepositories: () => [{ id: LOCAL_TARGET, fullName: "owner/local", private: false }],
+        listResources: jest.fn(async () => ({
+          codespaces: [codespace({ provider: "local-sandboxes", repository_id: LOCAL_TARGET })],
+          unavailable: [],
+          has_diagnostics: false,
+        })),
+      },
+    });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const github = services({
+      resource: {
+        ...base.resource!,
+        listResources: async () => {
+          await held;
+          return { codespaces: [codespace()], unavailable: [] };
+        },
+      },
+    });
+    const billing = jest.fn(async () => {
+      await held;
+      return "unavailable" as const;
+    });
+    const app = appWith(services({ providers: [github, local], billing }));
+    let githubDone = false,
+      billingDone = false;
+    const pendingGithub = request(app)
+      .get(prefix)
+      .query({ provider: "github-codespaces" })
+      .then((value) => {
+        githubDone = true;
+        return value;
+      });
+    const pendingBilling = request(app)
+      .get(prefix + "/billing")
+      .then((value) => {
+        billingDone = true;
+        return value;
+      });
+    try {
+      const initial = await request(app).get(prefix).query({ provider: "local-sandboxes" });
+      const refreshed = await request(app)
+        .post(prefix + "/refresh")
+        .send({ provider: "local-sandboxes" });
+      for (const response of [initial, refreshed]) {
+        expect(response.status).toBe(200);
+        expect(response.body.data).toMatchObject({
+          provider: "local-sandboxes",
+          codespaces: [{ state: "usable" }],
+          provider_errors: [],
+          repositories: [{ target: expect.any(String), controller }],
+        });
+        expect(response.body.data).not.toHaveProperty("providers");
+        expect(response.body.data).not.toHaveProperty("provider_billing");
+        expect(decodeReference(response.body.data.repositories[0].target, "target").provider).toBe(
+          "local-sandboxes",
+        );
+      }
+      expect(githubDone).toBe(false);
+      expect(billingDone).toBe(false);
+      expect(local.connection.refreshGrants).not.toHaveBeenCalled();
+    } finally {
+      release();
+      await pendingGithub;
+      const billed = await pendingBilling;
+      expect(billed.body.data).toBe("unavailable");
+    }
+    expect(billing).toHaveBeenCalledTimes(1);
+  });
+  test("explicit diagnostics projects unavailable originals without a fabricated lifecycle reference", async () => {
     const base = services();
     const unavailable = {
       codespace_id: CONNECTION,
@@ -132,153 +209,96 @@ describe("website codespace management routes", () => {
       repository: "owner/unobserved",
       requested_ref: "main",
       created_at: 10,
+      device_id: DEVICE,
+      pending_request_ids: ["ws1-00000000-0000-4000-8000-000000000002"],
       error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" as const },
     };
     const local = services({
       provider: "local-sandboxes",
       resource: {
         ...base.resource!,
-        listRepositories: () => [{ id: LOCAL_TARGET, fullName: "owner/repository", private: true }],
+        listRepositories: () => [],
         listResources: async () => ({
-          codespaces: [codespace({ provider: "local-sandboxes", repository_id: LOCAL_TARGET })],
+          codespaces: [],
           unavailable: [unavailable],
+          has_diagnostics: true,
         }),
       },
     });
-    const response = await request(appWith(services({ providers: [local] }))).get(prefix);
+    const response = await request(appWith(services({ providers: [local] })))
+      .get(prefix)
+      .query({ provider: "local-sandboxes", view: "diagnostics" });
     expect(response.status).toBe(200);
     expect(response.body.data).toMatchObject({
-      codespaces: [{ codespace_id: CODESPACE_ID }],
-      provider_errors: [],
+      codespaces: [],
+      has_diagnostics: true,
       resources_stale: true,
     });
-    expect(
-      decodeReference(response.body.data.codespaces[0].workspace, "workspace").generation,
-    ).toBe(3);
-    expect(response.body.data.codespaces[0]).not.toHaveProperty("generation");
     expect(response.body.data.unavailable[0]).toMatchObject({
       codespace_id: CONNECTION,
-      error: unavailable.error,
+      pending_operations: [expect.any(String)],
     });
+    expect(
+      decodeReference(response.body.data.unavailable[0].pending_operations[0], "operation")
+        .requestId,
+    ).toBe("ws1-00000000-0000-4000-8000-000000000002");
     expect(response.body.data.unavailable[0]).not.toHaveProperty("workspace");
     expect(response.body.data.unavailable[0]).not.toHaveProperty("generation");
     expect(response.body.data.unavailable[0]).not.toHaveProperty("state");
   });
-  test.each([false, true])(
-    "reports all provider failures while retaining successful peers (all failed: %s)",
-    async (allFailed) => {
-      const failed = (provider: string) =>
-        services({
-          provider,
-          observability: {
-            readiness: async () => {
-              throw new CodespaceResourceError(
-                "CODESPACE_AUTHORIZATION_REQUIRED",
-                "private credential diagnostic",
-              );
-            },
-          },
-        });
-      const response = await request(
-        appWith(
-          services({
-            providers: [
-              allFailed ? failed("github-codespaces") : services({ provider: "github-codespaces" }),
-              failed("local-sandboxes"),
-            ],
-          }),
-        ),
-      ).get(prefix);
-      expect(response.status).toBe(200);
-      expect(response.body.data.codespaces).toHaveLength(allFailed ? 0 : 1);
-      expect(response.body.data.provider_errors).toEqual(
-        (allFailed ? ["github-codespaces", "local-sandboxes"] : ["local-sandboxes"]).map(
-          (provider) => ({ provider, error: { code: "CODESPACE_AUTHORIZATION_REQUIRED" } }),
-        ),
-      );
-      expect(response.body.data.providers.at(-1)).toEqual({
-        provider: "local-sandboxes",
-        error: { code: "CODESPACE_AUTHORIZATION_REQUIRED" },
-      });
-      if (allFailed) {
-        expect(response.body.data).not.toHaveProperty("readiness");
-        expect(response.body.data).not.toHaveProperty("connection");
-        expect(response.body.data.repositories).toEqual([]);
-      }
-      expect(response.text).not.toContain("private credential diagnostic");
-    },
-  );
-  test("a failed controller observation does not discard healthy provider resources", async () => {
+  test("selected provider failure remains visible without withholding healthy peer discovery", async () => {
+    const failed = services({
+      observability: {
+        readiness: async () => {
+          throw new CodespaceResourceError(
+            "CODESPACE_AUTHORIZATION_REQUIRED",
+            "private credential diagnostic",
+          );
+        },
+      },
+    });
+    const local = services({ provider: "local-sandboxes", resource: null });
+    const app = appWith(services({ providers: [failed, local] }));
+    const failure = await request(app).get(prefix).query({ provider: "github-codespaces" });
+    expect(failure.status).toBe(409);
+    expect(failure.body.error.code).toBe("CODESPACE_AUTHORIZATION_REQUIRED");
+    expect(failure.text).not.toContain("private credential diagnostic");
+    const healthy = await request(app).get(prefix).query({ provider: "local-sandboxes" });
+    expect(healthy.status).toBe(200);
+    expect(healthy.body.data.provider_errors).toEqual([]);
+  });
+  test("controller metadata failure does not discard selected provider resources", async () => {
     const response = await request(
       appWith(
         services({
-          providers: [services({ provider: "github-codespaces" })],
           controllers: async () => {
             throw new Error("private controller diagnostic");
           },
         }),
       ),
-    ).get(prefix);
+    )
+      .get(prefix)
+      .query({ provider: "github-codespaces" });
     expect(response.status).toBe(200);
     expect(response.body.data.codespaces).toHaveLength(1);
     expect(response.body.data.provider_errors).toEqual([
-      { provider: "local-sandboxes", error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" } },
+      { provider: "github-codespaces", error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" } },
     ]);
     expect(response.text).not.toContain("private controller diagnostic");
   });
-  test("one list projects both providers with independently selected computer targets", async () => {
-    const base = services();
-    const local = services({
-      provider: "local-sandboxes",
-      resource: {
-        ...base.resource!,
-        listRepositories: () => [{ id: LOCAL_TARGET, fullName: "owner/local", private: false }],
-        listResources: async () => ({
-          codespaces: [
-            codespace({
-              provider: "local-sandboxes",
-              repository_id: LOCAL_TARGET,
-              codespace_id: CONNECTION,
-            }),
-          ],
-          unavailable: [],
-        }),
-      },
-      observability: { readiness: async () => ({ ...readiness, provider: "local-sandboxes" }) },
-    });
-    const response = await request(
-      appWith(
-        services({
-          providers: [{ ...base, provider: "github-codespaces" }, local],
-          controllers: async () => [{ device_id: DEVICE, label: "Computer", available: true }],
-          repositoryMetadata: () => ({ device_id: DEVICE, device_label: "Computer" }),
-        }),
-      ),
-    ).get(prefix);
-    expect(response.status).toBe(200);
-    expect(response.body.data.repositories).toMatchObject([
-      { repository_id: "42", provider: "github-codespaces", controller },
-      {
-        repository_id: LOCAL_TARGET,
-        provider: "local-sandboxes",
-        device_label: "Computer",
-        controller,
-      },
-    ]);
-    expect(
-      response.body.data.repositories.map(
-        (r: { target: string }) => decodeReference(r.target, "target").provider,
-      ),
-    ).toEqual(["github-codespaces", "local-sandboxes"]);
-    expect(response.body.data.codespaces.map((r: { provider: string }) => r.provider)).toEqual([
-      "github-codespaces",
-      "local-sandboxes",
-    ]);
-    expect(
-      response.body.data.providers.map(
-        (r: { readiness: { provider: string } }) => r.readiness.provider,
-      ),
-    ).toEqual(["github-codespaces", "local-sandboxes"]);
+  test("discovery requires an explicit provider and rejects mixed service metadata", async () => {
+    const dependencies = services();
+    const app = appWith(dependencies);
+    for (const query of [
+      {},
+      { provider: "all" },
+      { provider: "local-sandboxes", generation: "1" },
+    ]) {
+      const response = await request(app).get(prefix).query(query);
+      expect(response.status).toBe(400);
+      expect(response.body.error.code).toBe("CODESPACE_RESOURCE_INVALID");
+    }
+    expect(dependencies.connection.refreshGrants).not.toHaveBeenCalled();
   });
   test("lists current facts without exposing private provider authority or raw CAS fields", async () => {
     const base = services();
@@ -297,7 +317,9 @@ describe("website codespace management routes", () => {
           },
         }),
       ),
-    ).get(prefix);
+    )
+      .get(prefix)
+      .query({ provider: "github-codespaces" });
     expect(response.status).toBe(200);
     expect(response.headers["cache-control"]).toBe("no-store");
     expect(response.body.data).toMatchObject({
@@ -335,7 +357,9 @@ describe("website codespace management routes", () => {
             },
           }),
         ),
-      ).get(prefix);
+      )
+        .get(prefix)
+        .query({ provider: "github-codespaces" });
       expect(response.body.data.codespaces[0]).toMatchObject({
         state: "stop_pending",
         observed_at: 15,
@@ -351,7 +375,9 @@ describe("website codespace management routes", () => {
         readiness: async () => ({ ...readiness, state: "disabled", reason: "NOT_CONFIGURED" }),
       },
     });
-    const response = await request(appWith(disabled)).get(prefix);
+    const response = await request(appWith(disabled))
+      .get(prefix)
+      .query({ provider: "github-codespaces" });
     expect(response.status).toBe(200);
     expect(response.body.data).toMatchObject({ readiness: { state: "disabled" }, codespaces: [] });
   });
@@ -363,16 +389,18 @@ describe("website codespace management routes", () => {
         refreshGrants: jest.fn(async () => ({ refreshed: false, stale: true })),
       },
     });
-    const response = await request(appWith(dependencies)).post(`${prefix}/refresh`);
+    const response = await request(appWith(dependencies))
+      .post(`${prefix}/refresh`)
+      .send({ provider: "github-codespaces" });
     expect(response.status).toBe(200);
     expect(response.body.data).toMatchObject({
       repositories_stale: true,
       resources_stale: true,
       codespaces: [{ codespace_id: CODESPACE_ID }],
     });
-    expect(dependencies.resource!.refreshProviderState).not.toHaveBeenCalled();
+    expect(dependencies.semantic.invoke).not.toHaveBeenCalled();
   });
-  test("fresh refresh reconciles managed resources only after confirmed grants", async () => {
+  test("fresh refresh observes its selected provider once after current grant refresh", async () => {
     const base = services();
     let present = true;
     const dependencies = services({
@@ -382,19 +410,23 @@ describe("website codespace management routes", () => {
       },
       resource: {
         ...base.resource!,
-        refreshProviderState: jest.fn(async () => {
-          present = false;
-          return { stale: false };
-        }),
-        listResources: async () => ({ codespaces: present ? [codespace()] : [], unavailable: [] }),
+        listResources: jest.fn(async () => ({
+          codespaces: present ? [codespace()] : [],
+          unavailable: [],
+        })),
       },
     });
-    const response = await request(appWith(dependencies)).post(`${prefix}/refresh`);
+    const app = appWith(dependencies);
+    const initial = await request(app).get(prefix).query({ provider: "github-codespaces" });
+    expect(initial.body.data.codespaces).toHaveLength(1);
+    present = false;
+    const response = await request(app)
+      .post(`${prefix}/refresh`)
+      .send({ provider: "github-codespaces" });
     expect(response.body.data).toMatchObject({ resources_stale: false, codespaces: [] });
     expect(dependencies.connection.refreshGrants).toHaveBeenCalledWith("user-a", { force: true });
-    expect(dependencies.resource!.refreshProviderState).toHaveBeenCalledWith("user-a", {
-      authorizationFresh: true,
-    });
+    expect(dependencies.resource!.listResources).toHaveBeenCalledTimes(2);
+    expect(dependencies.semantic.invoke).not.toHaveBeenCalled();
   });
   test.each([
     ["workspace_create", { target, branch: "feature" }],

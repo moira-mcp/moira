@@ -3,13 +3,17 @@
  */
 
 import React from "react";
-import { afterEach, describe, expect, test } from "@jest/globals";
-import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, jest, test } from "@jest/globals";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
 import { I18nextProvider } from "react-i18next";
 import type { CodespaceProviderBillingView } from "@mcp-moira/shared";
 import i18n from "../../../packages/web-frontend/src/i18n";
-import { CodespaceBillingPanel } from "../../../packages/web-frontend/src/pages/settings/CodespaceBillingPanel";
+import {
+  CodespaceBillingPanel,
+  CodespaceBillingFromData,
+} from "../../../packages/web-frontend/src/pages/settings/CodespaceBillingPanel";
+import { apiClient } from "../../../packages/web-frontend/src/services/api-client";
 
 function renderPanel(billing: CodespaceProviderBillingView) {
   return render(
@@ -21,10 +25,41 @@ function renderPanel(billing: CodespaceProviderBillingView) {
 
 afterEach(async () => {
   cleanup();
+  jest.restoreAllMocks();
   await i18n.changeLanguage("en");
 });
 
 describe("Codespace provider billing", () => {
+  test("hidden billing does not read; activation owns an independent pending request and hides its late reply", async () => {
+    let resolve!: (value: CodespaceProviderBillingView) => void;
+    const read = jest
+      .spyOn(apiClient, "getCodespaceBilling")
+      .mockImplementationOnce(
+        () =>
+          new Promise((yes) => {
+            resolve = yes;
+          }),
+      )
+      .mockResolvedValue("unavailable");
+    const panel = (active: boolean) => (
+      <I18nextProvider i18n={i18n}>
+        <CodespaceBillingFromData active={active} />
+      </I18nextProvider>
+    );
+    const view = render(panel(false));
+    expect(read).not.toHaveBeenCalled();
+    view.rerender(panel(true));
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("codespace-billing-region")).toHaveAttribute("aria-busy", "true");
+    view.rerender(panel(false));
+    await act(async () => resolve("unavailable"));
+    expect(screen.queryByTestId("github-codespace-billing-unavailable")).toBeNull();
+    expect(read).toHaveBeenCalledTimes(1);
+    view.rerender(panel(true));
+    expect(await screen.findByTestId("github-codespace-billing-unavailable")).toBeInTheDocument();
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+
   test("shows actual personal monthly usage and billed amount", async () => {
     await i18n.changeLanguage("en");
     renderPanel({

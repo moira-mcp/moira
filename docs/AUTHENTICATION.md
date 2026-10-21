@@ -437,6 +437,13 @@ Discovery exposes references, state and safe metadata, while the original outcom
 requires explicit `operation_get` under current authority.
 Reference decoding alone never permits a foreign or stale-owner read.
 
+Workspace discovery views do not broaden authority. Diagnostic identities omit lifecycle
+generations and permit observation or collection of retained originals, not mutation with a
+guessed precondition. Request-local Local observations are rechecked against current device
+registration before reuse. Browser discovery and GitHub connection responses are fenced by
+the accepted private-read scope: a credential or capability change for the same account also
+retires obsolete responses. Late success or failure cannot replace the renewed observation.
+
 `operation_get` is pure original observation. `operation_resume` is an explicit
 continuation only of retained private-repository creation using its saved input and
 existing authority/claim checks. It is not a general retry command. Applied creation
