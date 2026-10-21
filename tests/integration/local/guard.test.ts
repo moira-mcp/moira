@@ -1128,20 +1128,25 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
         import {LocalManager} from ${JSON.stringify(`file://${join(root, "manager.js")}`)};
         import {LocalRecords} from ${JSON.stringify(`file://${join(root, "space-record.js")}`)};
         import {PrivateState} from ${JSON.stringify(`file://${join(root, "private-state.js")}`)};
-        const device = await startGuard(${JSON.stringify(local.state.root)});
+        let device;
+        const manager=new LocalManager(new LocalRecords(await PrivateState.open(${JSON.stringify(local.state.root)})),{guard:async()=>device});
+        await manager.holdRunnerLock();
         try {
+          device = await startGuard(${JSON.stringify(local.state.root)});
           if (${heldWorker}) await f.writeFile(${JSON.stringify(local.observation)}, JSON.stringify({status:'created',keepWorker:true}));
           else await f.writeFile(${JSON.stringify(local.observation)}, JSON.stringify({status:'created',stopKeepsCreated:true}));
           const before = await device.observe();
           if (before.length !== 1 || before[0].status !== 'created') throw new Error('Created inventory was pretended stopped');
-          const manager=new LocalManager(new LocalRecords(await PrivateState.open(${JSON.stringify(local.state.root)})),{guard:async()=>device});
           if ((await manager.snapshot()).spaces[0].nativeStopConfirmed !== false) throw new Error('Bare created inventory claimed stop proof');
           const guard = await device.space(${JSON.stringify(local.space.id)});
           await guard.stop();
           const after = await device.observe();
           if (after.length !== 1 || after[0].status !== (${heldWorker} ? 'stopped' : 'created')) throw new Error('Exact stop changed the independent observation');
           if ((await manager.snapshot()).spaces[0].nativeStopConfirmed !== true) throw new Error('Native settlement did not provide stop proof');
-        } finally { await device.stop(); }
+        } finally {
+          try { await device?.stop(); }
+          finally { await manager.close(); }
+        }
       `,
       ]);
       const calls = (await readFile(local.observation + ".calls", "utf8"))
@@ -1230,7 +1235,6 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
         profile: localRuntimeProfileHash(local.policy),
         settled: false,
       };
-      await local.state.write("runtime-owner.json", receipt);
       const jobKey = `job-${"c".repeat(64)}.json`;
       const unknownJob = { unknown: true, terminal: false, marker: `moira-op-${"c".repeat(32)}` };
       await local.state.write(jobKey, unknownJob);
@@ -1241,9 +1245,11 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
           "--input-type=module",
           "-e",
           `
-        import {PrivateState} from ${JSON.stringify(`file://${join(root, "private-state.js")}`)};
+        import {PrivateState,hostBootIdentity} from ${JSON.stringify(`file://${join(root, "private-state.js")}`)};
         const state=await PrivateState.open(${JSON.stringify(local.state.root)});
-        await state.lock();process.stdout.write('ready');process.stdin.resume();
+        await state.lock();
+        await state.write('runtime-owner.json',{...${JSON.stringify(receipt)},ownerPID:process.pid,boot:await hostBootIdentity()});
+        process.stdout.write('ready');process.stdin.resume();
       `,
         ],
         { env: {}, stdio: ["pipe", "pipe", "pipe"] },
@@ -1333,7 +1339,9 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
         expect(daemons[0].exitCode).toBeNull();
         expect(daemons[0].signalCode).toBeNull();
         expect(await local.state.read("runtime-owner.json", (value) => value)).toEqual(receipt);
-        expect(await readMarker()).toEqual(markerBefore);
+        expect(await readMarker()).toEqual(
+          reason === "live-owner-stale-marker" ? null : markerBefore,
+        );
       } finally {
         await release?.();
       }
@@ -2378,10 +2386,11 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
       "-e",
       driver(local) +
         `
-      const work=guard.prepare();
-      try{await Promise.race([wait(),work.then(()=>{throw new Error('Creation completed before barrier');})]);}
-      catch(error){await guard.stop();await device.stop();throw error;}
-      const settled=work.catch(()=>{});await guard.stop();await settled;
+      const work=guard.prepare();const settled=work.catch(()=>{});
+      try{
+        await Promise.race([wait(),work.then(()=>{throw new Error('Creation completed before barrier');})]);
+        await guard.stop();await settled;
+      }finally{await device.stop();await settled;}
     `,
     ]);
     const { pid } = JSON.parse(await readFile(local.pending, "utf8"));
