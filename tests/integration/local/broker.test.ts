@@ -437,7 +437,15 @@ describe("local broker authority and address boundary", () => {
       boot: await hostBootIdentity(),
     });
     expect(await state.read("job-retained.json", (value) => value)).toEqual(retained);
-    expect(await fixture.records.get(fixture.space.id)).toEqual(fixture.space);
+    expect(await fixture.records.get(fixture.space.id)).toEqual({
+      ...fixture.space,
+      admittedMachine: {
+        cpuCores: fixture.policy.runtime.cpuCores,
+        memoryBytes: fixture.policy.runtime.memoryBytes,
+        dockerBytes: fixture.policy.runtime.dockerBytes,
+      },
+      admittedRepositoryFullName: fixture.policy.repositories[0].fullName,
+    });
     expect(await fixture.records.policy()).toEqual(fixture.policy);
     await expect(state.lock()).rejects.toMatchObject({ code: "LOCAL_ALREADY_RUNNING" });
     await manager.close();
@@ -539,6 +547,16 @@ describe("local broker authority and address boundary", () => {
         await manager.release();
       });
       await manager.open();
+      const admitted = await fixture.records.get(fixture.space.id);
+      expect(admitted).toEqual({
+        ...fixture.space,
+        admittedMachine: {
+          cpuCores: fixture.policy.runtime.cpuCores,
+          memoryBytes: fixture.policy.runtime.memoryBytes,
+          dockerBytes: fixture.policy.runtime.dockerBytes,
+        },
+        admittedRepositoryFullName: fixture.policy.repositories[0].fullName,
+      });
       const retained = Buffer.from('{"state":"running","command":"original-only"}');
       await writeFile(join(root, "job-retained.json"), retained, { mode: 0o600 });
       await echo("before-owner-loss");
@@ -595,7 +613,7 @@ describe("local broker authority and address boundary", () => {
       }
       await echo("after-owner-loss");
       expect(await readFile(join(root, "job-retained.json"))).toEqual(retained);
-      expect(await fixture.records.get(fixture.space.id)).toEqual(fixture.space);
+      expect(await fixture.records.get(fixture.space.id)).toEqual(admitted);
       expect(await fixture.records.policy()).toEqual(fixture.policy);
     },
   );
