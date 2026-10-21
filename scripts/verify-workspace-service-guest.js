@@ -9,6 +9,12 @@ import { build } from "esbuild";
 import sharp from "sharp";
 import tar from "tar-stream";
 import { createWorkspaceRequestId } from "../packages/shared/src/codespaces/workspace-request-id.ts";
+import { decodeReference } from "../packages/shared/src/codespaces/workspace-references.mjs";
+import { encodeOwnerFrame } from "../packages/workspace-service/src/stream-frame.mjs";
+import {
+  DAEMON_DIAGNOSTIC_FILE_BYTES,
+  DAEMON_DIAGNOSTIC_FILE_COUNT,
+} from "../packages/workspace-service/src/daemon-diagnostics.mjs";
 import {
   WORKSPACE_INSTALL_SCRIPT,
   WORKSPACE_PROBE_SCRIPT,
@@ -25,6 +31,7 @@ import { compileBinaryExtensionArtifact } from "../packages/extension-runner/src
 import { scanExtensionBundles } from "../packages/extension-runner/src/bundle-loader.ts";
 
 function docker(argv, input) {
+  const caller = new Error("Guest verification invocation").stack;
   return new Promise((done, failed) => {
     const child = spawn("docker", argv, { stdio: ["pipe", "pipe", "pipe"] });
     const stdout = [],
@@ -32,11 +39,35 @@ function docker(argv, input) {
     child.stdout.on("data", (chunk) => stdout.push(chunk));
     child.stderr.on("data", (chunk) => stderr.push(chunk));
     child.once("error", failed);
-    child.once("close", (code) =>
-      code === 0
-        ? done(Buffer.concat(stdout))
-        : failed(new Error(`Guest verification exit ${code}: ${Buffer.concat(stderr)}`)),
-    );
+    child.once("close", (code) => {
+      if (code === 0) return done(Buffer.concat(stdout));
+      const safe = {};
+      try {
+        const value = JSON.parse(Buffer.concat(stdout).toString("utf8")).structuredContent;
+        const errorCode = value?.error?.code ?? value?.outcome?.error?.code;
+        if (/^[A-Z][A-Z0-9_]{1,79}$/.test(errorCode ?? "")) safe.code = errorCode;
+        if (["absent", "pending", "unconfirmed", "completed"].includes(value?.state))
+          safe.state = value.state;
+        const reason = value?.error?.reason ?? value?.outcome?.result?.reason;
+        if (["unsafe_access", "concurrent_change", "precondition"].includes(reason))
+          safe.reason = reason;
+      } catch {
+        // Failed stdout may contain owned bytes; never dump it as diagnostics.
+      }
+      const cli = argv.findIndex((argument) => argument.endsWith("/moira-workspace"));
+      const daemon = argv.findIndex((argument) => argument.endsWith("/service/daemon.mjs"));
+      const stage =
+        cli >= 0
+          ? `workspace CLI ${argv[cli + 1]}`
+          : daemon >= 0
+            ? `workspace daemon ${argv[daemon + 1]}`
+            : `${argv[0]} guest fixture`;
+      const error = new Error(
+        `Guest verification ${stage} exit ${code}: ${JSON.stringify(safe)} ${Buffer.concat(stderr)}`,
+      );
+      error.stack += `\n${caller}`;
+      failed(error);
+    });
     child.stdin.on("error", (error) => {
       if (error.code !== "EPIPE") failed(error);
     });
@@ -66,8 +97,8 @@ let fixtureDirectory;
 const ownedVolumes = [];
 let activeHome = "/home/agent";
 verification: try {
-  await mkdir(resolve("../agent_temp_files_local"), { recursive: true });
-  fixtureDirectory = await mkdtemp(resolve("../agent_temp_files_local/guest-router-"));
+  await mkdir(resolve("agent_temp_files_local"), { recursive: true });
+  fixtureDirectory = await mkdtemp(resolve("agent_temp_files_local/guest-router-"));
   const keyPath = `${fixtureDirectory}/key.pem`,
     caPath = `${fixtureDirectory}/ca.pem`;
   await promisify(execFile)("openssl", [
@@ -270,6 +301,20 @@ verification: try {
       }),
     ).then((value) => JSON.parse(value));
   const semantic = (action, request) => deliver("POST", "/v1/tools", { action, request });
+  const semanticStream = (action, request, requestId, bytes) =>
+    docker(
+      [
+        "exec",
+        "--interactive",
+        container,
+        node,
+        "--input-type=module",
+        "-e",
+        `const {workspaceRequest}=await import(process.argv[1]);const response=await workspaceRequest(${JSON.stringify(`${activeHome}/.local/state/moira/workspace-service/service.sock`)},'POST','/v1/tools',process.stdin,{'content-type':'application/vnd.moira.owner-stream'});for await(const chunk of response)process.stdout.write(chunk);`,
+        `file://${program}/service/cli.mjs`,
+      ],
+      encodeOwnerFrame({ action, request, requestId }, [bytes]).body,
+    ).then((value) => JSON.parse(value));
   await docker([
     "exec",
     container,
@@ -600,9 +645,25 @@ verification: try {
     heldKernelLock: true,
     competingStatus: 1,
   });
+  const diagnosticSnapshot = async () =>
+    JSON.parse(
+      await docker([
+        "exec",
+        container,
+        node,
+        "-e",
+        `const fs=require('node:fs'),crypto=require('node:crypto');const base='/home/agent/.local/state/moira/workspace-service';const files=[];let ready=false,warning=false;for(let i=0;i<${DAEMON_DIAGNOSTIC_FILE_COUNT};i++){const name=i?'daemon.log.'+i:'daemon.log';let value;try{value=fs.lstatSync(base+'/'+name)}catch(error){if(error.code==='ENOENT')continue;throw error}const bytes=fs.readFileSync(base+'/'+name);ready||=bytes.includes(Buffer.from('"workspaceService":"ready"'));warning||=bytes.includes(Buffer.from('packaged-daemon-warning-tail'));files.push({name,size:value.size,mode:value.mode&511,nlink:value.nlink,regular:value.isFile(),sha256:crypto.createHash('sha256').update(bytes).digest('hex')})}process.stdout.write(JSON.stringify({files,ready,warning}));`,
+      ]),
+    );
+  const originalDiagnostics = await diagnosticSnapshot();
+  assert.equal(originalDiagnostics.ready, true);
   await assert.rejects(
     docker(["exec", container, node, `${program}/service/daemon.mjs`, "--start"]),
   );
+  await assert.rejects(
+    docker(["exec", container, node, `${program}/service/daemon.mjs`, "--owned-daemon"]),
+  );
+  assert.deepEqual(await diagnosticSnapshot(), originalDiagnostics);
   assert.equal(JSON.parse(await fixed(WORKSPACE_HEALTH_SCRIPT)).processId, ready.processId);
   assert.equal(
     JSON.parse(await fixed(WORKSPACE_HEALTH_SCRIPT)).environmentIdentity,
@@ -875,6 +936,42 @@ verification: try {
   );
   assert.deepEqual(await publicationBytes(), bytes);
   await assert.rejects(cli("read", "../outside"));
+  // The real detached collector, not owner collection, retires proved input
+  // after completion while the daemon is absent. Output remains independent.
+  const retainedInput = Buffer.alloc(128 * 1024, "i");
+  const fullOutputBytes = DAEMON_DIAGNOSTIC_FILE_BYTES * 4;
+  const retirementArgv = [
+    node,
+    "-e",
+    `const fs=require('node:fs'),crypto=require('node:crypto');const chunks=[];process.stdin.on('data',chunk=>chunks.push(chunk));process.stdin.on('end',()=>{const input=Buffer.concat(chunks);fs.appendFileSync('retirement-once','once\\n');fs.writeFileSync('retirement-input-sha',crypto.createHash('sha256').update(input).digest('hex'));fs.writeFileSync('retirement-ready','ready');const timer=setInterval(()=>{if(fs.existsSync('retirement-release')){clearInterval(timer);process.stdout.write('O'.repeat(${fullOutputBytes}));process.stderr.write('E'.repeat(${fullOutputBytes}));}},10)});`,
+  ];
+  const retained = JSON.parse(
+    await docker(
+      [
+        "exec",
+        "--interactive",
+        container,
+        "/home/agent/.local/bin/moira-workspace",
+        "exec",
+        "--background",
+        "--stdin",
+        "--",
+        ...retirementArgv,
+      ],
+      retainedInput,
+    ),
+  ).structuredContent;
+  const retainedId = decodeReference(retained.operation, "operation").requestId;
+  const requestsPath = `/home/agent/.local/state/moira/workspace-service/requests/${retainedId}`;
+  const membershipPath = `/home/agent/.local/state/moira/workspace-service/active-requests/${retainedId}.json`;
+  await docker([
+    "exec",
+    container,
+    node,
+    "--input-type=module",
+    "-e",
+    `import fs from 'node:fs';import assert from 'node:assert/strict';await new Promise(done=>{const observe=()=>{if(fs.existsSync('/workspaces/project/retirement-ready')){watcher.close();done()}};const watcher=fs.watch('/workspaces/project',observe);observe()});assert.equal(fs.readFileSync('/workspaces/project/retirement-input-sha','utf8'),${JSON.stringify(createHash("sha256").update(retainedInput).digest("hex"))});assert.equal(fs.statSync(${JSON.stringify(`${requestsPath}/input`)}).size,${retainedInput.length});assert.ok(fs.existsSync(${JSON.stringify(membershipPath)}));assert.ok(fs.existsSync(${JSON.stringify(`${requestsPath}/accepted.json`)}));`,
+  ]);
   const previousGhOwner = JSON.parse(await fixed(WORKSPACE_HEALTH_SCRIPT));
   await docker(["exec", container, node, `${program}/service/daemon.mjs`, "--stop"]);
   await assert.rejects(fixed(WORKSPACE_HEALTH_SCRIPT));
@@ -888,6 +985,88 @@ verification: try {
     ]),
   );
   assert.deepEqual(stoppedOwner, { actorAbsent: true, competingStatus: 0 });
+  await docker([
+    "exec",
+    container,
+    node,
+    "--input-type=module",
+    "-e",
+    `import fs from 'node:fs';import assert from 'node:assert/strict';const request=${JSON.stringify(requestsPath)},member=${JSON.stringify(membershipPath)};const snapshots=['accepted.json','input.json','input-identity.json'].map(name=>fs.readFileSync(request+'/'+name));fs.writeFileSync('/workspaces/project/retirement-release','release');await new Promise(done=>{const check=()=>{if(!fs.existsSync(request+'/input')&&!fs.existsSync(member)){for(const watcher of watchers)watcher.close();done()}};const watchers=[fs.watch(request,check),fs.watch('/home/agent/.local/state/moira/workspace-service/active-requests',check)];check()});for(const [index,name]of ['accepted.json','input.json','input-identity.json'].entries())assert.deepEqual(fs.readFileSync(request+'/'+name),snapshots[index]);const engine='/home/agent/.local/state/moira/workspace-service/engine/moira-op-'+${JSON.stringify(retainedId.slice(4).replaceAll("-", ""))};const result=JSON.parse(fs.readFileSync(engine+'/result.json'));assert.equal(result.state,'succeeded');assert.equal(result.inputSettled,true);assert.equal(fs.statSync(engine+'/stdout.log').size,${fullOutputBytes});assert.equal(fs.statSync(engine+'/stderr.log').size,${fullOutputBytes});assert.equal(fs.readFileSync('/workspaces/project/retirement-once','utf8'),'once\\n');`,
+  ]);
+  // Oversized legacy diagnostics and actual Node warnings pass through the
+  // newly started daemon's writer, never a host-side pathname rotation.
+  await docker([
+    "exec",
+    container,
+    node,
+    "-e",
+    `const fs=require('node:fs');const base='/home/agent/.local/state/moira/workspace-service';for(let i=0;i<${DAEMON_DIAGNOSTIC_FILE_COUNT};i++)fs.writeFileSync(base+'/'+(i?'daemon.log.'+i:'daemon.log'),Buffer.alloc(${DAEMON_DIAGNOSTIC_FILE_BYTES * 2},'d'),{mode:384});fs.writeFileSync('/tmp/daemon-warning-fixture.cjs',${JSON.stringify(`if(process.argv.includes('--owned-daemon')&&process.send){const send=process.send.bind(process);process.send=(message,...args)=>{const value=send(message,...args);if(message?.type==='workspace-service-ready')process.emitWarning('d'.repeat(${DAEMON_DIAGNOSTIC_FILE_BYTES * 4})+'packaged-daemon-warning-tail',{code:'PACKAGED_DAEMON_WARNING'});return value}}`)},{mode:384});`,
+  ]);
+  const restarted = JSON.parse(
+    await docker([
+      "exec",
+      "--env",
+      "NODE_OPTIONS=--require=/tmp/daemon-warning-fixture.cjs",
+      container,
+      node,
+      `${program}/service/daemon.mjs`,
+      "--start",
+    ]),
+  );
+  assert.notEqual(restarted.processId, previousGhOwner.processId);
+  await docker([
+    "exec",
+    container,
+    node,
+    "--input-type=module",
+    "-e",
+    `import fs from 'node:fs';const base='/home/agent/.local/state/moira/workspace-service';await new Promise(done=>{const check=()=>{for(let i=0;i<${DAEMON_DIAGNOSTIC_FILE_COUNT};i++){try{if(fs.readFileSync(base+'/'+(i?'daemon.log.'+i:'daemon.log')).includes(Buffer.from('packaged-daemon-warning-tail'))){watcher.close();done();return}}catch(error){if(error.code!=='ENOENT')throw error}}};const watcher=fs.watch(base,check);check()});`,
+  ]);
+  const boundedDiagnostics = await diagnosticSnapshot();
+  assert.equal(boundedDiagnostics.warning, true);
+  assert.equal(boundedDiagnostics.files.length, DAEMON_DIAGNOSTIC_FILE_COUNT);
+  for (const entry of boundedDiagnostics.files) {
+    assert.ok(entry.size <= DAEMON_DIAGNOSTIC_FILE_BYTES);
+    assert.equal(entry.mode, 0o600);
+    assert.equal(entry.nlink, 1);
+    assert.equal(entry.regular, true);
+  }
+  const retiredOriginal = JSON.parse(await cli("get", retained.operation)).structuredContent;
+  assert.equal(retiredOriginal.state, "completed");
+  assert.equal(retiredOriginal.outcome.ok, true);
+  for (const [stream, character] of [
+    ["stdout", "O"],
+    ["stderr", "E"],
+  ]) {
+    const output = JSON.parse(
+      await cli(
+        "output",
+        retained.process,
+        "--stream",
+        stream,
+        "--max-bytes",
+        String(fullOutputBytes),
+      ),
+    ).structuredContent;
+    assert.equal(output.total_bytes, fullOutputBytes);
+    assert.equal(output.text, character.repeat(fullOutputBytes));
+  }
+  const originalIntent = { command: { argv: retirementArgv }, background: true };
+  const replay = await semanticStream("command_run", originalIntent, retainedId, retainedInput);
+  assert.equal(replay.structuredContent.operation, retained.operation);
+  assert.equal(replay.structuredContent.state, "completed");
+  assert.equal(replay.structuredContent.outcome.ok, true);
+  const altered = await semanticStream(
+    "command_run",
+    originalIntent,
+    retainedId,
+    Buffer.from("changed original stdin"),
+  );
+  assert.equal(altered.isError, true);
+  assert.equal(altered.structuredContent.error.code, "REQUEST_ID_CONFLICT");
+  assert.equal(JSON.parse(await cli("read", "retirement-once")).structuredContent.text, "once\n");
+  await docker(["exec", container, node, `${program}/service/daemon.mjs`, "--stop"]);
+  await assert.rejects(fixed(WORKSPACE_HEALTH_SCRIPT));
   // A distinct disposable Local home/repository keeps the GitHub selector,
   // configuration and original journals intact; provider identity is never relabelled.
   activeHome = "/home/agent/local-owner";
@@ -1193,7 +1372,7 @@ verification: try {
     "const fs=require('node:fs'),assert=require('node:assert/strict');const c=JSON.parse(fs.readFileSync('/home/agent/.local/share/moira-workspace/config.json'));const observed=JSON.parse(fs.readFileSync('/home/agent/renewal-observed.json'));const original=JSON.parse(fs.readFileSync('/home/agent/.local/state/moira/workspace-service/renewal-'+c.environmentIdentity+'.json'));assert.deepEqual(observed,original);assert.equal(c.remote.credential,'z'.repeat(43));assert.equal(c.renewalPending,undefined)",
   ]);
   console.log(
-    "Verified pinned Linux payload, exclusive directory publication preserving occupied targets and refusing replaced stages, credential-free GitHub Unix readiness and later enrollment with unchanged owner PID/life and one continuing command, a genuinely changed guest life with unchanged persistent root/inode/sentinels and local-ready renewal through the same durable request, refusal to regenerate a never-enrolled original proof across life changes, single-owner locking, Local-only configuration and later live enrollment/publication, exact exit/output and binary files, immutable publications, packaged UTF-8 materialize tar, custom binary extension delivery and original-receipt collection, and PNG preview. Real GitHub provisioning, vendor delivery and native source networking were not exercised.",
+    "Verified pinned Linux payload, exclusive directory publication preserving occupied targets and refusing replaced stages, credential-free GitHub Unix readiness and later enrollment with unchanged owner PID/life and one continuing command, a genuinely changed guest life with unchanged persistent root/inode/sentinels and local-ready renewal through the same durable request, refusal to regenerate a never-enrolled original proof across life changes, single-owner locking with unchanged diagnostics on competing/unlocked entry, bounded daemon restart diagnostics and actual Node warnings, detached stdin retirement without owner collection while original identity and full stdout/stderr survive restart and same-original replay, Local-only configuration and later live enrollment/publication, exact exit/output and binary files, immutable publications, packaged UTF-8 materialize tar, custom binary extension delivery and original-receipt collection, and PNG preview. Real GitHub provisioning, vendor delivery and native source networking were not exercised.",
   );
 } catch (error) {
   // Imported application logging can handle uncaught exceptions; a failed

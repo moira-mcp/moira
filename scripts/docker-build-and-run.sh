@@ -214,8 +214,10 @@ done
 # Determine app host (localhost for local, remote IP for remote)
 if [ "$REMOTE_MODE" = "true" ]; then
     APP_HOST="$REMOTE_HOST"
+    DOCKER_BIND_ADDRESS="${DOCKER_BIND_ADDRESS:-0.0.0.0}"
 else
     APP_HOST="localhost"
+    DOCKER_BIND_ADDRESS="${DOCKER_BIND_ADDRESS:-127.0.0.1}"
 fi
 
 setup_docker_cmd
@@ -240,7 +242,7 @@ else
 fi
 echo "  Image: $DOCKER_IMAGE_NAME:latest"
 echo "  Container: $DOCKER_CONTAINER_NAME"
-echo "  Port: $DOCKER_PORT:80"
+echo "  Port: $DOCKER_BIND_ADDRESS:$DOCKER_PORT:80"
 echo "  App URL: http://$APP_HOST:$DOCKER_PORT"
 if [ "$ENABLE_RATE_LIMIT" = "true" ]; then
     echo "  Rate limiting: ENABLED"
@@ -341,7 +343,7 @@ fi
 
 # Build run command arguments
 RUN_ARGS=(
-    run --name "$DOCKER_CONTAINER_NAME" -p "$DOCKER_PORT:80"
+    run --name "$DOCKER_CONTAINER_NAME" -p "$DOCKER_BIND_ADDRESS:$DOCKER_PORT:80"
     --env-file "$ENV_FILE"
     -e MCP_PORT=3000
     -e WEB_BACKEND_PORT=3001

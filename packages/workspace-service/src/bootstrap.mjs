@@ -43,7 +43,7 @@ tar -tzf "$temporary/payload.tar.gz" >"$temporary/names"
 test -z "$(sort "$temporary/names" | uniq -d)"
 while IFS= read -r name; do
   case "$name" in /*|../*|*/../*|*/..|./*|*/./*|*//*) echo 'Unsafe workspace archive member' >&2; exit 1;; esac
-  case "$name" in runtime/|runtime/bin/|runtime/ripgrep/|service/|runtime/bin/node|runtime/bin/rg|runtime/LICENSE|runtime/ripgrep/LICENSE-MIT|runtime/ripgrep/UNLICENSE|runtime/ripgrep/COPYING|service/daemon.mjs|service/cli.mjs|service/local-bootstrap.mjs|service/guest-proxy.mjs|service/owner-renderer.mjs|service/extension-handler-host.mjs|service/process-group-helper|service/node_modules/|service/node_modules/*|service/fonts/|service/fonts/*|release.json) ;; *) echo 'Unsafe workspace archive member' >&2; exit 1;; esac
+  case "$name" in runtime/|runtime/bin/|runtime/ripgrep/|service/|runtime/bin/node|runtime/bin/rg|runtime/LICENSE|runtime/ripgrep/LICENSE-MIT|runtime/ripgrep/UNLICENSE|runtime/ripgrep/COPYING|service/daemon.mjs|service/cli.mjs|service/local-bootstrap.mjs|service/guest-proxy.mjs|service/owner-renderer.mjs|service/extension-handler-host.mjs|service/request-retirement.mjs|service/process-group-helper|service/node_modules/|service/node_modules/*|service/fonts/|service/fonts/*|release.json) ;; *) echo 'Unsafe workspace archive member' >&2; exit 1;; esac
 done <"$temporary/names"
 tar -tvzf "$temporary/payload.tar.gz" | awk 'substr($0,1,1)!="-"&&substr($0,1,1)!="d"{exit 1}'
 mkdir "$temporary/release"

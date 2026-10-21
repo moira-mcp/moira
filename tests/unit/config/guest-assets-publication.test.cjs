@@ -14,6 +14,7 @@ const entryPoints = {
   "guest-proxy": "packages/local/src/guest-proxy.ts",
   "owner-renderer": "packages/workspace-service/src/owner-renderer.mjs",
   "extension-handler-host": "packages/extension-runner/src/binary-handler-host.mjs",
+  "request-retirement": "packages/workspace-service/src/request-retirement.mjs",
 };
 
 describe("canonical guest asset publication", () => {
@@ -69,7 +70,7 @@ try {
       if (child.error) throw child.error;
       expect({ exit: child.status, stderr: child.stderr }).toEqual({ exit: 0, stderr: "" });
       const assets = JSON.parse(await readFile(outcome, "utf8"));
-      expect(assets).toHaveLength(6);
+      expect(assets).toHaveLength(Object.keys(entryPoints).length);
       for (const asset of assets) {
         expect(asset.retained).toBe(asset.original);
         expect(asset.currentInode).not.toBe(asset.originalInode);
@@ -139,6 +140,7 @@ await writeFile(process.argv[3], JSON.stringify({
         "guest-proxy.mjs",
         "local-bootstrap.mjs",
         "owner-renderer.mjs",
+        "request-retirement.mjs",
       ]);
       expect(observed.entries.sort()).toEqual([
         "cli.mjs",
@@ -148,6 +150,7 @@ await writeFile(process.argv[3], JSON.stringify({
         "local-bootstrap.mjs",
         "owner-renderer.mjs",
         "previous-daemon.mjs",
+        "request-retirement.mjs",
       ]);
       expect(observed.currentForeignInode).toBe(observed.foreignInode);
       expect(observed.foreign).toBe("foreign bytes");

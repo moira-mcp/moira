@@ -775,6 +775,14 @@ checked before source acquisition. Preparation can finish before the final locke
 session/repository gate rejects execution, so prepared input does not prove a command
 started. Collect the original no-start or uncertain outcome without fetching or launching again.
 
+The owner retains admission identity, input digest/metadata and the original result. A temporary
+native/stdin `input` file is removable only after a matching terminal result, settled input readers
+and exact file identity/content verification. The detached physical collector can complete this
+cleanup after its observer exits. Live or unknown work, conflicting file transactions, weak
+identity evidence, changed files and cleanup failures retain the input and recovery membership.
+Removing that temporary copy does not remove command stdout/stderr or make an original request
+eligible for execution again; collection and replay do not reacquire its source.
+
 The semantic projection reports `pending`, `completed`, `unconfirmed` or `absent`.
 Completed results contain `outcome: {ok,result/error}`; uncertainty retains the original observation.
 The engine separately retains actual running, terminal, proved `not_started` and unknown evidence.
@@ -1187,6 +1195,21 @@ credential digests and measured-life/generation bindings; clear credentials are 
 only by fixed bootstrap. Command/input/output/file journals live in the workspace.
 Token-free security acquisition receipts and PR receipts also belong to the owner;
 they retain original recovery IDs without persisting child tokens in project storage.
+
+The host controller's `controller-active-operations.json` tracks active or unresolved
+originals; a failed index removal can also retain a proved terminal member safely.
+Admission publishes membership before effects, and removes it only after durable terminal
+or custody-settlement proof. Initial guarded migration inventories retained originals once;
+routine pending-resource and custody checks read indexed originals, not the terminal archive.
+Missing or malformed indexed evidence refuses admission. Original receipts, prepared provider
+choices, enrollment proofs and unresolved archives remain retained; do not delete an index or
+journal to bypass a refusal. Guest recovery uses its own `active-requests/` membership and
+`active-requests.json` initialization marker with the same admission-before-effect ordering.
+
+Detached guest service diagnostics are separate from this evidence and command output. They live
+at `~/.local/state/moira/workspace-service/daemon.log`, `daemon.log.1` and `daemon.log.2`, each
+bounded to 1 MiB. See [LOGGING.md](LOGGING.md#guest-workspace-daemon-diagnostics) for ownership and
+rotation. Read full command streams through `process_output` or `moira-workspace output`.
 
 Historical SQL operation and transfer rows and companion receipts remain archival.
 They are not attached to execution, counted as active command work, imported into the

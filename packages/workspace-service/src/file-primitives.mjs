@@ -469,10 +469,27 @@ export async function cleanupStaged(staged) {
 }
 
 export async function writeDurableJson(directory, name, value) {
-  const parent = await openDirectory(directory);
+  const acquired = typeof directory === "string";
+  const parent = acquired ? await openDirectory(directory) : directory;
+  const verifyParent = async () => {
+    if (acquired) return;
+    const expected = await directoryIdentity(parent);
+    if (process.platform === "linux") return;
+    // Darwin descriptorPath uses the guarded named path. A caller-owned FD
+    // must not grant authority over a replacement at that path.
+    if (!parent.moiraPath) failFile("unsafe_access", "directory capability has no named path");
+    const named = await openDirectory(parent.moiraPath);
+    try {
+      if (!sameDirectoryIdentity(expected, await directoryIdentity(named)))
+        failFile("concurrent_change", "durable JSON parent identity changed");
+    } finally {
+      await named.close();
+    }
+  };
   const temporaryName = `.${name}.${randomBytes(8).toString("hex")}.tmp`;
   const temporary = descriptorPath(parent, temporaryName);
   try {
+    await verifyParent();
     const handle = await open(
       temporary,
       constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
@@ -484,11 +501,16 @@ export async function writeDurableJson(directory, name, value) {
     } finally {
       await handle.close();
     }
+    await verifyParent();
     await rename(temporary, descriptorPath(parent, name));
     await syncDirectory(parent);
   } finally {
-    await rm(temporary, { force: true });
-    await parent.close();
+    try {
+      await verifyParent();
+      await rm(temporary, { force: true });
+    } finally {
+      if (acquired) await parent.close();
+    }
   }
 }
 

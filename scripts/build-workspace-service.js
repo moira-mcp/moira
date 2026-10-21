@@ -12,6 +12,7 @@ export async function buildWorkspaceService(output = "packages/workspace-service
     "guest-proxy": "packages/local/src/guest-proxy.ts",
     "owner-renderer": "packages/workspace-service/src/owner-renderer.mjs",
     "extension-handler-host": "packages/extension-runner/src/binary-handler-host.mjs",
+    "request-retirement": "packages/workspace-service/src/request-retirement.mjs",
   };
   for (const [entry, entryPoint] of Object.entries(entries)) {
     const result = await build({

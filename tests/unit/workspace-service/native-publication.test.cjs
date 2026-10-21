@@ -336,6 +336,10 @@ test("semantic native stdin retains exact binary input and original command outp
     outcome: { ok: true, result: { exitCode: 0, stdoutBytes: digest.length } },
   });
   expect(readFileSync(join(value.root, "native-stdin.bin"))).toEqual(value.sourceBytes);
+  expect(existsSync(join(value.stateRoot, "requests", requestId, "input"))).toBe(false);
+  expect(
+    JSON.parse(readFileSync(join(value.stateRoot, "requests", requestId, "input.json"), "utf8")),
+  ).toEqual({ size: value.sourceBytes.length, sha256: digest });
   value.sourceMode = "refused";
   await stop(value);
   await start(value);

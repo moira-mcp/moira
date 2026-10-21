@@ -2,7 +2,8 @@
 
 ## RULE: console.log/console.error ARE FORBIDDEN
 
-**ALL logs go ONLY through the logger from @mcp-moira/shared!**
+**Application logs use the logger from @mcp-moira/shared.** The independently packaged guest
+workspace daemon uses the owned diagnostic sink described below.
 
 The ESLint rule `no-console: "error"` blocks `console.*` in production code.
 
@@ -13,6 +14,32 @@ Exceptions (eslint overrides):
 - Files with `/* eslint-disable no-console */`:
   - CLI tools (MCP server cli.ts)
   - Frontend files for browser debugging (error boundaries, API errors, theme/layout persistence)
+
+## Guest workspace daemon diagnostics
+
+The detached workspace daemon writes to
+`~/.local/state/moira/workspace-service/daemon.log`, `daemon.log.1` and `daemon.log.2` inside the
+guest. Each file is bounded to 1 MiB. The synchronous writer rotates while writing and bounds
+existing oversized files on restart; its stdout, stderr and Node warnings use that same sink.
+Foreground CLI responses are unchanged.
+
+The daemon must prove its inherited kernel lock and descriptor identity before opening diagnostics.
+The state directory is private and owned; log files must be ordinary owned files with no symlink
+or hard-link substitution. A competing owner cannot modify them. An unsafe entry or writer failure
+refuses service rather than falling back to unbounded inherited stdout/stderr.
+
+These files contain service diagnostics. Command stdout/stderr, accepted-operation identity,
+input comparison metadata, terminal results and unresolved custody evidence are not rotated by
+this sink. Use `process_output` with the returned process reference, or the guest CLI:
+
+```bash
+moira-workspace output "$PROCESS_REF" --stream stdout
+moira-workspace output "$PROCESS_REF" --stream stderr
+```
+
+Preserve owner journals and unresolved input when diagnosing failure; deleting them can destroy
+the evidence needed to refuse replay. See [CODESPACES.md](CODESPACES.md#direct-operations) for
+terminal input cleanup.
 
 ## Using the Logger
 

@@ -6,6 +6,7 @@ import {
   controllerRequestIdSchema,
   controllerOperationDescriptorSchema,
   controllerOperationFindSchema,
+  controllerOperationSchema,
   githubControllerResourceSchema,
   githubPreparedCreateSchema,
   githubProvisionProofSchema,
@@ -18,7 +19,7 @@ import {
 } from "../../shared/src/codespaces/local-controller-protocol.js";
 import { LocalRecords, type LocalSpace } from "./space-record.js";
 import { LocalRefusal } from "./policy.js";
-import { scopedCredentialFailureOutcome } from "../../shared/src/codespaces/scoped-credential-types.js";
+import { operationState } from "../../shared/src/codespaces/workspace-operation-state.mjs";
 import { processCustodyWitnessSchema, type ProcessCustodyWitness } from "./process-custody.js";
 
 export const controllerBindingSchema = controllerIdentitySchema
@@ -31,6 +32,15 @@ export const controllerBindingSchema = controllerIdentitySchema
     localSpaceId: z.string().uuid().nullable(),
     localGeneration: z.number().int().positive().nullable(),
     creationClosed: z.boolean().default(false),
+  })
+  .strict();
+const activeIndexKey = "controller-active-operations.json";
+const activeIndexSchema = z
+  .object({
+    version: z.literal(1),
+    requestIds: z
+      .array(controllerRequestIdSchema)
+      .refine((ids) => new Set(ids).size === ids.length, "Duplicate active controller operation"),
   })
   .strict();
 export type ControllerBinding = z.infer<typeof controllerBindingSchema>;
@@ -75,6 +85,7 @@ const operationSchema = z
       .optional(),
   })
   .strict();
+type OperationRecord = z.infer<typeof operationSchema>;
 const sameIdentity = (left: ControllerIdentity, right: ControllerIdentity) =>
   (["userId", "deviceId", "deviceGeneration", "connectionId"] as const).every(
     (key) => left[key] === right[key],
@@ -90,9 +101,74 @@ export class ControllerState {
     this.tail = work;
     return work;
   }
+  private unresolved(entry: OperationRecord): boolean {
+    const outcome = controllerOperationSchema.shape.outcome.safeParse(entry.outcome);
+    return (
+      entry.state === "accepted" ||
+      !outcome.success ||
+      !outcome.data ||
+      operationState({ state: entry.state, outcome: outcome.data }) === "unconfirmed"
+    );
+  }
+  private async indexedOriginal(requestId: string): Promise<OperationRecord> {
+    const entry = await this.records.state.read(
+      `controller-operation-${requestId}.json`,
+      operationSchema.parse,
+    );
+    if (!entry || entry.requestId !== requestId)
+      throw new LocalRefusal(
+        "LOCAL_STATE_UNSAFE",
+        "An indexed original controller operation is missing or has changed identity.",
+      );
+    return entry;
+  }
+  /** Called inside the existing owner lane; the first inventory precedes admission. */
+  private async activeOriginals() {
+    let index = await this.records.state.read(activeIndexKey, activeIndexSchema.parse);
+    if (!index) {
+      const requestIds: string[] = [];
+      for (const key of await this.records.state.keys("controller-operation-")) {
+        const requestId = controllerRequestIdSchema.parse(
+          key.slice("controller-operation-".length, -".json".length),
+        );
+        if (this.unresolved(await this.indexedOriginal(requestId))) requestIds.push(requestId);
+      }
+      index = { version: 1, requestIds: requestIds.sort() };
+      await this.records.state.write(activeIndexKey, index);
+    }
+    return {
+      index,
+      originals: await Promise.all(index.requestIds.map((id) => this.indexedOriginal(id))),
+    };
+  }
+  /** Membership before admission, original proof before retirement; failure leaves a surplus. */
+  private async writeOriginal(entry: OperationRecord): Promise<void> {
+    const { index } = await this.activeOriginals();
+    if (!index.requestIds.includes(entry.requestId)) {
+      index.requestIds.push(entry.requestId);
+      index.requestIds.sort();
+      await this.records.state.write(activeIndexKey, index);
+    }
+    await this.records.state.write(`controller-operation-${entry.requestId}.json`, entry);
+    if (!this.unresolved(entry))
+      await this.records.state.write(activeIndexKey, {
+        version: 1,
+        requestIds: index.requestIds.filter((id) => id !== entry.requestId),
+      });
+  }
   async importBindings(identity: ControllerIdentity): Promise<void> {
     identity = controllerIdentitySchema.parse(identity);
     // The companion already holds the native private-state runner gate.
+    await this.serial(() => this.activeOriginals());
+    if (
+      await this.records.state.read("controller-legacy-archive.json", (value) =>
+        z
+          .object({ version: z.literal(1), keys: z.array(z.string()) })
+          .strict()
+          .parse(value),
+      )
+    )
+      return;
     for (const key of await this.records.state.keys("relay-space-")) {
       const old = await this.records.state.read(key, (value) =>
         z
@@ -138,19 +214,17 @@ export class ControllerState {
     }
     // Retain every legacy byte in place, isolated from the new dispatcher. This marker
     // records the inventory; no old intent or accepted receipt is converted to runnable work.
-    if (!(await this.records.state.read("controller-legacy-archive.json", (value) => value))) {
-      const keys = (
-        await Promise.all(
-          ["relay-space-", "lifecycle-", "request-", "result-"].map((prefix) =>
-            this.records.state.keys(prefix),
-          ),
-        )
-      ).flat();
-      await this.records.state.write("controller-legacy-archive.json", {
-        version: 1,
-        keys: [...new Set(keys)].sort(),
-      });
-    }
+    const keys = (
+      await Promise.all(
+        ["relay-space-", "lifecycle-", "request-", "result-"].map((prefix) =>
+          this.records.state.keys(prefix),
+        ),
+      )
+    ).flat();
+    await this.records.state.write("controller-legacy-archive.json", {
+      version: 1,
+      keys: [...new Set(keys)].sort(),
+    });
   }
   async binding(
     resourceId: string,
@@ -236,8 +310,8 @@ export class ControllerState {
     resourceId: string,
     activeRequestIds: ReadonlySet<string>,
   ): Promise<void> {
-    for (const key of await this.records.state.keys("controller-operation-")) {
-      const entry = await this.records.state.read(key, operationSchema.parse);
+    const entries = await this.serial(async () => (await this.activeOriginals()).originals);
+    for (const entry of entries) {
       if (
         !entry ||
         entry.resourceId !== resourceId ||
@@ -277,7 +351,15 @@ export class ControllerState {
       `controller-operation-${requestId}.json`,
       operationSchema.parse,
     );
-    if (!entry) return { requestId, state: "absent" };
+    if (!entry) {
+      const index = await this.records.state.read(activeIndexKey, activeIndexSchema.parse);
+      if (index?.requestIds.includes(requestId))
+        throw new LocalRefusal(
+          "LOCAL_STATE_UNSAFE",
+          "An indexed original controller operation is missing; absence is not confirmed.",
+        );
+      return { requestId, state: "absent" };
+    }
     if (!sameIdentity(entry.identity, identity))
       throw new LocalRefusal("LOCAL_UNAUTHORIZED", "Operation belongs to another authority.");
     return {
@@ -298,6 +380,7 @@ export class ControllerState {
     const operations = [];
     const keys = (await this.records.state.keys("controller-operation-")).sort();
     for (const key of keys) {
+      if (selection.cursor && key <= `controller-operation-${selection.cursor}.json`) continue;
       const entry = await this.records.state.read(key, operationSchema.parse);
       if (
         !entry ||
@@ -336,7 +419,7 @@ export class ControllerState {
           "LOCAL_REPLAY_CONFLICT",
           "Only the original accepted owner operation may enter a physical phase.",
         );
-      await this.records.state.write(key, operationSchema.parse({ ...entry, phase }));
+      await this.writeOriginal(operationSchema.parse({ ...entry, phase }));
     });
   }
   async recordGitHubPreparedCreate(
@@ -388,7 +471,7 @@ export class ControllerState {
           "LOCAL_REPLAY_CONFLICT",
           "Original GitHub preparation cannot change or be attached to another operation.",
         );
-      await this.records.state.write(key, operationSchema.parse({ ...entry, [field]: value }));
+      await this.writeOriginal(operationSchema.parse({ ...entry, [field]: value }));
     });
   }
   async githubSetupProof(
@@ -458,7 +541,7 @@ export class ControllerState {
         prior?.ok === false && /^[A-Z][A-Z0-9_]{1,79}$/.test(prior.error.code)
           ? ` Original diagnostic: ${prior.error.code}.`
           : "";
-      await this.records.state.write(key, {
+      await this.writeOriginal({
         ...entry,
         state: "completed",
         originalOutcome: entry.originalOutcome ?? entry.outcome,
@@ -506,7 +589,7 @@ export class ControllerState {
           "LOCAL_CUSTODY_UNCONFIRMED",
           "A physical process witness cannot be replaced or reused.",
         );
-      await this.records.state.write(key, {
+      await this.writeOriginal({
         ...entry,
         custody: { securityRequestId, witnesses: [...witnesses, witness] },
       });
@@ -550,7 +633,7 @@ export class ControllerState {
         prior?.ok === false && /^[A-Z][A-Z0-9_]{1,79}$/.test(prior.error.code)
           ? ` Original diagnostic: ${prior.error.code}.`
           : "";
-      await this.records.state.write(key, {
+      await this.writeOriginal({
         ...entry,
         state: "completed",
         originalOutcome: entry.originalOutcome ?? entry.outcome,
@@ -572,23 +655,10 @@ export class ControllerState {
   }
   async pendingResources(identity: ControllerIdentity): Promise<Map<string, string[]>> {
     const result = new Map<string, string[]>();
-    for (const key of await this.records.state.keys("controller-operation-")) {
-      const entry = await this.records.state.read(key, operationSchema.parse);
+    const entries = await this.serial(async () => (await this.activeOriginals()).originals);
+    for (const entry of entries) {
       if (!entry || !entry.resourceId || !sameIdentity(entry.identity, identity)) continue;
-      if (entry.state === "completed") {
-        const outcome = entry.outcome as ControllerOperation["outcome"];
-        if (
-          !outcome ||
-          outcome.ok ||
-          (![
-            "WORKSPACE_OUTCOME_UNCONFIRMED",
-            "WORKSPACE_OUTCOME_UNKNOWN",
-            "LOCAL_CUSTODY_UNCONFIRMED",
-          ].includes(outcome.error.code) &&
-            scopedCredentialFailureOutcome(outcome.error.code) !== "unconfirmed")
-        )
-          continue;
-      }
+      if (!this.unresolved(entry)) continue;
       const requests = result.get(entry.resourceId) ?? [];
       requests.push(entry.requestId);
       result.set(entry.resourceId, requests);
@@ -684,7 +754,7 @@ export class ControllerState {
             createdAt: Date.now(),
           })
         : undefined;
-      await this.records.state.write(`controller-operation-${requestId}.json`, {
+      await this.writeOriginal({
         requestId,
         digest,
         identity,
@@ -721,22 +791,25 @@ export class ControllerState {
         )
         .then(async (outcome) => {
           try {
-            const accepted = await this.records.state.read(
-              `controller-operation-${requestId}.json`,
-              operationSchema.parse,
-            );
-            await this.records.state.write(`controller-operation-${requestId}.json`, {
-              requestId,
-              digest,
-              identity,
-              ...projection,
-              state: "completed",
-              outcome,
-              ...(accepted?.phase ? { phase: accepted.phase } : {}),
-              ...(accepted?.custody ? { custody: accepted.custody } : {}),
-              ...(accepted?.descriptor ? { descriptor: accepted.descriptor } : {}),
-              ...(accepted?.preparedCreate ? { preparedCreate: accepted.preparedCreate } : {}),
-              ...(accepted?.enrollmentProof ? { enrollmentProof: accepted.enrollmentProof } : {}),
+            await this.serial(async () => {
+              const accepted = await this.records.state.read(
+                `controller-operation-${requestId}.json`,
+                operationSchema.parse,
+              );
+              await this.writeOriginal({
+                requestId,
+                digest,
+                identity,
+                ...projection,
+                state: "completed",
+                outcome,
+                ...(accepted?.phase ? { phase: accepted.phase } : {}),
+                ...(accepted?.custody ? { custody: accepted.custody } : {}),
+                ...(accepted?.descriptor ? { descriptor: accepted.descriptor } : {}),
+                ...(accepted?.preparedCreate ? { preparedCreate: accepted.preparedCreate } : {}),
+                ...(accepted?.enrollmentProof ? { enrollmentProof: accepted.enrollmentProof } : {}),
+                ...(accepted?.originalOutcome ? { originalOutcome: accepted.originalOutcome } : {}),
+              });
             });
           } catch {
             // The effect already ran. Publishing/fsync failure cannot become a refusal,

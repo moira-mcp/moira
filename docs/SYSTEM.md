@@ -802,6 +802,32 @@ translation, replay or active-command accounting. Binding migration preserves ex
 grants and disks without executing archived intents. Commands, output and file transaction
 receipts belong to workspace storage, not a cloud queue/result store.
 
+Host `ControllerState` serializes durable writes to its versioned
+`controller-active-operations.json` index with the original receipt. Membership is persisted before
+admission/effects; removal follows a durable terminal result and any required custody settlement.
+Guarded initialization inventories existing originals once. Routine pending-resource lookup and
+GitHub custody checks inspect indexed originals instead of scanning terminal history. Missing or
+malformed indexed originals fail closed. Validated legacy-import completion avoids rescanning its
+archive without treating unresolved legacy custody as settled. Explicit historical discovery filters
+request filenames by cursor before parsing records; exact collection still reads the original.
+Re-enrollment preserves foreign-principal records without granting current access to them.
+
+Guest recovery uses `active-requests/` and the versioned `active-requests.json` initialization
+marker. `request-retirement.mjs` is shared by the Unix owner and detached physical collector.
+Membership precedes `accepted.json`; commands require a terminal result matching the admission
+digest, while file mutations require a terminal result and settled transaction journals before
+removal. Identity/digest/input metadata and original results remain durable. Only a temporary raw
+native/stdin input is removable after reader settlement and exact inode, timestamps, size and hash
+verification. A retained retirement intent makes a confirmed prior unlink idempotent. Unknown/live
+work, unresolved file transactions, substituted input, insufficient identity and cleanup failure
+preserve input and membership. No generic TTL deletes original receipts or custody witnesses;
+complete command stdout/stderr remain outside this cleanup.
+
+The durable JSON publisher accepts a path or an already-held directory capability. A borrowed
+capability remains open for its caller; Linux publication stays relative to that descriptor, while
+Darwin additionally rejects a changed named directory. This lets admission and retirement share
+the existing atomic write/fsync primitive without reopening a descriptor-root path.
+
 The backend router holds ephemeral authenticated CONTROL/DATA connections. The remote
 adapter uses `moira-workspace/2` with distinct controller/workspace endpoint kinds and
 opens outbound HTTPS Upgrade CONTROL with bounded call IDs; per-call DATA pipes

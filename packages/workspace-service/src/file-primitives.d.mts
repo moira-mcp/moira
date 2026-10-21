@@ -136,7 +136,11 @@ export function stageStream(
   marker: string,
 ): Promise<StagedFile>;
 export function cleanupStaged(staged: StagedFile[]): Promise<Error | null>;
-export function writeDurableJson(directory: string, name: string, value: unknown): Promise<void>;
+export function writeDurableJson(
+  directory: string | ConfinedFileHandle,
+  name: string,
+  value: unknown,
+): Promise<void>;
 export function commitStaged(
   staged: StagedFile[],
   marker: string,

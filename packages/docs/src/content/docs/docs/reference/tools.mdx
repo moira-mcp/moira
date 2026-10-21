@@ -305,6 +305,10 @@ guest restart. File changes use confined descriptors, checked originals and atom
 interrupted recovery preserves uncertainty and foreign changes.
 
 Native input streams directly to the owner without base64 or cloud attachment storage.
+Operation identity, input digest/comparison metadata and original results remain retained.
+After a matching terminal result and settled readers, the owner can remove a verified temporary
+native/stdin copy; live, unknown or conflicting work retains it. Complete command output remains,
+and collection neither reacquires that source nor repeats the action.
 Repository authority is checked before acquisition, and final owner admission can still refuse
 prepared input. File/output continuation preserves complete UTF-8 characters. Binary files require
 download rather than lossy text decoding. Download returns an immutable resource link and
@@ -332,6 +336,10 @@ selection. `native-upload`, `exec --native-stdin` and `deliver --native` read th
 descriptor from stdin, never argv. Files and PRs use checked references and meaningful
 parameters; publication and delivery remain distinct. Local-only execution does not require cloud enrollment,
 but cloud collection still needs a registered authorized owner.
+Detached guest daemon diagnostics rotate separately in
+`~/.local/state/moira/workspace-service/daemon.log`, `daemon.log.1` and `daemon.log.2`, each bounded
+to 1 MiB. This does not trim command stdout/stderr; use the returned process reference and
+`output` or `process_output` for those full streams.
 Installation through the common image or Feature is described in
 [self-hosting](/docs/getting-started/self-hosting/#connect-local-codespaces).
 

@@ -167,6 +167,8 @@ npm run test:unit -- --file tests/unit/workspace-service/service.test.cjs
 npm run test:unit -- --file tests/unit/workspace-service/semantic-owner.test.cjs
 npm run test:unit -- --file tests/unit/workspace-service/cli-native.test.cjs
 npm run test:unit -- --file tests/unit/workspace-service/native-publication.test.cjs
+npm run test:unit -- --file tests/unit/workspace-service/retention.test.cjs
+npm run test:unit -- --file tests/unit/workspace-service/daemon-diagnostics.test.cjs
 npm run test:unit -- --file tests/unit/local/controller.test.ts
 npm run test:unit -- --file tests/unit/local/controller-state.test.ts
 npm run test:integration -- --file tests/integration/workspace-router.test.ts
@@ -196,6 +198,23 @@ and actual command completion are distinguished from missing owner proof; surviv
 child or descendant effects after a response retain uncertainty. Cancellation never
 grants signal authority to a saved foreign PID. Storage faults observe directory/output
 sync errors before durable success.
+
+Retention fixtures inspect the real request directory and detached collector. Terminal native/stdin
+input is removed after physical reader settlement even when the observer has exited; original
+admission, input comparison metadata, result and complete stdout/stderr remain. Reopening and
+collecting or repeating the original identity neither reacquires input nor launches another effect.
+Live/unknown commands, file conflicts, weak or substituted identity and cleanup failure retain
+input and recovery membership. Guarded migration and filesystem read traps distinguish active
+lookup from a scan of terminal history; missing/corrupt indexes and orphan admissions refuse.
+The durable publisher case holds a directory capability across a named-path replacement, preserves
+the caller's open handle and excludes writes to the substitute directory.
+
+Daemon diagnostics cases exercise the actual rotating writer, oversized writes and restart,
+private-file checks, Node warnings and fatal sink failure without an inherited output fallback.
+These bounded service diagnostics do not impose a command-output retention limit.
+Host controller-state cases separately observe durable membership before effects, terminal and
+custody proof before removal, restart/replay and preservation of prepared provider/enrollment data.
+Routine pending/custody lookup is tested with terminal-history reads forbidden.
 
 Semantic owner and CLI cases use purpose-specific inputs and returned operation/process/file
 references over that same socket. They distinguish a concurrent text or inode replacement from
@@ -346,6 +365,10 @@ reconnection and later configuration reload into the same owner without replayin
 The verifier uses the ordinary semantic CLI and tools, checked text references, complete UTF-8
 windows and binary streaming. Native source networking, real GitHub provisioning and actual vendor
 delivery are outside this network-disabled check. The pinned image must already exist locally.
+The assembled daemon scenarios also check competing-owner refusal without diagnostic modification,
+bounded diagnostics across restart, captured Node warnings and input retirement by the detached
+collector while the daemon is absent. Full stdout/stderr and compact original evidence survive;
+recollection and original-identity replay produce no additional command effect.
 Container compatibility and `npm run verify:docker` do not establish physical sbx
 ownership or host/LAN/VPN/metadata/other-VM isolation.
 

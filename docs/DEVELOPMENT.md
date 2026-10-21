@@ -43,6 +43,8 @@ npm run workspace:verify:guest
 `local:build` emits the CLI, independent guard, fixed runtime API, configuration bundle,
 native ownership/credential helpers and verified workspace payload under `packages/local/dist`.
 Do not copy a single JavaScript entry without its companion assets.
+The guest payload includes `request-retirement.mjs`, shared by the owner and detached collector;
+keep it with the complete built release so terminal input cleanup works after an observer exits.
 `workspace:verify:guest` packages the common Linux service and exercises actual installation,
 startup acknowledgment, Unix health/CLI, binary files, repository ownership and shutdown in an
 offline container. It is not proof of microVM isolation or physical SDK lifecycle.
@@ -56,6 +58,12 @@ Keep initialized companion state, SDK HOME/storage/profile, credentials,
 grants and VM disks at their existing paths. Do not copy stale ignored worker outputs as release assets.
 Host runtime validation requires the supported macOS SDK and locally approved
 state. Linux VM execution fails closed before creation.
+
+Keep runtime/configuration in the existing ignored local layout. Do not clear controller or guest
+active indexes, original receipts or unknown archives to recover a fixture or installed owner.
+Terminal cleanup removes only proved temporary input bulk; immutable comparison evidence,
+original results and full command output remain. Guest daemon diagnostic rotation is separate;
+its locations and bounds are documented in [LOGGING.md](LOGGING.md#guest-workspace-daemon-diagnostics).
 
 The common workspace service owns ordinary command/file/session execution in both providers.
 The Local controller owns physical lifecycle/settings through private Unix HTTP and live routing;
@@ -299,6 +307,11 @@ an ignore entry in the same change that proves its replacement passes the
 corresponding removal trigger above.
 
 ### Docker Build Configuration
+
+`scripts/docker-build-and-run.sh` publishes local development ports on `127.0.0.1` by default.
+Set `DOCKER_BIND_ADDRESS` explicitly when another binding is required; remote deployment keeps
+its public binding. `scripts/verify-docker.sh` creates fresh self-host container storage rather
+than deleting a shared host data directory for authentication fixtures.
 
 **Build IDs for cache isolation:**
 

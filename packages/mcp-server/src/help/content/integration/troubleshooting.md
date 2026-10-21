@@ -380,10 +380,20 @@ distinct intentions. An uncontrolled first reply has no automatic deduplication 
 
 The guest owns command receipts and retained stdout/stderr. Collection requires
 the service and retained guest data; cloud storage does not provide a second copy.
+Operation identity, input digest/comparison metadata and original results remain retained.
+Only a verified temporary native/stdin copy can be removed after a matching terminal result
+and settled input readers; live, unknown or conflicting work retains it. Collection does not
+reacquire the source or repeat the action.
 A cloud disconnect does not cancel a guest command. VM shutdown, provider idle stop
 or reboot can interrupt it. Missing or archived legacy receipts are not replayed.
 Preserve existing UNKNOWN records for diagnosis rather than importing their IDs into
 the new namespace. Explicit command deadlines and client wait bounds are separate.
+
+Guest daemon diagnostics are in `~/.local/state/moira/workspace-service/daemon.log`,
+`daemon.log.1` and `daemon.log.2`, each bounded to 1 MiB. Their rotation does not trim command
+stdout/stderr. Read complete command streams with `process_output` or
+`moira-workspace output "$PROCESS_REF" --stream stdout` (use `stderr` for that stream).
+Preserve journals and unresolved input when diagnosing an owner failure.
 
 Workspace routing for both GitHub Codespaces and Local requires a live, already prepared and
 enrolled owner service. Start the resource and complete its provider preparation explicitly

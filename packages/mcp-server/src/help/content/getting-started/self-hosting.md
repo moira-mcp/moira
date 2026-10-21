@@ -459,7 +459,12 @@ Copy returned operation/process references; use `operation_get`, `process_output
 `operation_find` and candidate selection. Identical deliberate calls are distinct intents;
 absence or unavailability is not proof of non-execution.
 
-The guest retains results and complete output on its disk. Cloud Moira routes live authorized
+The guest retains results and complete output on its disk. Operation identity, input digest and
+comparison metadata remain retained even when the owner removes a verified temporary native/stdin
+copy after a matching terminal result and settled readers. Live, unknown or conflicting work
+retains that input.
+Collection does not reacquire the source or execute the operation again.
+Cloud Moira routes live authorized
 requests without an offline queue or separate result store. Observation loss does not cancel
 commands; provider stop can interrupt them. Explicit `timeout_seconds` and observation windows
 remain, alongside physical storage and repository/owner guards. Cancellation is not confirmed
@@ -499,6 +504,10 @@ The CLI returns the same semantic operation, process and checked-file references
 Each deliberate mutation is a new intent; `get` collects and `find` discovers retained originals.
 Do not choose request IDs or replay after a lost reply. CLI create/replace/patch use absent-target,
 complete-text or checked-file preconditions. Native descriptors are read from stdin.
+Guest daemon diagnostics rotate separately at
+`~/.local/state/moira/workspace-service/daemon.log`, `daemon.log.1` and `daemon.log.2`, each
+bounded to 1 MiB. Rotation does not trim command stdout/stderr; use the returned process
+reference with `output` or `process_output` to read those full streams.
 The public image is `ghcr.io/moira-mcp/moira-workspace-service`; the optional Feature is
 `ghcr.io/moira-mcp/features/workspace-service`. Choose a published release tag. Both use the
 same payload and support glibc x64/arm64 and a repository owned by the service user, including

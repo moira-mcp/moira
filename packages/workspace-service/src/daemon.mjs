@@ -22,6 +22,7 @@ import { request } from "node:http";
 import { pathToFileURL, fileURLToPath, URL } from "node:url";
 import { startWorkspaceService } from "./server.mjs";
 import { createWorkspaceEngine } from "./engine.mjs";
+import { openDaemonDiagnostics } from "./daemon-diagnostics.mjs";
 import { startWorkspaceRemote, WorkspaceAuthorityRefusal } from "./remote.ts";
 import { validatedInstalledProxy } from "./tls-transport.mjs";
 import { originalGitOrigin, configureOwnerGit } from "./github-config.mjs";
@@ -598,6 +599,31 @@ async function stopOwnedService() {
   while (await identity()) await new Promise((done) => setTimeout(done, 25));
 }
 
+// This descriptor proof is available before publishing the owner receipt and before touching logs.
+async function ownsDaemonLock() {
+  if (process.platform !== "linux") return false;
+  try {
+    const descriptor = await stat("/proc/self/fd/4");
+    const named = await lstat(join(stateRoot, "daemon.lock"));
+    if (
+      !named.isFile() ||
+      named.isSymbolicLink() ||
+      named.nlink !== 1 ||
+      named.uid !== process.getuid() ||
+      named.mode & 0o077 ||
+      descriptor.dev !== named.dev ||
+      descriptor.ino !== named.ino
+    )
+      return false;
+    const info = await readFile("/proc/self/fdinfo/4", "utf8");
+    return info
+      .split("\n")
+      .some((line) => /^lock:\s+\S+:\s+FLOCK\s+ADVISORY\s+WRITE\s+/.test(line));
+  } catch {
+    return false;
+  }
+}
+
 async function serve() {
   let config = await privateJson(configurationPath);
   const release = await releaseIdentity();
@@ -635,24 +661,7 @@ async function serve() {
         owner.program !== fileURLToPath(import.meta.url)
       )
         return false;
-      // startOwnedService passes the daemon.lock descriptor as FD4 through the
-      // fixed shell's flock+exec. fdinfo reports locks of this open description.
-      const descriptor = await stat("/proc/self/fd/4");
-      const named = await lstat(join(stateRoot, "daemon.lock"));
-      if (
-        !named.isFile() ||
-        named.isSymbolicLink() ||
-        named.nlink !== 1 ||
-        named.uid !== process.getuid() ||
-        named.mode & 0o077 ||
-        descriptor.dev !== named.dev ||
-        descriptor.ino !== named.ino
-      )
-        return false;
-      const info = await readFile("/proc/self/fdinfo/4", "utf8");
-      return info
-        .split("\n")
-        .some((line) => /^lock:\s+\S+:\s+FLOCK\s+ADVISORY\s+WRITE\s+/.test(line));
+      return ownsDaemonLock();
     } catch {
       return false;
     }
@@ -804,11 +813,11 @@ async function serve() {
     const ready = await health();
     if (ready.releaseIdentity !== release)
       throw new Error("Workspace service release is not current");
-    if (process.connected)
-      process.send({ type: "workspace-service-ready", health: ready }, () => {});
     process.stdout.write(
       `${JSON.stringify({ workspaceService: "ready", releaseIdentity: release })}\n`,
     );
+    if (process.connected)
+      process.send({ type: "workspace-service-ready", health: ready }, () => {});
   } catch (error) {
     const cleanup = await Promise.allSettled([
       remote?.close(),
@@ -853,10 +862,7 @@ async function startOwnedService(foreground = false) {
     }
   };
   const lock = await ownedFile(join(stateRoot, "daemon.lock"), constants.O_RDWR);
-  let log;
   try {
-    if (!foreground)
-      log = await ownedFile(join(stateRoot, "daemon.log"), constants.O_WRONLY | constants.O_APPEND);
     // The fixed shell claims the inherited descriptor, then execs the daemon
     // while preserving the private IPC channel and held kernel lock. The
     // controller waits for actual readiness or child failure, then leaves this
@@ -865,7 +871,9 @@ async function startOwnedService(foreground = false) {
       "/bin/sh",
       [
         "-c",
-        '/usr/bin/flock --exclusive --nonblock 4 || exit $?; exec "$1" "$2"',
+        foreground
+          ? '/usr/bin/flock --exclusive --nonblock 4 || exit $?; exec "$1" "$2"'
+          : '/usr/bin/flock --exclusive --nonblock 4 || exit $?; exec "$1" "$2" --owned-daemon',
         "sh",
         process.execPath,
         fileURLToPath(import.meta.url),
@@ -874,7 +882,7 @@ async function startOwnedService(foreground = false) {
         detached: !foreground,
         stdio: foreground
           ? ["ignore", "inherit", "inherit", "ipc", lock.fd]
-          : ["ignore", log.fd, log.fd, "ipc", lock.fd],
+          : ["ignore", "ignore", "ignore", "ipc", lock.fd],
         env: process.env,
       },
     );
@@ -908,14 +916,20 @@ async function startOwnedService(foreground = false) {
     }
     return result;
   } finally {
-    await log?.close();
     await lock.close();
   }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  let diagnostics;
   try {
-    if (process.argv[2] === "--github-proof") {
+    if (process.argv[2] === "--owned-daemon") {
+      if (!(await ownsDaemonLock())) throw new Error("Workspace daemon lock is not held");
+      diagnostics = openDaemonDiagnostics(stateRoot);
+      diagnostics.redirectStandardStreams();
+      process.once("exit", () => diagnostics.close());
+      await serve();
+    } else if (process.argv[2] === "--github-proof") {
       const chunks = [];
       for await (const chunk of process.stdin) chunks.push(chunk);
       const input = JSON.parse(Buffer.concat(chunks).toString("utf8"));

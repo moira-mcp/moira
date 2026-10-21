@@ -2068,7 +2068,11 @@ and complete UTF-8 character boundaries; binary content uses native upload/downl
 rather than text conversion. Optional caller bounds can refuse or window a response.
 Active private mutation identities use
 `ws1-<lowercase UUID>`; bare archived IDs are not translated or dispatched.
-Immutable input and receipts remain with the relevant owner. Cloud has no Local
+Immutable input identity, digest/metadata and original receipts remain with the relevant owner.
+Verified terminal native/stdin staging bytes may be retired after input-reader settlement;
+live, unknown or conflicting work retains them. Collection does not reacquire an accepted source
+or dispatch the effect again. Complete command stdout/stderr are retained independently of that
+cleanup and service diagnostic rotation. Cloud has no Local
 lifecycle/settings queue or command-result journal. A confirmed pre-dispatch refusal
 differs from an unconfirmed post-dispatch outcome; collect the original identity.
 
