@@ -1,396 +1,96 @@
-# Workflow Scenario Testing Guide
+# Workflow scenario testing
 
-## Checklist Before Writing Tests
+The scenario harness runs `GraphExecutionEngine` directly with a fresh `InMemoryRepository`,
+controlled answers and dependencies. These scenarios protect authored graph paths and contracts;
+mock review answers do not establish independent agent judgment. The workflow test family also
+contains executor contract tests. Use the [testing guide](../TESTING-GUIDE.md) for level selection.
 
-**MANDATORY before writing tests:**
+## Read the authored contract
 
-- [ ] Run `moira-workflow <file>.json list` to list the nodes
-- [ ] Run `moira-workflow <file>.json get <node-id>` for each agent-directive
-- [ ] Record the required fields and their types from inputSchema
-- [ ] Check enum constraints (`["yes", "no"]` is not a boolean!)
-- [ ] Check array of objects vs string
-- [ ] Identify cycles with `detectCycles()` or `moira-workflow <file>.json structure --graph`
-- [ ] Plan mock inputs for each loop iteration
-
----
-
-## CLI Commands for Schema Extraction
-
-The `moira-workflow` CLI ships in `packages/workflow-cli` (run `npm link` there to
-install it globally).
-
-**List all workflow nodes:**
+Inspect the current graph before writing answers. The repository CLI exposes the actual node
+schemas and routes:
 
 ```bash
-moira-workflow workflows/production/public/data-analysis.json list
-moira-workflow workflows/production/public/data-analysis.json list --type agent-directive
+node packages/workflow-cli/bin/moira-workflow.js workflows/production/flows/5dd9c5c3-1176-4967-9d6c-798134b769df.json list
+node packages/workflow-cli/bin/moira-workflow.js workflows/production/flows/5dd9c5c3-1176-4967-9d6c-798134b769df.json structure --graph
 ```
 
-**Get a specific node with its inputSchema:**
+Use `get <node-id>` for each answering step. Read required fields, enum values, nested schemas,
+declared globals, node-local outputs and routing cases. Do not guess an answer from a step's title.
+`"yes"` is not `true`; a string is not an array; an array of objects needs each required property.
+Use [catalog-graphs.ts](../helpers/catalog-graphs.ts) to obtain an editable copy of a bundled graph
+instead of reproducing catalog lookup and casts. The [CLI reference](../../docs/reference/workflow-cli.md)
+describes the command owner.
+
+## Inputs and loops
+
+[scenario-runner.ts](../helpers/scenario-runner.ts) accepts a static object, an array of per-visit
+objects, or a function receiving `variables`, engine-owned `executionId`, `visitCount`, `nodeId`
+and the presented `directive`. Arrays cycle through their elements on repeated visits. Include
+the inputs needed for rejection, repair and later approval rather than hoping a loop terminates.
+
+```typescript
+const mockInputs = {
+  "review-result": [{ approved: "no", feedback: "Missing evidence" }, { approved: "yes" }],
+};
+```
+
+This illustrates input sequencing; field names and values must match the graph under test.
+Dynamic answers can use the current directive and execution identity for run-correlated paths.
+Use `initialVariables` only for an intentional focused scenario; do not seed hidden state that
+allows an ordinary route to pass without its producer.
+
+Node-local answers remain under their node scope; a later `contextPath` such as
+`review-result.approved` reads that output. Bare global names require the registry and declared
+input contract. Do not flatten answers in fixtures to bypass scope validation.
+
+## Run and assert
+
+For a scenario file in `tests/workflow/scenarios/`, reuse the existing harness:
+
+```typescript
+import { expect } from "@jest/globals";
+import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
+import { runScenario, type TestScenario } from "../../helpers/scenario-runner.js";
+
+async function checkScenario(graph: WorkflowGraph, scenario: TestScenario) {
+  const result = await runScenario(graph, scenario);
+  expect(result.passed).toBe(true);
+}
+```
+
+Pass the actual graph and schema-valid scenario to this assertion helper from the test case.
+Use `expect.reaches`, `avoids` and `contextContains` for the relevant outcome in addition to status.
+The runner's `stepCount` counts engine cycles, not authored nodes. On a bounded retry scenario,
+declare expected validation errors through `allowValidationErrorsAt`; do not broadly silence
+unexpected refusals. Use the existing `engineSetup` option for controlled handlers such as notes
+rather than starting unrelated services or copying engine behavior.
+
+The runner validates rendered directive and completion-condition text for unresolved template
+markers. Read `failedExpectations`, `error`, `visitedNodes`, submitted inputs and final context
+when a case fails. At the cycle bound it reports repeated/missing/unused inputs and route
+diagnostics. Fix the schema, producer, answer or routing cause before raising a bound.
+
+## Coverage and its limits
+
+[coverage-calculator.ts](../helpers/coverage-calculator.ts) aggregates scenario results. Require
+the scenarios themselves to pass before interpreting coverage, and keep meaningful existing
+thresholds. Its gap report helps locate unvisited nodes and candidate missing outputs.
+
+Current branch accounting infers outputs from adjacent visited node IDs: every connection whose
+target equals the next node is credited. If `approved` and `default` both target `end`, one
+transition cannot establish which was taken, and the report can credit both. A node sequence also
+does not independently prove the semantic selected output across waits or teleports. Use explicit
+route/output assertions for that contract; do not present the percentage as proof that every
+distinct output executed. Node reachability, scenario assertions and branch inference are different
+observations.
 
 ```bash
-moira-workflow workflows/production/public/data-analysis.json get get-context
+npm run test:workflow -- --file tests/workflow/scenarios/coverage.test.ts
+npm run test:workflow -- --file tests/workflow/scenarios/quick-task.test.ts
+npm run typecheck:tests
 ```
 
-**Example output:**
-
-```json
-{
-  "id": "get-context",
-  "type": "agent-directive",
-  "directive": "Gather business context...",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "business_question": { "type": "string", "minLength": 10 },
-      "context": { "type": "string" },
-      "data_sources": { "type": "string", "minLength": 5 }
-    },
-    "required": ["business_question", "context", "data_sources"],
-    "additionalProperties": false
-  }
-}
-```
-
-**Graph structure (for loops):**
-
-```bash
-moira-workflow workflows/production/public/data-analysis.json structure --graph
-```
-
----
-
-## Common Mistakes
-
-### 1. Boolean vs string enum
-
-**Schema:** `{ "approved": { "enum": ["yes", "no"] } }`
-
-```typescript
-// WRONG
-{
-  approved: true;
-}
-
-// CORRECT
-{
-  approved: "yes";
-}
-```
-
-### 2. Array vs string
-
-**Schema:** `{ "data_sources": { "type": "string", "minLength": 5 } }`
-
-```typescript
-// WRONG
-{
-  data_sources: ["db1", "db2"];
-}
-
-// CORRECT
-{
-  data_sources: "db1, db2";
-}
-```
-
-### 3. String vs object array
-
-**Schema:**
-
-```json
-{
-  "target_users": {
-    "type": "array",
-    "items": {
-      "type": "object",
-      "properties": { "name": { "type": "string" }, "role": { "type": "string" } },
-      "required": ["name", "role"]
-    }
-  }
-}
-```
-
-```typescript
-// WRONG
-{
-  target_users: ["developer", "designer"];
-}
-
-// CORRECT
-{
-  target_users: [{ name: "Developer", role: "End User" }];
-}
-```
-
-### 4. Missing required fields in nested objects
-
-**Schema:** `{ "items": { "required": ["name", "price", "source"] } }`
-
-```typescript
-// WRONG - missing "source"
-{
-  candidates: [{ name: "Product", price: 100 }];
-}
-
-// CORRECT
-{
-  candidates: [{ name: "Product", price: 100, source: "Amazon" }];
-}
-```
-
-### 5. Wrong enum value
-
-**Schema:** `{ "data_source_type": { "enum": ["inline", "file"] } }`
-
-```typescript
-// WRONG
-{
-  data_source_type: "external";
-}
-
-// CORRECT
-{
-  data_source_type: "file";
-}
-```
-
----
-
-## Handling Loops (Cycles)
-
-Workflows with cycles (define → approve → condition → back to define) require arrays of mock inputs.
-
-**Example: revision loop**
-
-```typescript
-mockInputs: {
-  // Array-based: first visit rejected, second approved
-  "define-problem": [
-    { research_question: "Vague question..." },  // First visit - rejected
-    { research_question: "Clear and specific question" }   // Second visit - approved
-  ],
-  "approve-problem": [
-    { approved: "no", feedback: "Too vague, be more specific" },  // First: reject
-    { approved: "yes" }  // Second: approve
-  ]
-}
-```
-
-**Function-based for dynamic values:**
-
-```typescript
-mockInputs: {
-  "create-workspace": (ctx) => ({
-    path: `./iteration-${ctx.visitCount + 1}/`,
-    name: `workspace_${ctx.variables.projectName || 'default'}`
-  })
-}
-```
-
-The runner cycles through the array elements for each visit to the node.
-
----
-
-## Context Path Resolution
-
-Condition nodes use `contextPath` to read values:
-
-```json
-{
-  "type": "condition",
-  "cases": [
-    {
-      "when": {
-        "operator": "eq",
-        "left": { "contextPath": "approve-problem.approved" },
-        "right": "yes"
-      },
-      "output": "approved"
-    }
-  ],
-  "connections": { "approved": "next-step", "default": "revise" }
-}
-```
-
-**How it works:**
-
-1. The agent completes a node with input `{ approved: "yes" }`
-2. The engine merges the data into `context.variables`
-3. The condition resolves `contextPath` via `getNestedValue()`
-
-**KNOWN ISSUE: FLAT merge**
-
-The engine performs a FLAT merge of data into context.variables. The `node-id.field` format expects nested storage, but the current implementation may store data flat.
-
-**Symptoms of contextPath problems:**
-
-- `evaluatedValues: { "node.field": undefined }` in test results
-- Infinite loop at a condition node
-- Status "running" instead of "completed"
-
-**Workaround in tests:**
-
-Make sure mock inputs use the exact fields the condition actually reads.
-
----
-
-## Debugging Failed Scenarios
-
-### 1. Check visitedNodes for loop patterns
-
-```
-visitedNodes: ["start", "get-context", "define-problem", "approve-problem",
-               "check-approved", "define-problem", "approve-problem", ...]
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-               Repeating pattern = infinite loop at condition
-```
-
-### 2. Check finalContext for missing values
-
-```typescript
-// Good - value present
-finalContext: { approved: "yes", ... }
-
-// Bad - not resolved
-evaluatedValues: { "approve.approved": undefined }
-```
-
-### 3. Run a single scenario with logging
-
-```typescript
-const result = await runScenario(workflow, scenario);
-console.log("Status:", result.status);
-console.log("Visited:", result.visitedNodes);
-console.log("Context:", result.finalContext);
-console.log("Step count:", result.stepCount);
-```
-
-### 4. Check the step count
-
-```typescript
-// Default max is 100 steps
-// If stepCount === 100 and status === "running" → infinite loop
-expect(result.stepCount).toBeLessThan(100);
-```
-
-### 5. Use gap analysis
-
-```typescript
-const coverage = calculateCoverage(workflow, results, { includeGapAnalysis: true });
-console.log(formatCoverageReport(coverage));
-
-// Shows uncovered nodes and branches with hints:
-// Gap Analysis:
-//   condition: 1 uncovered
-//     - check-approved:false
-//       Hint: Set condition variables to make check-approved evaluate false
-```
-
----
-
-## Test Structure Template
-
-```typescript
-import { runScenario, TestScenario } from "../../helpers/scenario-runner.js";
-import {
-  calculateCoverage,
-  formatCoverageReport,
-  assertCoverage,
-} from "../../helpers/coverage-calculator.js";
-import { GraphValidator, detectCycles } from "@mcp-moira/workflow-engine";
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
-
-function loadProductionWorkflow(): WorkflowGraph {
-  return findSystemCatalogEntry("workflow-name", "public")!.graph as WorkflowGraph;
-}
-
-describe("workflow-name Scenarios", () => {
-  let workflow: WorkflowGraph;
-
-  beforeAll(() => {
-    workflow = loadProductionWorkflow();
-  });
-
-  describe("Structural Validation", () => {
-    it("should have valid structure", async () => {
-      const validator = new GraphValidator();
-      const withId = { id: `moira/${workflow.slug || "workflow-name"}`, ...workflow };
-      const validation = await validator.validateWorkflow(withId);
-      expect(validation.valid).toBe(true);
-      expect(validation.errors).toHaveLength(0);
-    });
-
-    it("should detect expected cycles", () => {
-      const cycles = detectCycles(workflow);
-      // Adjust based on workflow design
-      expect(cycles.length).toBeGreaterThanOrEqual(0);
-    });
-  });
-
-  describe("Scenario Coverage", () => {
-    const scenarios: TestScenario[] = [
-      // Happy path
-      {
-        name: "happy path - all approvals pass",
-        mockInputs: {
-          "node-1": { field: "value" },
-          "node-2": { approved: "yes" },
-        },
-        expect: {
-          status: "completed",
-          reaches: ["end"],
-        },
-      },
-      // Rejection path
-      {
-        name: "rejection - needs revision",
-        mockInputs: {
-          "node-1": { field: "value" },
-          "node-2": [{ approved: "no", feedback: "Needs work" }, { approved: "yes" }],
-        },
-        expect: {
-          status: "completed",
-        },
-      },
-    ];
-
-    it.each(scenarios)("$name", async (scenario) => {
-      const result = await runScenario(workflow, scenario);
-      expect(result.passed).toBe(true);
-      if (!result.passed) {
-        console.log("Failed expectations:", result.failedExpectations);
-        console.log("Visited:", result.visitedNodes);
-      }
-    });
-
-    it("should achieve 100% node and branch coverage", async () => {
-      const results = await Promise.all(scenarios.map((s) => runScenario(workflow, s)));
-
-      const failedScenarios = results.filter((r) => !r.passed);
-      expect(failedScenarios).toHaveLength(0);
-
-      const coverage = calculateCoverage(workflow, results, {
-        includeGapAnalysis: true,
-      });
-
-      console.log(formatCoverageReport(coverage));
-
-      assertCoverage(coverage, 100, { type: "node" });
-      assertCoverage(coverage, 100, { type: "branch" });
-    });
-  });
-});
-```
-
----
-
-## Key Files
-
-| File                                           | Purpose                                             |
-| ---------------------------------------------- | --------------------------------------------------- |
-| `tests/helpers/scenario-runner.ts`             | Runs scenarios with mock inputs                     |
-| `tests/helpers/coverage-calculator.ts`         | Calculates node/branch coverage                     |
-| `@mcp-moira/workflow-engine`                   | GraphValidator + detectCycles                       |
-| `findSystemCatalogEntry` (`@mcp-moira/shared`) | Loads bundled production workflows from the catalog |
-| `tests/workflow/scenarios/`                    | Scenario test files                                 |
+Read the selected suite's Markdown coverage/failure artifacts first, then the executor log for
+crashes or setup failures. Do not lower a threshold to hide a gap, delete tests because a keyword
+scanner calls them duplicates, or add a second observer framework to reproduce the engine.

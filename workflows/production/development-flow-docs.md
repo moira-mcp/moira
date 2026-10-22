@@ -40,7 +40,7 @@ These documents are expected to exist in the project. The workflow references th
 
 ### 5. Testing
 
-- **`docs/TESTING.md`** - Testing rules
+- **`tests/TESTING-GUIDE.md`** - Testing entry and links to focused guides
   - Used by: nodes that work with tests
   - Contains: no hardcoded URLs, use `getTestBaseUrl()`, database setup
 

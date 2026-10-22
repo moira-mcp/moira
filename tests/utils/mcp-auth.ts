@@ -65,7 +65,7 @@ export const DEFAULT_ADMIN_CREDENTIALS = getAdminCredentials();
  * await verifyUserEmail(BASE_URL, 'test@example.com');
  */
 export async function verifyUserEmail(baseUrl: string, userEmail: string): Promise<void> {
-  // Get cached admin session cookie
+  // Sign in for an admin session cookie
   const adminSessionCookie = await getAdminSessionCookie(baseUrl);
 
   // Call the internal verification function
@@ -108,7 +108,7 @@ export async function createTestUserViaApi(
     throw new Error(`Sign-up failed: ${signUpResponse.status}`);
   }
 
-  // Get cached admin session for subsequent operations
+  // Sign in for an admin session used by subsequent operations
   const adminSessionCookie = await getAdminSessionCookie(baseUrl);
 
   // Find user ID (use search param to find by email in paginated results)
@@ -237,7 +237,7 @@ export async function forcePasswordResetViaApi(baseUrl: string, userId: string):
 }
 
 /**
- * Get admin session cookie
+ * Sign in as the configured admin and return the session cookie value
  * Useful when you need to make multiple admin API calls
  */
 export async function getAdminSessionCookie(baseUrl: string): Promise<string> {
@@ -503,7 +503,7 @@ async function exchangeCodeForToken(
  * @example
  * const { client, cleanup } = await createAuthenticatedMCPClient();
  * try {
- *   const result = await client.callTool({ name: 'list_workflows', arguments: {} });
+ *   const result = await client.callTool({ name: 'list', arguments: {} });
  *   // ... test assertions
  * } finally {
  *   await cleanup();
@@ -642,20 +642,21 @@ export async function createAuthenticatedMCPClient(
 }
 
 /**
- * Helper to call MCP tool and parse JSON result
+ * Read the first MCP text block as JSON, falling back to its raw text.
+ * Use client.callTool directly when asserting isError or native content blocks.
  *
  * @param client - Authenticated MCP client
  * @param toolName - Name of the tool to call
  * @param args - Tool arguments
- * @returns Parsed JSON result from tool
+ * @returns Parsed first text block, or its text when it is not JSON
  *
  * @example
- * const workflows = await callMCPTool(client, 'list_workflows', {});
- * expect(workflows).toHaveLength(23);
+ * const result = await callMCPTool(client, 'list', {});
+ * expect(result.workflows).toBeDefined();
  *
  * @example
- * const settings = await callMCPTool(client, 'get_user_settings', { category: 'ui' });
- * expect(settings).toHaveProperty('telegram.enabled');
+ * const settings = await callMCPTool(client, 'settings', { action: 'get', category: 'ui' });
+ * expect(settings).toBeDefined();
  */
 export async function callMCPTool<T = any>(
   client: Client,
