@@ -59,7 +59,7 @@ import {
   mergeSettingDefinitions,
   prepareExtensionSettingValue,
 } from "../extensions/extension-settings.js";
-import { maskEncryptedValue, decryptValue } from "../utils/encryption.js";
+import { maskEncryptedValue, decryptValue } from "@mcp-moira/shared/settings-encryption";
 
 function convertSettingValue(raw: string, type: SettingDefinition["type"]): unknown {
   switch (type) {

@@ -7,7 +7,7 @@ import { z } from "zod";
 import { gitBranchSchema } from "../../shared/src/codespaces/git-ref.ts";
 import { scopedCredentialFailureOutcome } from "../../shared/src/codespaces/scoped-credential-types.ts";
 import { WORKSPACE_REQUEST_ID_PATTERN } from "../../shared/src/codespaces/workspace-request-id.ts";
-export { readOwnerJsonBody as readOwnerPullRequestInput } from "./request-body.mjs";
+export { readOwnerJsonBody as readOwnerPullRequestInput } from "../../shared/src/http/request-body.mjs";
 
 export class GitHubOwnerError extends Error {
   constructor(publicCode, status = 409) {

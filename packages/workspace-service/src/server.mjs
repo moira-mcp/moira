@@ -9,8 +9,12 @@ import { connect } from "node:net";
 import { createWorkspaceOwner } from "./owner.mjs";
 import { serveOwnerPublication } from "./publications.mjs";
 import { executeOwnerTool } from "./presentation.mjs";
-import { readOwnerFrame, settleOwnerFrame, OWNER_STREAM_CONTENT_TYPE } from "./stream-frame.mjs";
-import { readOwnerJsonBody as jsonBody } from "./request-body.mjs";
+import {
+  readOwnerFrame,
+  settleOwnerFrame,
+  OWNER_STREAM_CONTENT_TYPE,
+} from "../../shared/src/http/owner-stream-frame.mjs";
+import { readOwnerJsonBody as jsonBody } from "../../shared/src/http/request-body.mjs";
 import { scopedCredentialFailureOutcome } from "../../shared/src/codespaces/scoped-credential-types.ts";
 import { WORKSPACE_REQUEST_ID_PATTERN } from "../../shared/src/codespaces/workspace-request-id.ts";
 

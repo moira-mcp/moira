@@ -10,7 +10,7 @@ import sharp from "sharp";
 import tar from "tar-stream";
 import { createWorkspaceRequestId } from "../packages/shared/src/codespaces/workspace-request-id.ts";
 import { decodeReference } from "../packages/shared/src/codespaces/workspace-references.mjs";
-import { encodeOwnerFrame } from "../packages/workspace-service/src/stream-frame.mjs";
+import { encodeOwnerFrame } from "../packages/shared/src/http/owner-stream-frame.mjs";
 import {
   DAEMON_DIAGNOSTIC_FILE_BYTES,
   DAEMON_DIAGNOSTIC_FILE_COUNT,
@@ -340,7 +340,7 @@ verification: try {
       import {createHash} from 'node:crypto';
       import {once} from 'node:events';
       import {WorkspaceRouter} from ${JSON.stringify(resolve("packages/web-backend/src/services/workspace-router.ts"))};
-      import {readOwnerFrame} from ${JSON.stringify(resolve("packages/workspace-service/src/stream-frame.mjs"))};
+      import {readOwnerFrame} from ${JSON.stringify(resolve("packages/shared/src/http/owner-stream-frame.mjs"))};
       const input=JSON.parse(await readFile('/tmp/router-input.json','utf8'));
       const binding={kind:'workspace',userId:input.resourceId,resourceId:input.resourceId,resourceGeneration:1,authorizationGeneration:1,environmentIdentity:input.environmentIdentity};
       let unavailable=true;

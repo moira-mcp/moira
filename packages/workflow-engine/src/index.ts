@@ -137,12 +137,6 @@ export * from "./utils/execution-progress-steps.js";
 export { ContextMapper } from "./utils/context-mapper.js";
 export { ContextHelpers } from "./utils/context-helpers.js";
 export { PathResolver } from "./utils/path-resolver.js";
-export {
-  encryptValue,
-  decryptValue,
-  maskEncryptedValue,
-  generateEncryptionKey,
-} from "./utils/encryption.js";
 
 // Error classes re-exported from shared for backward compatibility
 export {

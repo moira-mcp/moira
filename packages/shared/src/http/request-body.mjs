@@ -1,7 +1,7 @@
 import parser from "stream-json";
 import Assembler from "stream-json/assembler.js";
 
-/** Incremental JSON value reader; binary file bytes never use this representation. */
+/** Incremental JSON value reader; binary file bytes remain outside JSON control bodies. */
 export async function readJsonBody(request) {
   const tokens = parser({ streamValues: false });
   const assembler = new Assembler();

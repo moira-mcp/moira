@@ -15,7 +15,7 @@ import { eq, and, like } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { auditLog, extensionSettingValue } from "../schema.js";
-import { encryptValue, decryptValue } from "@mcp-moira/workflow-engine";
+import { encryptValue, decryptValue } from "../../utils/settings-encryption.js";
 import type * as schema from "../schema.js";
 
 export interface ExtensionSettingAuditEntry {

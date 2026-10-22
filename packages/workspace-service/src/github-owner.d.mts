@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-export { readOwnerJsonBody as readOwnerPullRequestInput } from "./request-body.mjs";
+export { readOwnerJsonBody as readOwnerPullRequestInput } from "../../shared/src/http/request-body.mjs";
 export type GitHubOwnerAction = "fetch" | "push" | "pull_request_read" | "pull_request_create";
 interface GitHubOwnerLeaseBase {
   repositoryFullName: string;

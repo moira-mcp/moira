@@ -11,7 +11,7 @@ function invalid() {
   });
 }
 
-/** A structural metadata frame followed by opaque bytes under the same backpressure. */
+/** Shared owner framing: structural metadata followed by opaque bytes under backpressure. */
 export function encodeOwnerFrame(control, source) {
   const metadata = Buffer.from(JSON.stringify(control), "utf8");
   if (!metadata.length || metadata.length > 0xffffffff) throw invalid();

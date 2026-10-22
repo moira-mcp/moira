@@ -10,7 +10,10 @@ import { fileURLToPath } from "node:url";
 import { createWorkspaceRequestId } from "../../shared/src/codespaces/workspace-request-id.mjs";
 import { workspaceRequest, workspaceJson } from "./client.mjs";
 import { workspaceFailure } from "./presentation.mjs";
-import { encodeOwnerFrame, OWNER_STREAM_CONTENT_TYPE } from "./stream-frame.mjs";
+import {
+  encodeOwnerFrame,
+  OWNER_STREAM_CONTENT_TYPE,
+} from "../../shared/src/http/owner-stream-frame.mjs";
 import { decodeReference } from "../../shared/src/codespaces/workspace-references.mjs";
 export { workspaceRequest } from "./client.mjs";
 

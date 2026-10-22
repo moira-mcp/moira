@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeEach } from "@jest/globals";
 import { InMemoryRepository } from "@mcp-moira/workflow-engine";
-import { generateEncryptionKey } from "@mcp-moira/workflow-engine";
+import { generateEncryptionKey } from "@mcp-moira/shared/settings-encryption";
 import type { SettingDefinition } from "@mcp-moira/workflow-engine";
 
 describe("Settings Repository (InMemory)", () => {

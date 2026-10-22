@@ -34,7 +34,7 @@ import {
   type ExecutionTaskTitleMutationResult,
 } from "@mcp-moira/shared";
 import { executionStopCapability } from "@mcp-moira/shared/execution-management";
-import { encryptValue, decryptValue } from "../utils/encryption.js";
+import { encryptValue, decryptValue } from "@mcp-moira/shared/settings-encryption";
 import { humanGateChanged, humanGateWaiting } from "../utils/human-gate.js";
 import { awaitingUserAfterMove } from "../utils/awaiting-user.js";
 import type {

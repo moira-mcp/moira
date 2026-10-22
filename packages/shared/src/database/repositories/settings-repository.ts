@@ -6,7 +6,7 @@
 import { eq, and } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { settingDefinition, userSettingValue } from "../schema.js";
-import { encryptValue, decryptValue, maskEncryptedValue } from "@mcp-moira/workflow-engine";
+import { encryptValue, decryptValue, maskEncryptedValue } from "../../utils/settings-encryption.js";
 import type { SettingDefinition } from "@mcp-moira/workflow-engine";
 import type * as schema from "../schema.js";
 import { ValidationError } from "../../errors/app-error.js";

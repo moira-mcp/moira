@@ -4,7 +4,7 @@
  */
 
 import crypto from "crypto";
-import { getTelegramEncryptionKey } from "@mcp-moira/shared";
+import { getTelegramEncryptionKey } from "../config/env.js";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 16;

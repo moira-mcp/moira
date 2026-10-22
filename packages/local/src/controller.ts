@@ -60,7 +60,7 @@ import {
   readOwnerFrame,
   settleOwnerFrame,
   OWNER_STREAM_CONTENT_TYPE,
-} from "../../workspace-service/src/stream-frame.mjs";
+} from "@mcp-moira/shared/http/owner-stream-frame";
 import { communicationOwnerSubmitSchema } from "../../shared/src/communication-owner-protocol.js";
 import { deliverOwnerExtension as deliverExtension } from "../../workspace-service/src/extension-owner.mjs";
 import { fileURLToPath, pathToFileURL } from "node:url";

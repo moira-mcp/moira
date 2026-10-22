@@ -1,4 +1,4 @@
-import { bootstrap } from "../../local/src/guest-bootstrap.js";
+import { bootstrap } from "./guest-bootstrap.js";
 import process from "node:process";
 import { Buffer } from "node:buffer";
 import { workspaceSetupFailureSchema } from "../../shared/src/codespaces/local-protocol.ts";

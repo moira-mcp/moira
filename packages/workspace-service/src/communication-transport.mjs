@@ -2,7 +2,10 @@ import { request } from "node:https";
 import { Buffer } from "node:buffer";
 import { URL } from "node:url";
 import { connectHttps, transportClosed } from "./tls-transport.mjs";
-import { encodeOwnerFrame, OWNER_STREAM_CONTENT_TYPE } from "./stream-frame.mjs";
+import {
+  encodeOwnerFrame,
+  OWNER_STREAM_CONTENT_TYPE,
+} from "../../shared/src/http/owner-stream-frame.mjs";
 import {
   communicationOwnerPrepareSchema,
   communicationOwnerSendSchema,
