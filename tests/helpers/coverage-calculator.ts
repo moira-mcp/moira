@@ -1,7 +1,7 @@
 /**
  * Workflow Coverage Calculator
  * Calculates node and branch coverage from scenario results
- * Enhanced with gap analysis, hints, threshold enforcement, and export
+ * Includes gap analysis, hints, threshold enforcement, and export
  */
 
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
@@ -33,7 +33,7 @@ export interface GapAnalysis {
 }
 
 /**
- * Extended coverage report with gap analysis
+ * Coverage report with optional gap analysis
  */
 export interface CoverageReport {
   workflowId: string;
@@ -189,18 +189,11 @@ export function calculateCoverage(
       allVisitedNodes.add(nodeId);
     }
 
-    // Track branches taken (infer from visited sequence)
-    for (let i = 0; i < result.visitedNodes.length - 1; i++) {
-      const fromNodeId = result.visitedNodes[i];
-      const toNodeId = result.visitedNodes[i + 1];
-
-      const fromNode = workflow.nodes.find((n) => n.id === fromNodeId);
-      if (fromNode && fromNode.connections) {
-        for (const [branch, targetId] of Object.entries(fromNode.connections)) {
-          if (targetId === toNodeId) {
-            allVisitedBranches.add(`${fromNodeId}:${branch}`);
-          }
-        }
+    // Only engine-selected exits count; waits and terminal visits have no exit.
+    // Intersecting with declared connections below excludes non-authored keys.
+    for (const visit of result.visits) {
+      if (visit.exitKey !== null) {
+        allVisitedBranches.add(`${visit.nodeId}:${visit.exitKey}`);
       }
     }
   }

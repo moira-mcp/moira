@@ -67,23 +67,39 @@ unexpected refusals. Use the existing `engineSetup` option for controlled handle
 rather than starting unrelated services or copying engine behavior.
 
 The runner validates rendered directive and completion-condition text for unresolved template
-markers. Read `failedExpectations`, `error`, `visitedNodes`, submitted inputs and final context
+markers. Read `failedExpectations`, `error`, `visitedNodes`, `visits`, submitted inputs and final context
 when a case fails. At the cycle bound it reports repeated/missing/unused inputs and route
 diagnostics. Fix the schema, producer, answer or routing cause before raising a bound.
 
 ## Coverage and its limits
 
-[coverage-calculator.ts](../helpers/coverage-calculator.ts) aggregates scenario results. Require
-the scenarios themselves to pass before interpreting coverage, and keep meaningful existing
-thresholds. Its gap report helps locate unvisited nodes and candidate missing outputs.
+[scenario-runner.ts](../helpers/scenario-runner.ts) retains each returned engine cycle's
+`visitedNodes` and `visits` before running its own diagnostics. `ScenarioResult.visits` contains
+raw chronological `EngineVisit` observations, including open waits and later resumes. This is not
+the persisted execution journal: the stateful executor separately assigns sequence numbers,
+folds a resumed wait into its open visit and records actor adjustments. The harness does not
+reconstruct absent engine observations from neighboring node IDs.
 
-Current branch accounting infers outputs from adjacent visited node IDs: every connection whose
-target equals the next node is credited. If `approved` and `default` both target `end`, one
-transition cannot establish which was taken, and the report can credit both. A node sequence also
-does not independently prove the semantic selected output across waits or teleports. Use explicit
-route/output assertions for that contract; do not present the percentage as proof that every
-distinct output executed. Node reachability, scenario assertions and branch inference are different
-observations.
+[coverage-calculator.ts](../helpers/coverage-calculator.ts) reports distinct facts:
+
+- Node coverage is the set of authored node IDs present in `visitedNodes`, relative to all
+  authored nodes.
+- Branch coverage is the set of observed `(nodeId, exitKey)` pairs with non-null exits that match
+  declared connections, relative to all declared connections. Repeated traversals count once.
+- `passedCount` counts results whose scenario expectations and runner diagnostics passed; it is
+  independent of node and branch coverage. Executed observations from a failed scenario can
+  contribute coverage, so assert scenario success separately from coverage thresholds.
+
+If `approved` and `default` both target `end`, only the observed selected exit receives credit.
+A wait, rejected answer or completion has a null exit and credits no outgoing branch; an accepted
+resume or loop traversal contributes its actual exit. A harness teleport redirect does not credit
+the paused source's connection merely because it points to the same target. The target's own
+observed declared exit can still count.
+
+Use the gap report to locate missing nodes and outputs, preserve meaningful existing thresholds,
+and inspect observations when diagnosing a gap. Coverage establishes execution under the supplied
+fixtures; it does not prove independent review quality, correctness of every answer, external
+provider delivery or physical native effects.
 
 ```bash
 npm run test:workflow -- --file tests/workflow/scenarios/coverage.test.ts
