@@ -18,7 +18,6 @@ import {
   TemplateText,
   VariableProvider,
 } from "../diagram/VariableText";
-import type { VariableDefinition } from "../diagram/VariableText";
 import type { WorkflowGraph } from "../../types/workflow-types";
 import type { WorkflowValidationStatus } from "../../types/react-flow-types";
 import type { NodeTypeIndex } from "../../types/node-type-catalog";
@@ -57,11 +56,10 @@ export function NodePanel({
   const owners = useMemo(() => nodeOwners(blocks), [blocks]);
   const owner = blockById(blocks).get(owners.get(nodeId) ?? "") ?? null;
   const described = nodeTypes?.[step.type];
-  const node = workflow.nodes.find((n) => n.id === nodeId) as unknown as
-    (Record<string, unknown> & { connections?: Record<string, string> }) | undefined;
+  const node = workflow.nodes.find((n) => n.id === nodeId);
   const nameOf = (id: string) => {
     const target = workflow.nodes.find((n) => n.id === id);
-    const label = (target as { progressActiveLabel?: string } | undefined)?.progressActiveLabel;
+    const label = target?.progressActiveLabel;
     return label ?? target?.metadata?.displayName ?? id;
   };
   // What the flow page's node sidebar used to show and the panel now owns: the node's own
@@ -69,14 +67,16 @@ export function NodePanel({
   // the schema its type declares, the raw input schema, a subgraph id, a materialize declaration.
   const errors = validation?.nodeValidation?.[nodeId]?.errors ?? [];
   const warnings = validation?.nodeValidation?.[nodeId]?.warnings ?? [];
-  const body = (node ?? {}) as Record<string, unknown>;
-  const basePath = typeof body.basePath === "string" ? body.basePath : undefined;
-  const filePaths = Array.isArray(body.filePaths)
-    ? (body.filePaths as unknown[]).filter((f): f is string => typeof f === "string")
-    : undefined;
+  const body = (node ?? {}) as unknown as Record<string, unknown>;
+  const basePath = node?.type === "materialize" ? node.basePath : undefined;
+  const filePaths = node?.type === "materialize" ? node.files.map((file) => file.path) : undefined;
   const playbookTexts = [
     step.text ?? undefined,
     step.completionCondition ?? undefined,
+    step.progressContent?.summary,
+    ...(step.progressContent?.details ?? []),
+    step.progressContent?.outcome,
+    step.progressContent?.next,
     basePath,
     ...(filePaths ?? []),
   ];
@@ -91,7 +91,7 @@ export function NodePanel({
   return (
     <VariableProvider
       value={{
-        registry: (workflow.variableRegistry ?? {}) as Record<string, VariableDefinition>,
+        registry: workflow.variableRegistry ?? {},
         onSelect: onSelectVariable,
       }}
     >
@@ -132,9 +132,31 @@ export function NodePanel({
               </code>
             )}
             {step.progressContent && (
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                <TemplateText text={step.progressContent} />
-              </p>
+              <div
+                className="mt-1 space-y-0.5 text-xs leading-5"
+                data-testid="node-panel-progress-content"
+              >
+                {step.progressContent.summary !== undefined && (
+                  <p className="font-medium">
+                    <TemplateText text={step.progressContent.summary} />
+                  </p>
+                )}
+                {step.progressContent.details?.map((detail, index) => (
+                  <p key={index} className="text-muted-foreground">
+                    • <TemplateText text={detail} />
+                  </p>
+                ))}
+                {step.progressContent.outcome !== undefined && (
+                  <p className="text-success">
+                    ✓ <TemplateText text={step.progressContent.outcome} />
+                  </p>
+                )}
+                {step.progressContent.next !== undefined && (
+                  <p className="font-medium text-primary">
+                    → <TemplateText text={step.progressContent.next} />
+                  </p>
+                )}
+              </div>
             )}
           </div>
           {onFocusNode && (

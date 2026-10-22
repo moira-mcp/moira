@@ -227,15 +227,16 @@ export function StepNodeView({ data, selected }: NodeProps<StepNode>): React.JSX
   // Hovering the card lights every connection it takes part in, and the cards at their far end.
   const near = focus.hovered !== null && links.some((id) => focus.hovered!.has(id));
   const step = graph.step;
+  const progressSummary = step.progressContent?.summary;
   return (
     <PortedCard
       type={step.type}
       title={step.progressLabel ?? step.displayName ?? step.id}
       subtitle={step.progressLabel || step.displayName ? step.id : null}
-      description={step.progressContent ?? step.summary ?? null}
+      description={progressSummary ?? step.summary ?? null}
       descriptionTip={
-        step.progressContent ? (
-          <TemplateText text={step.progressContent} />
+        progressSummary ? (
+          <TemplateText text={progressSummary} />
         ) : step.text ? (
           <TemplateText text={step.text} />
         ) : null

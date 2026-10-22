@@ -1,251 +1,54 @@
-/**
- * Core workflow type definitions for the frontend
- */
+/** Authoring types share the engine's definition; API and view records remain browser-local. */
+import type {
+  WorkflowGraph as EngineWorkflowGraph,
+  GraphNode,
+  StartNode,
+  EndNode,
+  AgentDirectiveNode,
+  ConditionNode,
+  ExpressionNode,
+  SubgraphNode,
+  ReadNoteNode,
+  WriteNoteNode,
+  UpsertNoteNode,
+  MaterializeNode,
+} from "@mcp-moira/workflow-engine/types";
 
-export type ConditionOperator =
-  "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "contains" | "exists" | "and" | "or" | "not";
+export type {
+  ConditionOperator,
+  ConditionValue,
+  StructuredCondition,
+  ConnectionLabel,
+  BaseNode,
+  RoutingCase,
+  StartNode,
+  AgentDirectiveNode,
+  ConditionNode,
+  EndNode,
+  ExpressionNode,
+  SubgraphNode,
+  TelegramNotificationNode,
+  UserNotificationNode,
+  ReadNoteNode,
+  WriteNoteNode,
+  UpsertNoteNode,
+  MaterializeFile,
+  MaterializeNode,
+  LockNode,
+  TeleportNode,
+  ExtensionNode,
+  RegistryVariable,
+  VariableRegistry,
+  ProgressContentTemplate,
+} from "@mcp-moira/workflow-engine/types";
 
-export type ConditionValue =
-  | string
-  | number
-  | boolean
-  | null
-  | {
-      contextPath: string;
-    };
-
-export interface StructuredCondition {
-  operator: ConditionOperator;
-  left?: ConditionValue;
-  right?: ConditionValue;
-  conditions?: StructuredCondition[];
-  condition?: StructuredCondition;
-  value?: ConditionValue;
-}
-
-/** A connection label as authored: plain text, or text plus the return it explains. */
-export type ConnectionLabel = string | { label: string; cycle?: { cause: string; exit: string } };
-
-/** One process block as authored in `progress.nodes`. */
-export interface WorkflowProgressNode {
-  id: string;
-  label: string;
-  connections?: { default?: string };
-  content?: { summary?: string; details?: string[]; outcome?: string; next?: string };
-}
-
-export interface WorkflowProgress {
-  title?: string;
-  goal?: string;
-  facts?: Array<{ label: string; value: string; tone?: string }>;
-  nodes: WorkflowProgressNode[];
-}
-
-export interface BaseNode {
-  type: string;
-  id: string;
-  /** The process block this node belongs to (`progress.nodes[].id`). */
-  progressNodeId?: string;
-  /** Human labels for connections, keyed like `connections`. */
-  connectionLabels?: Record<string, ConnectionLabel>;
-  metadata?: {
-    displayName?: string;
-    description?: string;
-    icon?: string;
-    color?: string;
-    tags?: string[];
-    estimatedDuration?: number;
-  };
-  timeout?: number;
-  connections?: Record<string, string>;
-}
-
-export interface StartNode extends BaseNode {
-  type: "start";
-  initialData?: Record<string, unknown>;
-  connections: {
-    default: string;
-  };
-}
-
-/** One routing case: the first case whose `when` holds selects `output`, a connection key. */
-export interface RoutingCase {
-  when: StructuredCondition;
-  output: string;
-}
-
-export interface AgentDirectiveNode extends BaseNode {
-  type: "agent-directive";
-  directive: string;
-  completionCondition: string;
-  inputSchema?: Record<string, unknown>;
-  /** Expressions evaluated after the answer is validated and before routing. */
-  expressions?: string[];
-  /** Routing on the node's own validated answer; `success` when no case holds. */
-  cases?: RoutingCase[];
-  connections: { success: string; error?: string; timeout?: string } & Record<string, string>;
-}
-
-export interface ConditionNode extends BaseNode {
-  type: "condition";
-  expressions?: string[];
-  cases: RoutingCase[];
-  connections: { default: string; error?: string } & Record<string, string>;
-}
-
-export interface EndNode extends BaseNode {
-  type: "end";
-  finalOutput?: string[];
-}
-
-export interface ExpressionNode extends BaseNode {
-  type: "expression";
-  expressions: string[];
-  connections: {
-    default: string;
-    error?: string;
-  };
-}
-
-export interface SubgraphNode extends BaseNode {
-  type: "subgraph";
-  graphId: string;
-  inputMapping?: Record<string, string>;
-  outputMapping?: Record<string, string>;
-  connections: {
-    success: string;
-    error?: string;
-  };
-}
-
-export interface UserNotificationNode extends BaseNode {
-  type: "user-notification";
-  message: string;
-  format?: "plain" | "markdown" | "html";
-  silent?: boolean;
-  attachProgressImage?: boolean;
-  planList?: "full" | "progress" | "none";
-  attachment?: {
-    kind: "image" | "document";
-    data: string;
-    encoding: "base64";
-    filename: string;
-    mimeType: string;
-  };
-  connections: { default: string; error?: string };
-}
-
-// Note nodes - automatic nodes for persistent storage
-export interface ReadNoteNode extends BaseNode {
-  type: "read-note";
-  outputVariable: string;
-  filter?: {
-    tag?: string;
-    keyPattern?: string;
-    keySearch?: string;
-  };
-  singleMode?: boolean;
-  connections: {
-    default: string;
-    error?: string;
-  };
-}
-
-export interface WriteNoteNode extends BaseNode {
-  type: "write-note";
-  key?: string;
-  source: string;
-  tags?: string[];
-  batchMode?: boolean;
-  connections: {
-    default: string;
-    error?: string;
-  };
-}
-
-export interface UpsertNoteNode extends BaseNode {
-  type: "upsert-note";
-  search?: {
-    tag?: string;
-    keyPattern?: string;
-  };
-  keyTemplate: string;
-  value: string;
-  tags?: string[];
-  outputVariable?: string;
-  connections: {
-    default: string;
-    error?: string;
-  };
-}
-
-export interface MaterializeFile {
-  path: string;
-  from?: string;
-  content?: "";
-}
-
-export interface MaterializeNode extends BaseNode {
-  type: "materialize";
-  basePath: string;
-  files: MaterializeFile[];
-  connections: {
-    success: string;
-    error?: string;
-  };
-}
-
-export type WorkflowNode =
-  | StartNode
-  | AgentDirectiveNode
-  | ConditionNode
-  | ExpressionNode
-  | SubgraphNode
-  | UserNotificationNode
-  | ReadNoteNode
-  | WriteNoteNode
-  | UpsertNoteNode
-  | MaterializeNode
-  | EndNode;
-
-export interface WorkflowMetadata {
-  name: string;
-  version: string;
-  description: string;
-  author?: string;
-  tags?: string[];
-  philosophy?: string;
-}
-
-export interface WorkflowVariable {
-  name: string;
-  description?: string;
-  type?: string;
-  default?: unknown;
-  required?: boolean;
-}
-
-/** Declared global variable in the workflow's variableRegistry (single source of truth). */
-export interface RegistryVariable {
-  type: "string" | "number" | "boolean" | "object" | "array" | "null";
-  description: string;
-  default?: unknown;
-  /** Any other JSON Schema keyword (enum, items, properties, pattern…) the declaration carries. */
-  [keyword: string]: unknown;
-}
-
-export interface WorkflowGraph {
-  id: string;
-  metadata: WorkflowMetadata;
-  nodes: WorkflowNode[];
-  variables?: Record<string, WorkflowVariable>;
-  /** Declared global variables, keyed by name (single source of truth). */
-  variableRegistry?: Record<string, RegistryVariable>;
-  /** The process definition: blocks in process order with their descriptions. */
-  progress?: WorkflowProgress;
-  systemReminder?: string;
-  runtimePolicy?: Record<string, unknown>;
-}
+export type WorkflowNode = GraphNode;
+export type AuthoredWorkflowGraph = EngineWorkflowGraph;
+/** A graph loaded by the API has the identity assigned on save. */
+export type WorkflowGraph = EngineWorkflowGraph & { id: string };
+export type WorkflowMetadata = EngineWorkflowGraph["metadata"];
+export type WorkflowProgress = NonNullable<EngineWorkflowGraph["progress"]>;
+export type WorkflowProgressNode = WorkflowProgress["nodes"][number];
 
 export interface ExecutionContext {
   variables: Record<string, unknown>;

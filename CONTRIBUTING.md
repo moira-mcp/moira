@@ -162,6 +162,27 @@ an ordinary step or authored error route, or have a blocking diagnosis, safe rec
 subsequent ordinary step on the same execution. If the change cannot affect an in-flight execution,
 explain why in the pull request.
 
+### Workflow definitions and browser views
+
+The workflow engine owns the authored definition: node variants, conditions, registry declarations
+and process content. `packages/web-frontend/src/types/workflow-types.ts` reuses that contract from
+`@mcp-moira/workflow-engine/types` through `import type` and `export type`; do not maintain a second
+frontend definition or hide a mismatch behind graph-shape casts. Browser operations use the existing
+`/authoring`, `/process` and `/progress-visual` entries. Do not import the engine's runtime barrel
+to obtain types or browser type guards.
+
+An authored definition may omit its server-assigned ID. A graph loaded into the editor has a required
+ID, which edits retain when an authoring operation returns a general definition. Save keeps the
+existing revision guard. HTTP envelopes, execution views and React Flow presentation remain local
+models; they are not copies of the authored graph or the engine's internal execution record.
+
+Keep the complete definition through editing, undo and save, including fields the current screen
+does not edit. Narrow canonical node variants before reading their fields; catalog rendering and
+tolerant handling of unknown runtime JSON do not widen the authored union. For model changes, verify
+the full graph after a real editor operation and save, and check the emitted browser bundle for
+accidental engine execution, storage or Node dependencies. Visible changes also need inspection in
+the running interface.
+
 ## Pull-request policy
 
 Every pull request to `master` is checked by **PR Policy**. The check reports all

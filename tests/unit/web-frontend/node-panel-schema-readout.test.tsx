@@ -15,14 +15,20 @@
  */
 
 import React from "react";
-import { afterEach, beforeAll, beforeEach, describe, expect, test } from "@jest/globals";
-import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, beforeAll, beforeEach, describe, expect, jest, test } from "@jest/globals";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
 import type { Node } from "@xyflow/react";
 import { I18nextProvider } from "react-i18next";
+import { MemoryRouter } from "react-router-dom";
 import i18n from "../../../packages/web-frontend/src/i18n";
 import type { NodeTypeIndex } from "../../../packages/web-frontend/src/types/node-type-catalog";
-import type { WorkflowGraph } from "../../../packages/web-frontend/src/types/workflow-types";
+import type {
+  ProgressContentTemplate,
+  WorkflowGraph,
+} from "../../../packages/web-frontend/src/types/workflow-types";
+import { stepsOf } from "../../../packages/web-frontend/src/components/run/model";
+import { apiClient } from "../../../packages/web-frontend/src/services/api-client";
 
 let NodePanel: typeof import("../../../packages/web-frontend/src/components/run/NodePanel").NodePanel;
 let NodeDetailSheet: typeof import("../../../packages/web-frontend/src/components/workflow/NodeDetailSheet").NodeDetailSheet;
@@ -42,6 +48,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   cleanup();
+  jest.restoreAllMocks();
 });
 
 const NODE_TYPE = "corporate-messenger.send";
@@ -75,14 +82,17 @@ function workflowWith(config: Record<string, unknown>): WorkflowGraph {
     id: "wf-1",
     metadata: { name: "Catalog", description: "", version: "1.0.0" },
     nodes: [
+      { id: "start", type: "start", connections: { default: "sender" } },
       {
         id: "sender",
         type: NODE_TYPE,
         progressActiveLabel: "Отправка сообщения",
         config,
+        connections: { success: "end" },
       },
+      { id: "end", type: "end" },
     ],
-  } as unknown as WorkflowGraph;
+  };
 }
 
 function renderPanel(config: Record<string, unknown>): void {
@@ -202,5 +212,108 @@ describe("the node panel of a node drawn from the catalog", () => {
     expect(screen.getByText("standalone")).toBeInTheDocument();
     expect(screen.getByText("login")).toBeInTheDocument();
     expect(screen.getByText("not set")).toBeInTheDocument();
+  });
+});
+
+describe("authored node details", () => {
+  function authoredWorkflow(progressActiveContent?: ProgressContentTemplate): WorkflowGraph {
+    return {
+      id: "authored-details",
+      metadata: { name: "Authored details", description: "", version: "1.0.0" },
+      variableRegistry: {
+        workspace_path: { type: "string", description: "Working directory", default: "./work" },
+        round: { type: "integer", description: "Review round", default: 1 },
+      },
+      nodes: [
+        { id: "start", type: "start", connections: { default: "materialize" } },
+        {
+          id: "materialize",
+          type: "materialize",
+          basePath: "{{workspace_path}}",
+          files: [
+            { path: "{{playbook:reference-name}}/reference.md", content: "" },
+            { path: "plans/.keep", content: "" },
+          ],
+          connections: { success: "review" },
+        },
+        {
+          id: "review",
+          type: "agent-directive",
+          directive: "Review the implementation.",
+          completionCondition: "Review complete",
+          progressActiveContent,
+          connections: { success: "end" },
+        },
+        { id: "end", type: "end" },
+      ],
+    };
+  }
+
+  function renderAuthored(
+    workflow: WorkflowGraph,
+    nodeId: string,
+    onSelectVariable?: (name: string) => void,
+  ) {
+    return render(
+      <MemoryRouter>
+        <I18nextProvider i18n={i18n}>
+          <NodePanel
+            workflow={workflow}
+            blocks={[]}
+            nodeId={nodeId}
+            onBack={() => {}}
+            onSelectVariable={onSelectVariable}
+          />
+        </I18nextProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  test("reads materialize paths from the authored files and retains their playbook references", async () => {
+    jest
+      .spyOn(apiClient, "getPlaybook")
+      .mockRejectedValue(new Error("Fixture playbook unavailable"));
+    renderAuthored(authoredWorkflow(), "materialize");
+
+    const materialize = screen.getByTestId("node-panel-materialize");
+    expect(within(materialize).getByText("{{workspace_path}}")).toBeInTheDocument();
+    expect(
+      within(materialize).getByText("{{playbook:reference-name}}/reference.md"),
+    ).toBeInTheDocument();
+    expect(within(materialize).getByText("plans/.keep")).toBeInTheDocument();
+    expect(
+      await screen.findByTestId("playbook-reference-unavailable-reference-name"),
+    ).toBeInTheDocument();
+    expect(apiClient.getPlaybook).toHaveBeenCalledWith("reference-name", {});
+  });
+
+  test("renders every structured active-content field with interactive template references", () => {
+    const content: ProgressContentTemplate = {
+      summary: "Review round {{round}}",
+      details: ["Read the changed source", "Compare the result with requirements"],
+      outcome: "Findings recorded",
+      next: "Return to the implementation owner",
+    };
+    const workflow = authoredWorkflow(content);
+    const onSelectVariable = jest.fn<(name: string) => void>();
+    renderAuthored(workflow, "review", onSelectVariable);
+
+    expect(stepsOf(workflow, ["review"])[0].progressContent).toBe(content);
+    const shown = screen.getByTestId("node-panel-progress-content");
+    expect(shown).toHaveTextContent("Review round {{round}}");
+    expect(shown).toHaveTextContent("Read the changed source");
+    expect(shown).toHaveTextContent("Compare the result with requirements");
+    expect(shown).toHaveTextContent("Findings recorded");
+    expect(shown).toHaveTextContent("Return to the implementation owner");
+    fireEvent.click(within(shown).getByRole("button", { name: "{{round}}" }));
+    expect(onSelectVariable).toHaveBeenCalledWith("round");
+  });
+
+  test("preserves absent, empty and explicitly blank active-content values", () => {
+    expect(stepsOf(authoredWorkflow(), ["review"])[0].progressContent).toBeNull();
+    const empty: ProgressContentTemplate = {};
+    expect(stepsOf(authoredWorkflow(empty), ["review"])[0].progressContent).toBe(empty);
+    const blank: ProgressContentTemplate = { summary: "", details: [], outcome: "", next: "" };
+    expect(stepsOf(authoredWorkflow(blank), ["review"])[0].progressContent).toBe(blank);
   });
 });

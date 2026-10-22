@@ -16,8 +16,142 @@ import { test, expect } from "./fixtures.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
 import { graphOverview } from "./helpers/diagram.js";
+import type { WorkflowGraph } from "@mcp-moira/workflow-engine/types";
 
 const BASE_URL = getTestBaseUrl();
+
+test("authored file paths, structured progress and integer declarations survive an editor save", async ({
+  page,
+}, testInfo) => {
+  await loginAsAdmin(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const workflow: WorkflowGraph = {
+    metadata: {
+      name: `Authored model browser ${Date.now()}`,
+      version: "1.0.0",
+      description: "Full definition editing",
+    },
+    variableRegistry: {
+      count: { type: "integer", description: "Completed items", minimum: 0, default: 0 },
+      items: {
+        type: "array",
+        description: "Work items",
+        items: { type: "string" },
+        default: ["First"],
+      },
+      source: { type: "string", description: "File source", default: "A real authored file" },
+    },
+    runtimePolicy: { externalVariableWrites: { count: { allowedNodeIds: ["review"] } } },
+    systemReminder: "Keep all authored fields.",
+    progress: {
+      nodes: [
+        {
+          id: "work",
+          label: "Prepare and review",
+          content: { summary: "Prepare the source file and review the result." },
+          list: { items: "items", current: "count", indexBase: 0 },
+        },
+      ],
+    },
+    nodes: [
+      { id: "start", type: "start", progressNodeId: "work", connections: { default: "files" } },
+      {
+        id: "files",
+        type: "materialize",
+        progressNodeId: "work",
+        basePath: "./workspace",
+        files: [{ path: "brief.md", from: "source" }],
+        connections: { success: "review" },
+      },
+      {
+        id: "review",
+        type: "agent-directive",
+        progressNodeId: "work",
+        directive: "Inspect the file.",
+        completionCondition: "Reviewed.",
+        humanGate: { label: "Approve", notify: "off" },
+        progressActiveLabel: "Review item {{count}}",
+        progressActiveContent: {
+          summary: "Inspect the authored brief",
+          details: ["Read all source material"],
+          outcome: "Record a decision",
+          next: "Deliver the result",
+        },
+        connections: { success: "end" },
+      },
+      { id: "end", type: "end", progressNodeId: "work" },
+    ],
+  };
+  const createdResponse = await page.request.post(`${BASE_URL}/api/workflows`, {
+    data: { visibility: "private", workflow },
+  });
+  expect(createdResponse.status()).toBe(200);
+  const created = await createdResponse.json();
+  const id: string = created.data.workflowId;
+  const detail = async () => {
+    const response = await page.request.get(`${BASE_URL}/api/workflows/${id}`);
+    expect(response.status()).toBe(200);
+    return (await response.json()).data;
+  };
+  const capture = async (name: string) => {
+    const path = testInfo.outputPath(`${name}.png`);
+    await page.screenshot({ path, fullPage: true, animations: "disabled" });
+    await testInfo.attach(name, { path, contentType: "image/png" });
+  };
+  try {
+    const before = await detail();
+    await page.goto(`${BASE_URL}/workflows/${id}?view=graph&edit=1`);
+    await expect(page.getByTestId("flow-edit-toggle")).toHaveAttribute("aria-pressed", "true");
+    await graphOverview(page);
+    await page.locator('[data-graph-node="files"]').click();
+    const panel = page.getByTestId("node-panel");
+    await expect(panel).toHaveAttribute("data-node-id", "files");
+    await expect(panel.getByText("brief.md", { exact: true })).toBeVisible();
+    await panel.getByText("brief.md", { exact: true }).scrollIntoViewIfNeeded();
+    await capture("authored-materialize-paths");
+
+    await page.locator('[data-graph-node="review"]').click();
+    await expect(panel).toHaveAttribute("data-node-id", "review");
+    const content = page.getByTestId("node-panel-progress-content");
+    await content.scrollIntoViewIfNeeded();
+    await expect(content).toBeVisible();
+    for (const text of [
+      "Inspect the authored brief",
+      "Read all source material",
+      "Record a decision",
+      "Deliver the result",
+    ]) {
+      await expect(content).toContainText(text);
+    }
+    await capture("authored-structured-progress");
+
+    await page.getByRole("tab", { name: /Variables|Переменные/ }).click();
+    await page.getByTestId("registry-count-type").click();
+    await expect(page.getByRole("option", { name: "integer", exact: true })).toBeVisible();
+    await capture("authored-integer-option");
+    await page.getByRole("option", { name: "integer", exact: true }).click();
+    await expect(page.getByTestId("registry-count-type")).toHaveText("integer");
+    await page.getByTestId("registry-count-toggle").click();
+    await page.getByTestId("registry-count-description").fill("Completed items after review");
+    await expect(page.getByTestId("flow-edit-save")).toBeEnabled();
+    await page.getByTestId("flow-edit-save").click();
+    await expect(page.getByTestId("flow-edit-count")).toContainText("0");
+    const after = await detail();
+    expect(after.fileInfo.revision).toBeGreaterThan(before.fileInfo.revision);
+    expect(after.workflow).toEqual({
+      ...before.workflow,
+      variableRegistry: {
+        ...before.workflow.variableRegistry,
+        count: {
+          ...before.workflow.variableRegistry.count,
+          description: "Completed items after review",
+        },
+      },
+    });
+  } finally {
+    await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
+  }
+});
 
 test("custom catalog node renders its owner and config schema in the node panel", async ({
   page,

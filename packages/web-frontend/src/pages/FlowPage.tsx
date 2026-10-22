@@ -279,8 +279,7 @@ export const FlowPage: React.FC = () => {
   const hasEdits = editLog.ops.length > 0;
   const process = useMemo<ProcessProjection | null>(() => {
     if (!edited) return null;
-    if (hasEdits || (held !== undefined && !heldIsCurrent))
-      return deriveProcess(edited as unknown as Parameters<typeof deriveProcess>[0]);
+    if (hasEdits || (held !== undefined && !heldIsCurrent)) return deriveProcess(edited);
     return heldProcess ?? null;
   }, [edited, hasEdits, held, heldIsCurrent, heldProcess]);
   // Before the first projection of this workflow the page has nothing to show yet; a refetch for

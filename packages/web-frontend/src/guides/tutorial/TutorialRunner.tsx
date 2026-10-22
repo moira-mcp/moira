@@ -54,9 +54,6 @@ const LESSON_BLOCK: Record<string, string> = {
   "lesson-5": "report",
 };
 
-type Engine = Parameters<typeof checkNewStep>[0];
-const engine = (graph: WorkflowGraph) => graph as unknown as Engine;
-
 function useWide(): boolean {
   const [wide, setWide] = useState(() => window.matchMedia(WIDE_QUERY).matches);
   useEffect(() => {
@@ -85,25 +82,24 @@ function check(
 ): LessonResult | null {
   switch (lesson) {
     case "lesson-1":
-      return checkOwnCopy(engine(graph), engine(example), {
+      return checkOwnCopy(graph, example, {
         visibility: surface.visibility,
         ownedByReader: surface.owner,
       });
     case "lesson-2":
-      return checkNewStep(engine(graph), engine(example));
+      return checkNewStep(graph, example);
     case "lesson-3":
-      return checkConnected(engine(graph), engine(example), issues);
+      return checkConnected(graph, example, issues);
     case "lesson-4":
-      return checkChoice(engine(graph), issues);
+      return checkChoice(graph, issues);
     case "lesson-5":
-      return checkReference(engine(graph), validationErrors);
+      return checkReference(graph, validationErrors);
     default:
       return null;
   }
 }
 
-const savedIssues = (graph: WorkflowGraph) =>
-  deriveProcess(graph as unknown as Parameters<typeof deriveProcess>[0])?.diagnostics ?? [];
+const savedIssues = (graph: WorkflowGraph) => deriveProcess(graph)?.diagnostics ?? [];
 
 export default function TutorialRunner(): React.JSX.Element | null {
   const { t, i18n } = useTranslation();
@@ -125,7 +121,7 @@ export default function TutorialRunner(): React.JSX.Element | null {
   useEffect(() => {
     let live = true;
     apiClient.getWorkflow(`moira/${slug}`).then(
-      (detail) => live && setExample(detail.workflow as unknown as WorkflowGraph),
+      (detail) => live && setExample(detail.workflow),
       () => live && setExample(null),
     );
     return () => {
@@ -247,7 +243,7 @@ export default function TutorialRunner(): React.JSX.Element | null {
   // Lesson 6: a completed run of the copy that answered the new step. Never assumed: looked up.
   const lookForRun = useCallback(async () => {
     if (!surface || !example) return;
-    const stepId = lessonStepId(engine(surface.saved), engine(example));
+    const stepId = lessonStepId(surface.saved, example);
     if (!stepId) return;
     const { executions } = await apiClient
       .getExecutions({ workflowId: surface.flowId, status: ["completed"], mine: true, limit: 20 })
@@ -332,7 +328,7 @@ export default function TutorialRunner(): React.JSX.Element | null {
       });
     }
     if (lesson === "lesson-3") {
-      const id = lessonStepId(engine(surface.draft), engine(example));
+      const id = lessonStepId(surface.draft, example);
       if (!id) return;
       surface.apply({ kind: "set-connection", source: "do-task", key: "success", target: id });
     }
@@ -363,7 +359,7 @@ export default function TutorialRunner(): React.JSX.Element | null {
               completionCondition: t("guides.tutorial.forMe.gapCondition"),
               connections: { success: "end" },
               connectionLabels: { success: t("guides.tutorial.forMe.gapLabel") },
-            } as unknown as WorkflowNode,
+            },
             blockId: "check",
           },
         ],

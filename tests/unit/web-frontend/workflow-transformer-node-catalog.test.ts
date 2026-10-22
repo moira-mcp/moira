@@ -10,7 +10,11 @@
 import { describe, expect, test } from "@jest/globals";
 import { WorkflowTransformer } from "../../../packages/web-frontend/src/utils/workflow-transformer";
 import type { NodeTypeIndex } from "../../../packages/web-frontend/src/types/node-type-catalog";
-import type { WorkflowGraph } from "../../../packages/web-frontend/src/types";
+import type {
+  WorkflowGraph,
+  WorkflowNode,
+  ExtensionNode,
+} from "../../../packages/web-frontend/src/types";
 
 const CATALOG: NodeTypeIndex = {
   "corporate-messenger.send": {
@@ -51,7 +55,7 @@ const CATALOG: NodeTypeIndex = {
   },
 };
 
-function workflowWith(node: Record<string, unknown>): WorkflowGraph {
+function workflowWith(node: WorkflowNode): WorkflowGraph {
   return {
     id: "wf-1",
     metadata: { name: "Catalog", description: "", version: "1.0.0" },
@@ -64,13 +68,14 @@ function workflowWith(node: Record<string, unknown>): WorkflowGraph {
       node,
       { id: "done", type: "end" },
     ],
-  } as unknown as WorkflowGraph;
+  };
 }
 
-const EXTENSION_NODE = {
+const EXTENSION_NODE: ExtensionNode = {
   id: "subject",
   type: "corporate-messenger.send",
   config: { text: "hello", chat: "0/0/e7" },
+  input: { source: "review.result" },
   connections: { success: "done" },
 };
 
@@ -109,6 +114,9 @@ describe("A node type the bundle has no branch for", () => {
     expect(data.schemaScope).toBe("config");
     expect((data.schema as Record<string, unknown>).required).toEqual(["text"]);
     expect(data.config).toEqual({ text: "hello", chat: "0/0/e7" });
+    expect(data.originalNode).toBe(EXTENSION_NODE);
+    expect(data.config).toBe(EXTENSION_NODE.config);
+    expect(data.originalNode).toHaveProperty("input", { source: "review.result" });
   });
 
   test("without the catalog the same node is unknown, and the extension is named", () => {
@@ -139,10 +147,14 @@ describe("A node type the bundle has no branch for", () => {
     expect((node.data as Record<string, unknown>).extensionName).toBe("corporate-messenger");
   });
 
-  test("a built-in type the bundle never knew is drawn as a built-in type, not as unknown", () => {
-    // `lock` and `teleport` are built into the engine and were absent from the browser's own list.
+  test("a canonical built-in without a dedicated renderer uses the built-in catalog view", () => {
     const result = WorkflowTransformer.transformWorkflow(
-      workflowWith({ id: "subject", type: "lock", connections: { success: "done" } }),
+      workflowWith({
+        id: "subject",
+        type: "lock",
+        reason: "Await approval",
+        connections: { unlocked: "done" },
+      }),
       undefined,
       undefined,
       CATALOG,
@@ -160,13 +172,18 @@ describe("A node type the bundle has no branch for", () => {
     expect(data.config).toMatchObject({
       id: "subject",
       type: "lock",
-      connections: { success: "done" },
+      connections: { unlocked: "done" },
     });
   });
 
   test("a truly unknown type stays unknown even with a catalog", () => {
     const result = WorkflowTransformer.transformWorkflow(
-      workflowWith({ id: "subject", type: "not-a-type", connections: { success: "done" } }),
+      // Deliberately malformed runtime data is outside the authored node contract.
+      workflowWith({
+        id: "subject",
+        type: "not-a-type",
+        connections: { success: "done" },
+      } as unknown as WorkflowNode),
       undefined,
       undefined,
       CATALOG,

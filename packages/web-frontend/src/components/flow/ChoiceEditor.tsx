@@ -44,8 +44,6 @@ interface OptionRow {
   target: string;
 }
 
-type EngineNode = Parameters<typeof readChoice>[0];
-
 /** The dialog's rows: the existing choice, or two options whose first keeps the step's label. */
 function initialRows(choice: Choice | null, primaryLabel: string): OptionRow[] {
   if (!choice) {
@@ -84,9 +82,9 @@ export function ChoiceEditor({ nodeId }: { nodeId: string }): React.JSX.Element 
   const [open, setOpen] = useState(false);
   const node = draft?.nodes.find((n) => n.id === nodeId);
   if (!enabled || !draft || node?.type !== "agent-directive") return null;
-  const existing = readChoice(node as unknown as EngineNode);
+  const existing = readChoice(node);
   // A step that routes in another way keeps that routing: the editor does not offer to replace it.
-  if (!existing && ((node as { cases?: unknown[] }).cases?.length ?? 0) > 0) return null;
+  if (!existing && (node.cases?.length ?? 0) > 0) return null;
   return (
     <>
       <Button

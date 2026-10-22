@@ -5,9 +5,46 @@
 
 import { describe, test, expect, jest } from "@jest/globals";
 import { WorkflowTransformer } from "../../../packages/web-frontend/src/utils/workflow-transformer";
-import { WorkflowGraph } from "../../../packages/web-frontend/src/types";
+import type {
+  WorkflowGraph,
+  TelegramNotificationNode,
+} from "../../../packages/web-frontend/src/types";
 
 describe("WorkflowTransformer", () => {
+  test("keeps the canonical Telegram node and its configured message in the dedicated view", () => {
+    const notification: TelegramNotificationNode = {
+      id: "notify",
+      type: "telegram-notification",
+      message: "Review ready",
+      chatId: "configured-chat",
+      parseMode: "HTML",
+      disableNotification: true,
+      attachProgressImage: true,
+      connections: { default: "end" },
+    };
+    const workflow: WorkflowGraph = {
+      id: "telegram-view",
+      metadata: { name: "Telegram view", version: "1.0.0", description: "Canonical node" },
+      nodes: [
+        { id: "start", type: "start", connections: { default: "notify" } },
+        notification,
+        { id: "end", type: "end" },
+      ],
+    };
+
+    const view = WorkflowTransformer.transformWorkflow(workflow).nodes.find(
+      (node) => node.id === "notify",
+    )!;
+
+    expect(view.type).toBe("telegram-notification");
+    expect(view.data).toMatchObject({
+      message: "Review ready",
+      chatId: "configured-chat",
+      parseMode: "HTML",
+    });
+    expect(view.data.originalNode).toBe(notification);
+  });
+
   describe("Materialize Node", () => {
     test("transforms materialize with a content-free file summary and success/error edges", () => {
       const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);

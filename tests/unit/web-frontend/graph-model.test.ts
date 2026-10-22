@@ -27,7 +27,9 @@ const FLOWS = [
 ];
 
 function graphOf(slug: string): FrontendGraph {
-  return catalogGraph(slug) as unknown as FrontendGraph;
+  const graph = catalogGraph(slug);
+  if (!graph.id) throw new Error(`Catalog graph ${slug} has no loaded identity`);
+  return { ...graph, id: graph.id };
 }
 
 describe("graphModel", () => {
