@@ -22,6 +22,7 @@ child.on("error", (error) => {
   process.exit(1);
 });
 
-child.on("exit", (code) => {
-  process.exit(code ?? 0);
+child.on("exit", (code, signal) => {
+  if (signal) process.kill(process.pid, signal);
+  else process.exit(code ?? 1);
 });

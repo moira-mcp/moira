@@ -4,19 +4,14 @@
  * so both edits must be exact, validated, and must not disturb the rest of the file.
  */
 
-import { execFileSync } from "child_process";
-import path from "path";
 import fs from "fs";
-import os from "os";
 import { randomUUID } from "crypto";
+import { createWorkflowCliFixture } from "../../helpers/workflow-cli-fixture.js";
 
-const WORKFLOW_TOOL = path.join(process.cwd(), "packages/workflow-cli/src/workflow-tool.ts");
+let cli: ReturnType<typeof createWorkflowCliFixture>;
 
 function runWorkflowTool(args: string[]): string {
-  return execFileSync(process.execPath, ["--import", "tsx", WORKFLOW_TOOL, ...args], {
-    encoding: "utf-8",
-    cwd: process.cwd(),
-  });
+  return cli.run(args);
 }
 
 function createTempWorkflow(): string {
@@ -31,7 +26,7 @@ function createTempWorkflow(): string {
       { id: "end", type: "end", connections: {} },
     ],
   };
-  const tmpFile = path.join(os.tmpdir(), `identity-workflow-${randomUUID()}.json`);
+  const tmpFile = cli.path(`identity-workflow-${randomUUID()}.json`);
   fs.writeFileSync(tmpFile, JSON.stringify(workflow, null, 2));
   return tmpFile;
 }
@@ -44,11 +39,12 @@ describe("workflow-tool identity commands", () => {
   let file: string;
 
   beforeEach(() => {
+    cli = createWorkflowCliFixture("workflow-identity-");
     file = createTempWorkflow();
   });
 
   afterEach(() => {
-    fs.rmSync(file, { force: true });
+    cli.cleanup();
   });
 
   describe("set-name", () => {

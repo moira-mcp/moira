@@ -3,31 +3,34 @@
  * Tests variable extraction from workflows
  */
 
-import { execFileSync } from "child_process";
 import path from "path";
 import fs from "fs";
-import os from "os";
 import { randomUUID } from "crypto";
+import { createWorkflowCliFixture } from "../../helpers/workflow-cli-fixture.js";
 
-const WORKFLOW_TOOL = path.join(process.cwd(), "packages/workflow-cli/bin/moira-workflow.js");
+let cli: ReturnType<typeof createWorkflowCliFixture>;
 
-function runWorkflowTool(args: string[], cwd = process.cwd()): string {
-  return execFileSync(process.execPath, [WORKFLOW_TOOL, ...args], {
-    encoding: "utf-8",
-    cwd,
-  });
+beforeEach(() => {
+  cli = createWorkflowCliFixture("workflow-variables-");
+});
+
+afterEach(() => {
+  cli.cleanup();
+});
+
+function runWorkflowTool(args: string[]): string {
+  return cli.run(args);
 }
 
 function createTempWorkflow(workflow: object): string {
-  const tmpDir = os.tmpdir();
-  const tmpFile = path.join(tmpDir, `test-workflow-${randomUUID()}.json`);
+  const tmpFile = cli.path(`test-workflow-${randomUUID()}.json`);
   fs.writeFileSync(tmpFile, JSON.stringify(workflow, null, 2));
   return tmpFile;
 }
 
 describe("agent-facing CLI diagnostics", () => {
   test("--version identifies both the package version and exact source checkout", () => {
-    const output = runWorkflowTool(["--version"], os.tmpdir());
+    const output = runWorkflowTool(["--version"]);
 
     expect(output).toContain("@mcp-moira/workflow-cli 0.6.0");
     expect(output).toContain(path.normalize("packages/workflow-cli/src/workflow-tool.ts"));
@@ -184,8 +187,6 @@ describe("workflow-tool variables command", () => {
       });
     } finally {
       fs.unlinkSync(tmpFile);
-      const backup = `${tmpFile}.backup`;
-      if (fs.existsSync(backup)) fs.unlinkSync(backup);
     }
   });
   describe("initialData extraction", () => {
@@ -514,7 +515,7 @@ describe("workflow-tool variables command", () => {
 
     test("set-variable-schema reads complex JSON Schema from a file", () => {
       const tmpFile = createTempWorkflow(registryWorkflow());
-      const schemaFile = path.join(os.tmpdir(), `variable-schema-${randomUUID()}.json`);
+      const schemaFile = cli.path(`variable-schema-${randomUUID()}.json`);
       const schema = {
         type: "object",
         description: "Structured result",
@@ -586,7 +587,7 @@ describe("workflow-tool variables command", () => {
         ],
       };
       const tmpFile = createTempWorkflow(workflow);
-      const descriptionFile = path.join(os.tmpdir(), `workflow-description-${randomUUID()}.txt`);
+      const descriptionFile = cli.path(`workflow-description-${randomUUID()}.txt`);
       fs.writeFileSync(descriptionFile, "First paragraph.\n\nSecond paragraph.\n");
       try {
         runWorkflowTool([tmpFile, "set-description", "--file", descriptionFile, "--force"]);
@@ -609,7 +610,7 @@ describe("workflow-tool variables command", () => {
         ],
       };
       const tmpFile = createTempWorkflow(workflow);
-      const reminderFile = path.join(os.tmpdir(), `workflow-reminder-${randomUUID()}.txt`);
+      const reminderFile = cli.path(`workflow-reminder-${randomUUID()}.txt`);
       fs.writeFileSync(reminderFile, "One step at a time.\n\nName the outcome explicitly.\n");
       try {
         runWorkflowTool([tmpFile, "set-system-reminder", "--file", reminderFile, "--force"]);
@@ -709,7 +710,7 @@ describe("workflow-tool variables command", () => {
 
     test("replace preserves node position and requires the same id", () => {
       const tmpFile = createTempWorkflow(migrationWorkflow());
-      const replacementFile = path.join(os.tmpdir(), `replacement-${Date.now()}.json`);
+      const replacementFile = cli.path(`replacement-${Date.now()}.json`);
       fs.writeFileSync(
         replacementFile,
         JSON.stringify({

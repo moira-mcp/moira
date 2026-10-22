@@ -1,21 +1,15 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { createWorkflowCliFixture } from "../../helpers/workflow-cli-fixture.js";
 
-const WORKFLOW_TOOL = path.join(process.cwd(), "packages/workflow-cli/bin/moira-workflow.js");
+let cli: ReturnType<typeof createWorkflowCliFixture>;
 
 function run(args: string[]): string {
-  return execFileSync(process.execPath, [WORKFLOW_TOOL, ...args], {
-    cwd: process.cwd(),
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  return cli.run(args);
 }
 
 function fixture(): string {
-  const file = path.join(os.tmpdir(), `workflow-progress-${randomUUID()}.json`);
+  const file = cli.path(`workflow-progress-${randomUUID()}.json`);
   fs.writeFileSync(
     file,
     JSON.stringify({
@@ -52,15 +46,16 @@ describe("workflow-tool progress authoring", () => {
   let file: string;
 
   beforeEach(() => {
+    cli = createWorkflowCliFixture("workflow-progress-");
     file = fixture();
   });
 
   afterEach(() => {
-    fs.rmSync(file, { force: true });
+    cli.cleanup();
   });
 
   test("authors and clears the complete static progress graph from a file", () => {
-    const progressFile = path.join(os.tmpdir(), `progress-${randomUUID()}.json`);
+    const progressFile = cli.path(`progress-${randomUUID()}.json`);
     const progress = {
       title: "Task {{executionId}}",
       nodes: [{ id: "work", label: "Work" }],

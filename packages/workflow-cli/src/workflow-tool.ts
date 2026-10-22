@@ -30,9 +30,8 @@
  *   set-variable <name> <value>      Set declared global in variableRegistry
  *   list-variables                   List declared globals from variableRegistry
  *   set-name <text>                  Set workflow display name
- *   set-owner <system-owner>         Set the catalog owner (system-admin | system-moira)
  *   set-owner <system-owner>         Set the catalog owner: system-admin (private) or system-moira (public)
-  set-slug <slug>                  Set workflow catalog slug (kebab-case)
+ *   set-slug <slug>                  Set workflow catalog slug (kebab-case)
  *   set-description <text>           Set workflow description
  *   set-system-reminder <text|none>  Set or remove the per-step system reminder
  *   set-tags <tag,tag,...|none>      Set or remove catalog tags
@@ -80,6 +79,7 @@ import {
 } from "@mcp-moira/shared/services/workflow-query-service";
 import { readCatalogEntry } from "@mcp-moira/shared/services/workflow-catalog";
 import { HUMAN_GATE_DURATION_PATTERN } from "@mcp-moira/shared/utils/human-gate-duration";
+import { canonicalJson } from "@mcp-moira/shared/canonical-json";
 import {
   validateVersionChange,
   isValidSemver,
@@ -162,13 +162,18 @@ function createBackup(filePath: string): string {
   ensureBackupsDir();
 
   const fileName = path.basename(filePath, ".json");
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -5);
-  const backupFileName = `${fileName}.backup-${timestamp}.json`;
-  const backupPath = path.join(BACKUPS_DIR, backupFileName);
-
-  fs.copyFileSync(filePath, backupPath);
-  console.log(c("dim", `📦 Backup created: ${backupPath}`));
-  return backupPath;
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  for (let attempt = 0; ; attempt++) {
+    const suffix = attempt === 0 ? "" : `-${attempt}`;
+    const backupPath = path.join(BACKUPS_DIR, `${fileName}.backup-${timestamp}${suffix}.json`);
+    try {
+      fs.copyFileSync(filePath, backupPath, fs.constants.COPYFILE_EXCL);
+      console.log(c("dim", `📦 Backup created: ${backupPath}`));
+      return backupPath;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+  }
 }
 
 // === WORKFLOW LOADING ===
@@ -1440,6 +1445,20 @@ function showStructure(workflow: WorkflowGraph, config: StructureConfig): void {
 }
 
 // === DIFF COMMAND ===
+/** Compare JSON object fields without ignoring absent fields or depending on object key order. */
+function changedFields(left: object, right: object, excluded: string[] = []): string[] {
+  const before = left as Record<string, unknown>;
+  const after = right as Record<string, unknown>;
+  return [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .sort()
+    .filter(
+      (key) =>
+        !excluded.includes(key) &&
+        (Object.hasOwn(before, key) !== Object.hasOwn(after, key) ||
+          canonicalJson(before[key]) !== canonicalJson(after[key])),
+    );
+}
+
 function cmdDiff(workflow1: WorkflowGraph, workflow2Path: string): void {
   const workflow2 = loadWorkflow(workflow2Path);
 
@@ -1449,22 +1468,19 @@ function cmdDiff(workflow1: WorkflowGraph, workflow2Path: string): void {
   console.log("");
 
   // Compare metadata
-  const metadataChanges: string[] = [];
-  if (workflow1.metadata.name !== workflow2.metadata.name) {
-    metadataChanges.push(`name: "${workflow1.metadata.name}" → "${workflow2.metadata.name}"`);
-  }
-  if (workflow1.metadata.version !== workflow2.metadata.version) {
-    metadataChanges.push(
-      `version: "${workflow1.metadata.version}" → "${workflow2.metadata.version}"`,
-    );
-  }
-  if (workflow1.metadata.description !== workflow2.metadata.description) {
-    metadataChanges.push(`description changed`);
-  }
+  const metadataChanges = changedFields(workflow1.metadata, workflow2.metadata);
 
   if (metadataChanges.length > 0) {
     console.log(c("yellow", "📋 Metadata changes:"));
-    metadataChanges.forEach((change) => console.log(`  ${change}`));
+    metadataChanges.forEach((change) => {
+      if (change === "name" || change === "version") {
+        console.log(
+          `  ${change}: "${workflow1.metadata[change]}" → "${workflow2.metadata[change]}"`,
+        );
+      } else {
+        console.log(`  ${change} changed`);
+      }
+    });
     console.log("");
   }
 
@@ -1494,42 +1510,7 @@ function cmdDiff(workflow1: WorkflowGraph, workflow2Path: string): void {
   for (const [id, node1] of nodes1Map) {
     const node2 = nodes2Map.get(id);
     if (node2) {
-      const changes: string[] = [];
-      if (node1.type !== node2.type) changes.push("type");
-      if (JSON.stringify(node1.connections) !== JSON.stringify(node2.connections))
-        changes.push("connections");
-      if ("directive" in node1 && "directive" in node2 && node1.directive !== node2.directive)
-        changes.push("directive");
-      if (
-        "completionCondition" in node1 &&
-        "completionCondition" in node2 &&
-        node1.completionCondition !== node2.completionCondition
-      )
-        changes.push("completionCondition");
-      if (
-        "inputSchema" in node1 &&
-        "inputSchema" in node2 &&
-        JSON.stringify(node1.inputSchema) !== JSON.stringify(node2.inputSchema)
-      )
-        changes.push("inputSchema");
-      if (
-        "cases" in node1 &&
-        "cases" in node2 &&
-        JSON.stringify(node1.cases) !== JSON.stringify(node2.cases)
-      )
-        changes.push("cases");
-      if ("message" in node1 && "message" in node2 && node1.message !== node2.message)
-        changes.push("message");
-      if (
-        "initialData" in node1 &&
-        "initialData" in node2 &&
-        JSON.stringify(node1.initialData) !== JSON.stringify(node2.initialData)
-      )
-        changes.push("initialData");
-      // Present on one side only counts too: marking or unmarking a step is a change.
-      const gate1 = node1.type === "agent-directive" ? node1.humanGate : undefined;
-      const gate2 = node2.type === "agent-directive" ? node2.humanGate : undefined;
-      if (JSON.stringify(gate1) !== JSON.stringify(gate2)) changes.push("humanGate");
+      const changes = changedFields(node1, node2);
 
       if (changes.length > 0) {
         modifiedNodes.push({ id, changes });
@@ -1557,11 +1538,15 @@ function cmdDiff(workflow1: WorkflowGraph, workflow2Path: string): void {
     console.log("");
   }
 
-  // Compare systemReminder
-  if (workflow1.systemReminder !== workflow2.systemReminder) {
-    console.log(c("magenta", "📝 systemReminder changed"));
+  const rootChanges = changedFields(workflow1, workflow2, ["metadata", "nodes"]);
+  for (const field of rootChanges) {
+    console.log(c("magenta", `📝 ${field} changed`));
     console.log("");
   }
+  const nodeOrderChanged =
+    canonicalJson(workflow1.nodes.map((node) => node.id)) !==
+    canonicalJson(workflow2.nodes.map((node) => node.id));
+  if (nodeOrderChanged) console.log(c("magenta", "📝 nodes order changed\n"));
 
   // Summary
   const totalChanges =
@@ -1569,7 +1554,8 @@ function cmdDiff(workflow1: WorkflowGraph, workflow2Path: string): void {
     addedNodes.length +
     removedNodes.length +
     modifiedNodes.length +
-    (workflow1.systemReminder !== workflow2.systemReminder ? 1 : 0);
+    rootChanges.length +
+    (nodeOrderChanged ? 1 : 0);
 
   if (totalChanges === 0) {
     console.log(c("green", "✓ Workflows are identical"));
@@ -1678,12 +1664,18 @@ async function syncWorkflow(sourcePath: string, destPath: string): Promise<void>
   // Validate destination catalog metadata before any write, even though its graph is replaced.
   getExecutableWorkflow(destPath, destinationWorkflow);
   const synchronizedWorkflow: WorkflowGraph = JSON.parse(JSON.stringify(sourceExecutableWorkflow));
-  synchronizedWorkflow.id = destinationWorkflow.id;
+  if (Object.hasOwn(destinationWorkflow, "id")) {
+    synchronizedWorkflow.id = destinationWorkflow.id;
+  } else {
+    delete synchronizedWorkflow.id;
+  }
   const sourceRecord = synchronizedWorkflow as WorkflowGraph & Record<string, unknown>;
   const destinationRecord = destinationWorkflow as WorkflowGraph & Record<string, unknown>;
   for (const field of ["slug", "owner", "visibility"] as const) {
-    if (destinationRecord[field] !== undefined) {
+    if (Object.hasOwn(destinationRecord, field)) {
       sourceRecord[field] = destinationRecord[field];
+    } else {
+      delete sourceRecord[field];
     }
   }
   synchronizedWorkflow.metadata.author ??= destinationWorkflow.metadata.author;
@@ -1705,6 +1697,8 @@ async function syncWorkflow(sourcePath: string, destPath: string): Promise<void>
   // so the engine schema remains strict and a workspace copy cannot overwrite migration history.
   if (destinationRecord.previousSlugs !== undefined) {
     sourceRecord.previousSlugs = JSON.parse(JSON.stringify(destinationRecord.previousSlugs));
+  } else {
+    delete sourceRecord.previousSlugs;
   }
 
   createBackup(destPath);
@@ -1900,16 +1894,15 @@ ${c("cyan", "Examples:")}
   };
 
   for (let i = 2; i < args.length; i++) {
-    if (args[i] === "--directive" && args[i + 1]) {
-      config.options.directive = args[i + 1];
-      i++;
-    } else if (args[i] === "--directive-file" && args[i + 1]) {
-      const filePath = args[i + 1];
-      if (!fs.existsSync(filePath)) {
-        console.error(c("red", `ERROR: Directive file not found: ${filePath}`));
+    if (args[i] === "--directive") {
+      if (args[i + 1] === undefined || VERSION_SWITCHES.has(args[i + 1])) {
+        console.error(c("red", "ERROR: --directive requires a value"));
         process.exit(1);
       }
-      config.options.directive = fs.readFileSync(filePath, "utf-8").trim();
+      config.options.directive = args[i + 1];
+      i++;
+    } else if (args[i] === "--directive-file") {
+      config.options.directive = readTextArgumentFromFile(args, "--directive-file", "Directive");
       i++;
     } else if (args[i] === "--cases" && args[i + 1]) {
       config.options.cases = args[i + 1];
@@ -2328,12 +2321,13 @@ async function main(): Promise<void> {
       cmdGetVariable(workflow, config.nodeId);
       break;
 
-    case "set-variable":
+    case "set-variable": {
       if (!config.nodeId) {
         console.error(c("red", "ERROR: Missing variable name"));
         process.exit(1);
       }
-      if (!config.options.directive && args.length < 4) {
+      const valueArguments = args.slice(3).filter((argument) => !VERSION_SWITCHES.has(argument));
+      if (config.options.directive === undefined && valueArguments.length === 0) {
         console.error(c("red", "ERROR: Missing variable value"));
         console.log("Usage: set-variable <name> <value>");
         process.exit(1);
@@ -2341,11 +2335,12 @@ async function main(): Promise<void> {
       createBackup(config.file);
       saveWorkflow(
         config.file,
-        setVariable(workflow, config.nodeId, config.options.directive || args.slice(3).join(" ")),
+        setVariable(workflow, config.nodeId, config.options.directive ?? valueArguments.join(" ")),
         originalWorkflow,
         saveOptions,
       );
       break;
+    }
 
     case "set-variable-schema": {
       if (!config.nodeId) {

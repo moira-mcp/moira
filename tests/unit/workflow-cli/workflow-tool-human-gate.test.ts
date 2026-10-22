@@ -1,21 +1,13 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { stripVTControlCharacters } from "node:util";
+import { createWorkflowCliFixture } from "../../helpers/workflow-cli-fixture.js";
 
-const WORKFLOW_TOOL = path.join(process.cwd(), "packages/workflow-cli/bin/moira-workflow.js");
+let cli: ReturnType<typeof createWorkflowCliFixture>;
 
 /** The tool's output without its terminal colours. */
 function run(args: string[]): string {
-  return stripVTControlCharacters(
-    execFileSync(process.execPath, [WORKFLOW_TOOL, ...args], {
-      cwd: process.cwd(),
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    }),
-  );
+  return stripVTControlCharacters(cli.run(args));
 }
 
 const APPROVAL = {
@@ -34,7 +26,7 @@ function nodeOf(file: string, id: string): Record<string, unknown> {
 }
 
 function fixture(): string {
-  const file = path.join(os.tmpdir(), `workflow-human-gate-${randomUUID()}.json`);
+  const file = cli.path(`workflow-human-gate-${randomUUID()}.json`);
   fs.writeFileSync(
     file,
     JSON.stringify({
@@ -69,13 +61,13 @@ describe("workflow-tool human gate authoring", () => {
   let other: string;
 
   beforeEach(() => {
+    cli = createWorkflowCliFixture("workflow-human-gate-");
     file = fixture();
     other = fixture();
   });
 
   afterEach(() => {
-    fs.rmSync(file, { force: true });
-    fs.rmSync(other, { force: true });
+    cli.cleanup();
   });
 
   test("marks, replaces and unmarks a step, bumping the version each time", () => {

@@ -467,7 +467,7 @@ between blocks, returns and hub blocks are derived from the
 primary graph by `deriveProcess` (`@mcp-moira/workflow-engine/process`), which the validator, the
 CLI `derive` command and `GET /api/workflows/:id/process` share; the CLI's `set-block`, `add-block`,
 `edit-block`, `set-label` and `clear-label` commands author the contract one mutation at a time
-(`docs/WORKFLOW-TOOLS.md`). Workflows without `progress` are
+(`docs/reference/workflow-cli.md`). Workflows without `progress` are
 unaffected. Multiple primary nodes may map to one block. The active primary node is that
 block's focus target, while every other block deterministically focuses its first mapped primary
 node in workflow order.

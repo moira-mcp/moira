@@ -1,18 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "@jest/globals";
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { createWorkflowCliFixture } from "../../helpers/workflow-cli-fixture.js";
 
-const WORKFLOW_TOOL = path.join(process.cwd(), "packages/workflow-cli/bin/moira-workflow.js");
+let cli: ReturnType<typeof createWorkflowCliFixture>;
 
 function run(args: string[]): string {
-  return execFileSync(process.execPath, [WORKFLOW_TOOL, ...args], {
-    cwd: process.cwd(),
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  return cli.run(args);
 }
 
 function read(file: string) {
@@ -21,7 +15,7 @@ function read(file: string) {
 
 /** A two-block process with one unlabelled boundary edge and one unowned routing node. */
 function fixture(): string {
-  const file = path.join(os.tmpdir(), `workflow-process-${randomUUID()}.json`);
+  const file = cli.path(`workflow-process-${randomUUID()}.json`);
   fs.writeFileSync(
     file,
     JSON.stringify({
@@ -72,11 +66,12 @@ describe("workflow-tool process block authoring", () => {
   let file: string;
 
   beforeEach(() => {
+    cli = createWorkflowCliFixture("workflow-process-");
     file = fixture();
   });
 
   afterEach(() => {
-    fs.rmSync(file, { force: true });
+    cli.cleanup();
   });
 
   test("labels a forward edge and an explained return, moves a node, and the contract becomes satisfied", () => {
