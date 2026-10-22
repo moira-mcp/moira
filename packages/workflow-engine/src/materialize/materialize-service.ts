@@ -5,7 +5,8 @@ import {
   GraphTemplateProcessor,
   type UnresolvedPlaybookReference,
 } from "../templates/graph-template-processor.js";
-import { materializeTextFilesSchema, ValidationError } from "@mcp-moira/shared";
+import { materializeTextFilesSchema } from "@mcp-moira/shared/communication-owner-protocol";
+import { ValidationError } from "@mcp-moira/shared/errors";
 
 /**
  * Ceiling for a materialize set delivered into an agent's context instead of onto a filesystem.

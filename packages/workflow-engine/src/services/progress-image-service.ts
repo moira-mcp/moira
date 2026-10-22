@@ -1,11 +1,8 @@
-import {
-  getBaseUrl,
-  metadataRevision,
-  TokenManager,
-  ValidationError,
-  type WorkflowToken,
-  communicationOwnerReceiptSchema,
-} from "@mcp-moira/shared";
+import { getBaseUrl } from "@mcp-moira/shared/urls";
+import { metadataRevision } from "@mcp-moira/shared/metadata-revision";
+import { TokenManager, type WorkflowToken } from "@mcp-moira/shared/services/token-manager";
+import { ValidationError } from "@mcp-moira/shared/errors";
+import { communicationOwnerReceiptSchema } from "@mcp-moira/shared/communication-owner-protocol";
 import type { IDataRepository } from "../interfaces/data-repository.js";
 import {
   normalizeProgressVisualOptions,

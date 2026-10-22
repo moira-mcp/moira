@@ -1,4 +1,5 @@
-import { ConflictError, metadataRevision, ValidationError } from "@mcp-moira/shared";
+import { ConflictError, ValidationError } from "@mcp-moira/shared/errors";
+import { metadataRevision } from "@mcp-moira/shared/metadata-revision";
 import type { WorkflowGraph } from "../interfaces/core-interfaces.js";
 import type { WorkflowExecution } from "../types/base-types.js";
 import { PathResolver } from "./path-resolver.js";

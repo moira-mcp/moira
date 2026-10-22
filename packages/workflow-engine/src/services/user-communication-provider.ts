@@ -1,9 +1,9 @@
 import { TelegramCommunicationAdapter } from "./telegram-communication-adapter.js";
-import {
-  AppError,
-  type CommunicationOwnerScope,
-  type CommunicationOwnerSubmit,
-} from "@mcp-moira/shared";
+import { AppError } from "@mcp-moira/shared/errors";
+import type {
+  CommunicationOwnerScope,
+  CommunicationOwnerSubmit,
+} from "@mcp-moira/shared/communication-owner-protocol";
 import {
   CommunicationChannelRegistry,
   UserCommunicationService,

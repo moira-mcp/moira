@@ -11,6 +11,28 @@
 - **GraphTemplateProcessor** - `{{variable}}` interpolation
 - **ContextManager** - Variable and state management
 
+### Shared Module Boundaries
+
+`@mcp-moira/shared` contains both foundation utilities and application services. Engine runtime
+imports select their actual owners: logging from `/logging/logger`, errors from `/errors`, metrics
+from `/metrics`, and canonical JSON from `/canonical-json`. Foundation modules and their runtime
+dependencies do not import shared application services, SQL repositories or the workflow engine.
+Use the narrow exports rather than the shared root barrel when extending these dependencies.
+
+SQL connections and repositories remain application dependencies under `/database/…`.
+`@mcp-moira/shared/services` exposes the existing singleton factories; individual service exports
+identify their domain owners. Engine storage adapters and handlers compose these services explicitly.
+Repositories own persistence and synchronous transactions, including definition changes and gate
+waiting updates. A narrow application import does not make its target a foundation utility.
+
+Shared application code uses the engine's canonical `/migration` and `/human-gate` entries for
+definition migration and gate evaluation. Workflow mutation uses `GraphValidator` through
+`@mcp-moira/workflow-engine/validation`, including its live extension registry validation. Execution,
+migration and validation algorithms stay with the engine; shared persistence calls those owners.
+The packages therefore depend on each other at application composition points, while the foundation
+module graph remains closed. Narrow exports point to the existing implementations, preserving error
+class identity, metrics and service singletons.
+
 ### Storage Layer
 
 ```typescript

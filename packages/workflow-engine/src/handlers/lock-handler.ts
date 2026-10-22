@@ -18,7 +18,9 @@ import { IGraphExecutionEngine } from "../interfaces/graph-execution-engine.js";
 import { AgentMessageQueue } from "../services/agent-message-queue.js";
 import { createTrustedExecutionLock } from "../services/trusted-lock-delivery.js";
 import { GraphTemplateProcessor } from "../templates/graph-template-processor.js";
-import { createLogger, WorkflowLogger, InternalError, getLockService } from "@mcp-moira/shared";
+import { createLogger, type WorkflowLogger } from "@mcp-moira/shared/logging/logger";
+import { InternalError } from "@mcp-moira/shared/errors";
+import { getLockService } from "@mcp-moira/shared/services";
 
 /**
  * Handler for lock nodes

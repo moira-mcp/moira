@@ -15,18 +15,16 @@ import { INodeHandler, WorkflowGraph } from "../interfaces/core-interfaces.js";
 import { IDataRepository } from "../interfaces/data-repository.js";
 import { AgentMessageQueue } from "../services/agent-message-queue.js";
 import { missingExpressionVariables } from "../services/continuation-diagnosis.js";
+import { createLogger, type WorkflowLogger } from "@mcp-moira/shared/logging/logger";
 import {
-  createLogger,
-  WorkflowLogger,
   AppError,
   isOperationalError,
   ConfigurationError,
   InternalError,
   ValidationError,
-  sanitizeInput,
-  type ExecutionError,
-  type ExecutionErrorType,
-} from "@mcp-moira/shared";
+} from "@mcp-moira/shared/errors";
+import { sanitizeInput } from "@mcp-moira/shared/logging/sanitize-input";
+import type { ExecutionError, ExecutionErrorType } from "@mcp-moira/shared/execution-error";
 import { StartNodeHandler } from "../handlers/start-handler.js";
 import { EndNodeHandler } from "../handlers/end-handler.js";
 import { AgentDirectiveHandler } from "../handlers/agent-directive-handler.js";
@@ -60,7 +58,7 @@ import {
   IGraphExecutionEngine,
   GraphExecutionResult,
 } from "../interfaces/graph-execution-engine.js";
-import { workflowStepDurationSeconds } from "@mcp-moira/shared";
+import { workflowStepDurationSeconds } from "@mcp-moira/shared/metrics";
 
 export class GraphExecutionEngine implements IGraphExecutionEngine {
   private nodeHandlers: Map<string, INodeHandler> = new Map();

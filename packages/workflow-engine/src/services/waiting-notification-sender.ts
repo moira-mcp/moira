@@ -11,12 +11,12 @@
  * by the writer.) Time comes from the injected clock, so tests drive it.
  */
 
-import {
-  createLogger,
-  personWaitKeys,
-  type ExecutionNotificationRepository,
-} from "@mcp-moira/shared";
-import type { ExecutionNotificationRow } from "@mcp-moira/shared";
+import { createLogger } from "@mcp-moira/shared/logging/logger";
+import { personWaitKeys } from "@mcp-moira/shared/database/execution-notification";
+import type {
+  ExecutionNotificationRepository,
+  ExecutionNotificationRow,
+} from "@mcp-moira/shared/database/repositories/execution-notification-repository";
 import type { IDataRepository } from "../interfaces/data-repository.js";
 import type { WorkflowGraph } from "../interfaces/core-interfaces.js";
 import type { WorkflowExecution } from "../types/base-types.js";

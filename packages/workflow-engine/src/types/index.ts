@@ -92,5 +92,5 @@ export type {
   ExecutionErrorType,
   ExecutionStatus,
   LegacyExecutionStatus,
-} from "@mcp-moira/shared";
-export { mapLegacyStatus, mapLegacyStatusArray } from "@mcp-moira/shared";
+} from "@mcp-moira/shared/execution-error";
+export { mapLegacyStatus, mapLegacyStatusArray } from "@mcp-moira/shared/execution-error";

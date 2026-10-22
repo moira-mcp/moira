@@ -21,7 +21,8 @@ import {
   projectExecutionRun,
   resolveExecutionTaskTitle,
 } from "../utils/execution-run-projection.js";
-import { metadataRevision, ConflictError } from "@mcp-moira/shared";
+import { metadataRevision } from "@mcp-moira/shared/metadata-revision";
+import { ConflictError } from "@mcp-moira/shared/errors";
 import { withInFlightPause } from "../utils/execution-visits.js";
 import { liveExecution, type CycleOrigin, type EngineVisit } from "../utils/execution-visits.js";
 import { createHash } from "node:crypto";

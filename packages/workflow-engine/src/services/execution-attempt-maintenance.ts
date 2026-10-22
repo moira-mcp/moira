@@ -1,4 +1,5 @@
-import { createLogger, executionMutationAttemptsTotal } from "@mcp-moira/shared";
+import { createLogger } from "@mcp-moira/shared/logging/logger";
+import { executionMutationAttemptsTotal } from "@mcp-moira/shared/metrics";
 import type { IDataRepository } from "../interfaces/data-repository.js";
 
 export interface ExecutionAttemptMaintenanceOptions {

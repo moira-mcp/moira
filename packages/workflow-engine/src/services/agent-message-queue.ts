@@ -3,7 +3,7 @@
  * Decouples nodes from MCP protocol through message accumulation
  */
 
-import { createLogger } from "@mcp-moira/shared";
+import { createLogger } from "@mcp-moira/shared/logging/logger";
 
 // Message types for different scenarios
 export enum AgentMessageType {

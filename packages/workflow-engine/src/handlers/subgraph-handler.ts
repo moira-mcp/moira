@@ -17,7 +17,8 @@ import { IDataRepository } from "../interfaces/data-repository.js";
 import { IGraphExecutionEngine } from "../interfaces/graph-execution-engine.js";
 import { AgentMessageQueue } from "../services/agent-message-queue.js";
 import { ContextMapper } from "../utils/context-mapper.js";
-import { createLogger, NotFoundError, InternalError, ValidationError } from "@mcp-moira/shared";
+import { createLogger } from "@mcp-moira/shared/logging/logger";
+import { NotFoundError, InternalError, ValidationError } from "@mcp-moira/shared/errors";
 
 // Interface for subprocess state stored in context variables
 interface SubprocessState {

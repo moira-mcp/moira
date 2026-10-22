@@ -18,7 +18,7 @@
  */
 
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
-import { GraphValidator } from "@mcp-moira/workflow-engine";
+import { GraphValidator } from "@mcp-moira/workflow-engine/validation";
 import { unresolvedPlaybookReferences } from "./playbook-references.js";
 import type { PlaybookService } from "./playbook-service.js";
 import type {

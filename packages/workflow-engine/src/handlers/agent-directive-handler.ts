@@ -19,7 +19,8 @@ import { IGraphExecutionEngine } from "../interfaces/graph-execution-engine.js";
 import { recordUnresolvedPlaybooks } from "../templates/playbook-degradation.js";
 import { GraphTemplateProcessor } from "../templates/graph-template-processor.js";
 import { SchemaValidator } from "../utils/schema-validator.js";
-import { createLogger, InternalError, ValidationError } from "@mcp-moira/shared";
+import { createLogger } from "@mcp-moira/shared/logging/logger";
+import { InternalError, ValidationError } from "@mcp-moira/shared/errors";
 
 /**
  * Default schema for nodes without inputSchema (Issue #369)

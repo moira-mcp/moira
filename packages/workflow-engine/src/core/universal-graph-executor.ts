@@ -21,22 +21,19 @@ import type {
 import { GraphExecutionEngine } from "./graph-execution-engine.js";
 import { appendEngineVisits } from "../utils/execution-visits.js";
 import { humanGateWaiting } from "../utils/human-gate.js";
+import { createLogger, type WorkflowLogger } from "@mcp-moira/shared/logging/logger";
+import { getDatabase } from "@mcp-moira/shared/database/connection";
+import { GlobalSettingsRepository } from "@mcp-moira/shared/database/repositories/global-settings-repository";
 import {
-  createLogger,
-  WorkflowLogger,
-  getDatabase,
-  GlobalSettingsRepository,
   workflowExecutionsTotal,
   activeExecutionsGauge,
-  updateContext,
-  sanitizeInput,
-  getMcpTextService,
-  getRequestContext,
-  ValidationError,
-  ConflictError,
   executionMutationAttemptsTotal,
-  stepAttemptBindingMatches,
-} from "@mcp-moira/shared";
+} from "@mcp-moira/shared/metrics";
+import { updateContext, getRequestContext } from "@mcp-moira/shared/logging/context";
+import { sanitizeInput } from "@mcp-moira/shared/logging/sanitize-input";
+import { getMcpTextService } from "@mcp-moira/shared/services";
+import { ValidationError, ConflictError } from "@mcp-moira/shared/errors";
+import { stepAttemptBindingMatches } from "@mcp-moira/shared/step-attempt-binding";
 
 import type { ExtensionRegistry } from "../extensions/extension-registry.js";
 import { getActiveExtensionRegistry } from "../extensions/extension-registry-provider.js";

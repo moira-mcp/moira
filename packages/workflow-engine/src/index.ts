@@ -147,4 +147,4 @@ export {
   ConfigurationError,
   normalizeError,
   isOperationalError,
-} from "@mcp-moira/shared";
+} from "@mcp-moira/shared/errors";
