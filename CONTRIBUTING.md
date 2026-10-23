@@ -332,6 +332,9 @@ By contributing, you agree that your contributions will be licensed under the
 
 ## Documentation changes
 
+Follow [portable help source ownership](docs/DOCUMENTATION-STYLE-GUIDE.md#portable-runtime-help-sources)
+for prompt defaults and translations, semantic MDX wrappers, and typed tool exports.
+
 When modifying the public documentation under
 `packages/docs/src/content/docs/`:
 

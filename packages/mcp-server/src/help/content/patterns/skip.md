@@ -23,12 +23,17 @@ Allow users or agents to skip optional workflow steps when not needed. Useful fo
   "type": "agent-directive",
   "id": "optional-analysis",
   "directive": "Perform optional deep analysis. User can skip if not needed by providing skip='yes'.",
+  "completionCondition": "Optional analysis completed or explicitly skipped under the workflow's rules",
   "inputSchema": {
     "type": "object",
     "properties": {
       "analysis_result": { "type": "string" },
       "skip": { "type": "string", "enum": ["yes"] }
-    }
+    },
+    "oneOf": [
+      { "required": ["skip"], "not": { "required": ["analysis_result"] } },
+      { "required": ["analysis_result"], "not": { "required": ["skip"] } }
+    ]
   },
   "connections": { "success": "check-skip" }
 }
@@ -49,7 +54,7 @@ they provide `skip: "yes"`. Otherwise they provide the actual result.
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "skip" },
+        "left": { "contextPath": "optional-analysis.skip" },
         "right": "yes"
       },
       "output": "skipped"
@@ -85,13 +90,16 @@ Skip decisions can be made upfront:
 ```json
 {
   "id": "collect-preferences",
+  "type": "agent-directive",
   "directive": "Ask user: do you want detailed analysis?",
+  "completionCondition": "Actual user preference recorded",
   "inputSchema": {
     "properties": {
       "want_detailed_analysis": { "type": "boolean" }
     },
     "required": ["want_detailed_analysis"]
-  }
+  },
+  "connections": { "success": "route-preferences" }
 }
 ```
 
@@ -103,7 +111,7 @@ Then use condition:
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "want_detailed_analysis" },
+        "left": { "contextPath": "collect-preferences.want_detailed_analysis" },
         "right": false
       },
       "output": "skipped"
@@ -118,11 +126,14 @@ Then use condition:
 
 ## Real Example
 
-From `workflow-management-flow.json`:
+Example of optional review of an existing definition; it does not waive mandatory review or a complete source baseline before editing:
 
 ```json
 {
   "id": "review-existing-workflow",
+  "type": "agent-directive",
+  "completionCondition": "Applicable source review completed, or inapplicable new-workflow source review explicitly skipped",
+  "connections": { "success": "route-review-result" },
   "directive": "If editing, review the existing workflow structure.\nIf creating new workflow, skip this step.",
   "inputSchema": {
     "properties": {

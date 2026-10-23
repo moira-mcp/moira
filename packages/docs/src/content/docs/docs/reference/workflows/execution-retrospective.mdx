@@ -9,10 +9,14 @@ Execution Retrospective analyzes one completed, interrupted, or failed Moira exe
 mcp__moira__start({
   action: "prepare",
   workflowId: "moira/execution-retrospective",
-  parentExecutionId: "<subject-execution-id>"
+  parentExecutionId: "none"
 })
 mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
+
+Give the execution to analyze at intake. Its identity is separate from the parent: a completed
+execution cannot be a parent. Use `"none"` for a standalone retrospective, or the actual running
+caller's execution ID when it starts the retrospective as a child.
 
 ## Evidence and process
 
@@ -22,4 +26,4 @@ Partial or unavailable execution evidence cannot become a confident diagnosis. T
 
 ## Authority
 
-The workflow is proposal-only. It does not edit the analyzed execution, mutate a workflow or prompt, publish, notify, commit, release, deploy, or change production. Use [Workflow Management Flow](./workflow-management-flow/) separately to implement accepted workflow changes.
+The workflow is proposal-only. It does not edit the analyzed execution, mutate a workflow or prompt, publish, notify, commit, release, deploy, or change production. Use [Workflow Management Flow](/docs/reference/workflows/workflow-management-flow/) separately to implement accepted workflow changes.

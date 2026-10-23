@@ -333,7 +333,7 @@ receipts and repair an unconfirmed pause before resuming. A host reboot also int
 login startup recovers saved known VM intent when runtime and credentials are available, without
 replaying commands. It does not run before login or promise uninterrupted guest processes.
 
-Migration 0061 preserves old cloud Local policy/control, relay, grants and operational rows in
+Archived cloud Local policy/control, relay, grants and operational rows remain in
 immutable archives; those rows are not current authority or queued work. The owner imports only
 verified existing native bindings and preserves unknown outcomes. Unsupported private owner state
 remains a refusal: retain the backup, identity, journals and disks rather than editing cloud policy
@@ -342,9 +342,9 @@ or require replacement enrollment.
 
 The server retains only Local resource/repository/connection identity, the approved device/profile
 binding and confirmed retirement evidence. Machine, current state and lifecycle generation come
-from the live owner. Migration 0064 preserves complete resource and binding rows in immutable
-archives separately from migration 0061, while retaining public IDs, revocation values and existing
-guest credentials. It does not recreate VMs or disks. Device revocation does not prove disk removal;
+from the live owner. Complete resource and binding rows remain in immutable
+archives while public IDs, revocation values and existing
+guest credentials are retained. Archival does not recreate VMs or disks. Device revocation does not prove disk removal;
 account deletion remains pending for unresolved or unretired Local resources. Restore the coherent
 pre-migration database and matching owner backup for rollback; do not rebuild work from archives.
 
@@ -685,11 +685,10 @@ See [Troubleshooting](/docs/integration/troubleshooting/#local-codespaces) for r
 Local VMs have no host mounts, shared skills, host MCP gateway or forwarded host credentials,
 environment or agent sockets. External SDK policy denies host/LAN/VPN/metadata/other-VM access and
 direct egress; only locally approved brokered public egress is admitted. Public SDK API/GitHub
-credential placeholders in guest variables are not user tokens. Root-guest controlled checks
-observe host canaries and reachable loopback/LAN/VPN-interface challenge delivery; a proxy connection
-alone is not delivery. They do not establish remote VPN, metadata-service or other-VM physical
-isolation without reachable controlled targets. Those external probes remain unexecuted on the
-validation host. Codespace content is intentionally visible to Moira; review returned code before
+credential placeholders in guest variables are not user tokens. Configuration and a successful proxy
+connection alone do not establish physical isolation. Verifying a deployment's host, LAN, VPN,
+metadata-service and other-VM boundaries requires reachable controlled receivers for those targets;
+an unreachable receiver proves no isolation property. Codespace content is intentionally visible to Moira; review returned code before
 running it on the computer.
 
 ### Enable the GitHub codespace connection
@@ -845,8 +844,7 @@ docker compose up -d
 docker compose ps
 ```
 
-If an existing `.env` came from the older broken template and still contains the removed `0.3.5`
-tag, change it once before updating:
+Use a currently published image tag. To follow the normal public release channel, set:
 
 ```bash
 MOIRA_IMAGE=ghcr.io/moira-mcp/moira:latest
@@ -890,7 +888,7 @@ still in place. The warning never stops an upgrade. A run invalidated because it
 can be repaired afterwards with `session({ action: 'diagnose', ... })` followed by
 `session({ action: 'recover', ... })`; a run whose workflow the upgrade removes cannot, since no
 definition remains to resume against, and the line says which case it is. No warning means no paused
-run would be affected.
+run would be affected only when the affected-run analysis actually ran. An unevaluated check or missing logs is not proof that continuation is safe; inspect the selected update's diagnostics.
 
 When conflict detection has produced a local bundle under `data/.moira-reconciliation/pending`,
 follow its `AGENT INSTRUCTIONS` with one-off Compose CLI containers. The CLI itself does not stop or

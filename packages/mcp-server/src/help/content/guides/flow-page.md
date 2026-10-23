@@ -183,7 +183,7 @@ A change to the structure re-derives the whole process, so a problem can appear 
 did not touch — for example a return created by leading a step back to an earlier block, which
 needs its cause and exit before the save. If you rename or delete a step that one of your paused
 runs is waiting on, the edit bar names the run before you save: after the save that run no longer
-finds its step, so move it on with `session recover`.
+finds its step. Inspect the saved definition, execution state and unfinished work before selecting an authorized `session recover` target; moving forward must not skip unperformed responsibility or replay an uncertain effect.
 
 Every edit goes into the page's edit log. **Undo** takes back the last one — typing into one field
 counts as one edit — and **Discard edits** drops them all. The views re-derive as you type.

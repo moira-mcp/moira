@@ -119,7 +119,7 @@ The bot token is incorrect or expired. Go to @BotFather, send `/mybots`, select 
 
 ### "Network error" or "Timeout"
 
-Temporary connectivity issue. Wait a moment and retry. If persistent, check that the Moira server can reach `api.telegram.org`.
+Check whether the original send was accepted and inspect its retained outcome before retrying. A lost response can mean delivery already happened; do not automatically resend an uncertain message. After a confirmed refusal, repair connectivity or settings. A deliberate new test is a new send. If connectivity remains unavailable, check whether the Moira server can reach `api.telegram.org`.
 
 ### Bot Does Not Respond
 

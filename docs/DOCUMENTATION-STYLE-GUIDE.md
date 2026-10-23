@@ -289,7 +289,7 @@ content under `packages/mcp-server/src/help/content/` and `…/content/ru/`.
 
 ## Portable Runtime Help Sources
 
-For every runtime-discovered topic other than `reference/tools.mdx`, place the English semantic
+For file-backed runtime topics, place the English semantic
 Markdown under `packages/mcp-server/src/help/content/` and its Russian counterpart under
 `packages/mcp-server/src/help/content/ru/`. These sources carry the topic metadata used by runtime.
 The localized MDX shells keep matching Starlight frontmatter and import the content through the
@@ -302,11 +302,27 @@ the shared portable-token renderer. Do not place Astro imports or components in 
 sources.
 
 Quick start and MCP clients use explicit `.before.md` and `.after.md` sources around the client setup
-insertion. Agent instructions use one `.before.md` source followed by the existing system prompt.
-Runtime composes those sources with the pure presentation model; public MDX composes them with the
-interactive Astro component or system-prompt content. Client text lives in the MCP help contract,
+insertion. Runtime composes those sources with the pure presentation model; public MDX composes them
+with the interactive Astro component. Client text lives in the MCP help contract,
 while client identities, code configuration, tokens and deeplinks come from the shared registry and
-generators. The `tools` topic is rendered directly from the pure typed MCP contract.
+generators.
+
+The sole checked-in English default prompt is `config/prompts/systemPrompt.md`. The English
+agent-instructions MDX page imports it directly; portable help reads the same file independently of
+the caller's working directory, following its `.before.md` introduction. The Russian website page
+imports `packages/docs/src/content/docs/docs/SYSTEM-PROMPT-RU.md`; keep that translation semantically
+aligned. MCP help serves English topics; the Russian translation belongs to the website.
+
+These references do not expose an installation's effective MCP instructions. Initialization reads
+the settings database in model → agent → default order, choosing the first non-null value and
+preserving an intentional empty string. It does not fall back to the file-default reference.
+
+Tool facts belong to `packages/mcp-server/src/tools/tool-definitions.ts` and its imported schemas and
+descriptions. Runtime discovery, the `tools` help topic and public tools pages consume that contract.
+From the repository root, run `node --import tsx scripts/export-mcp-context.ts` to write ignored
+`mcp-tools-context.json` in the working directory. The export contains the full static projection and
+its revision, including schemas, description variants and native-file metadata. It is not a live
+session or effective database prompt. Do not maintain another tool inventory.
 
 ## Mandatory Sync With Code Changes
 

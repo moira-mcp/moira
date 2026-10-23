@@ -74,11 +74,11 @@ Entry point for workflow execution. Every workflow must have exactly one start n
 }
 ```
 
-| Property              | Required | Description                   |
-| --------------------- | -------- | ----------------------------- |
-| `id`                  | Yes      | Convention: should be "start" |
-| `type`                | Yes      | Must be `"start"`             |
-| `connections.default` | Yes      | Next node ID                  |
+| Property              | Required | Description                                                  |
+| --------------------- | -------- | ------------------------------------------------------------ |
+| `id`                  | Yes      | Any unique schema-valid node ID; "start" is the example name |
+| `type`                | Yes      | Must be `"start"`                                            |
+| `connections.default` | Yes      | Next node ID                                                 |
 
 The start node seeds the workflow's global variables from the `variableRegistry` `default` values. Declare globals in the workflow-level `variableRegistry`, not on the start node.
 
@@ -94,11 +94,11 @@ Terminal node marking workflow completion. No outgoing connections.
 }
 ```
 
-| Property      | Required | Description                             |
-| ------------- | -------- | --------------------------------------- |
-| `id`          | Yes      | Convention: should be "end"             |
-| `type`        | Yes      | Must be `"end"`                         |
-| `finalOutput` | No       | Context keys to include in final result |
+| Property      | Required | Description                                                |
+| ------------- | -------- | ---------------------------------------------------------- |
+| `id`          | Yes      | Any unique schema-valid node ID; "end" is the example name |
+| `type`        | Yes      | Must be `"end"`                                            |
+| `finalOutput` | No       | Context keys to include in final result                    |
 
 > **note:** End nodes have no connections - they are terminal nodes.
 
@@ -414,7 +414,7 @@ declared globals and satisfy their JSON Schemas; the node publishes nothing on e
 
 ### Error Handling
 
-Expression nodes can fail in two cases:
+Expression nodes can fail in the following cases:
 
 - Division by zero
 - Invalid, unsafe, unresolved, or out-of-bounds member read
@@ -761,14 +761,16 @@ Reads notes matching filter criteria into context variable:
 }
 ```
 
-| Property            | Required | Description                       |
-| ------------------- | -------- | --------------------------------- |
-| `outputVariable`    | Yes      | Context variable to store results |
-| `filter.tag`        | No       | Filter by exact tag               |
-| `filter.keyPattern` | No       | Filter by key prefix              |
-| `filter.keySearch`  | No       | Search in key (contains)          |
-| `singleMode`        | No       | Return object instead of array    |
-| `connections.error` | No       | Error handler node                |
+| Property            | Required | Description                                                              |
+| ------------------- | -------- | ------------------------------------------------------------------------ |
+| `outputVariable`    | Yes      | Context variable to store results                                        |
+| `filter.tag`        | No       | Filter by exact tag                                                      |
+| `filter.keyPattern` | No       | Search within key                                                        |
+| `filter.keySearch`  | No       | Search in key (contains)                                                 |
+| `singleMode`        | No       | Object only for exactly one result in the returned page; otherwise array |
+| `connections.error` | No       | Error handler node                                                       |
+
+Read-note stores `outputVariable` locally: use `{{load-notes.projectNotes}}`. It reads one default-sized page, not every matching note. The snippets assume declared globals for their bare template names and target nodes in the containing graph.
 
 ### Write Note Node
 
@@ -779,7 +781,7 @@ Writes data from context to notes:
   "type": "write-note",
   "id": "save-results",
   "key": "results-{{timestamp}}",
-  "source": "analysisResults",
+  "source": "{{analysisResults}}",
   "tags": ["analysis"],
   "connections": {
     "default": "next-node"
@@ -787,12 +789,18 @@ Writes data from context to notes:
 }
 ```
 
-| Property    | Required | Description                        |
-| ----------- | -------- | ---------------------------------- |
-| `key`       | No\*     | Note key (required in single mode) |
-| `source`    | Yes      | Context variable with value        |
-| `tags`      | No       | Tags to assign                     |
-| `batchMode` | No       | Process array of notes             |
+| Property    | Required | Description                                                           |
+| ----------- | -------- | --------------------------------------------------------------------- |
+| `key`       | No\*     | Note key (required in single mode)                                    |
+| `source`    | Yes      | Single mode: literal text or a template; batch mode: raw context path |
+| `tags`      | No       | Tags to assign                                                        |
+| `batchMode` | No       | Process an array at the raw source path (without template braces)     |
+
+The single-note example assumes `analysisResults` is declared in `variableRegistry` and populated
+before this node. A pure reference such as `{{analysisResults}}` or `{{analyze-requirements.features}}`
+stores the resolved value, serializing objects and arrays as JSON. Unbraced `analysisResults` stores
+that literal text. With `batchMode: true`, use an unbraced context path instead; its value must be an
+array of note entries with `key`, `value`, and optional `tags`.
 
 ### Upsert Note Node
 
@@ -802,25 +810,32 @@ Find-or-create operation:
 {
   "type": "upsert-note",
   "id": "upsert-config",
-  "search": { "tag": "config" },
+  "search": { "tag": "config-{{projectId}}" },
   "keyTemplate": "{{projectId}}-config",
-  "value": "configData",
+  "value": "{{configData}}",
+  "tags": ["config-{{projectId}}"],
   "connections": {
     "default": "next-node"
   }
 }
 ```
 
-| Property            | Required | Description                      |
-| ------------------- | -------- | -------------------------------- |
-| `search.tag`        | No       | Search by tag                    |
-| `search.keyPattern` | No       | Search by key prefix             |
-| `keyTemplate`       | Yes      | Key for new note if not found    |
-| `value`             | Yes      | Context variable with note value |
+| Property            | Required | Description                                   |
+| ------------------- | -------- | --------------------------------------------- |
+| `search.tag`        | No       | Search by tag                                 |
+| `search.keyPattern` | No       | Search within key                             |
+| `keyTemplate`       | Yes      | Key for new note if not found                 |
+| `value`             | Yes      | Literal text or a template for the note value |
+
+Here `configData` must be a declared, populated global. As in single-note writes, a pure braced
+reference stores its resolved value and serializes objects and arrays as JSON; an unbraced name
+stores literal text. Use `{{producer-id.field}}` to read a producing node's local output instead.
 
 :::tip
 All filter and key parameters support `{{ variable }}` template expressions.
 :::
+
+Upsert updates the first search match; it does not enforce uniqueness. Scope the search to the intended note. Automatic note results remain under their producing node ID, not in bare-name globals.
 
 ## Best Practices
 

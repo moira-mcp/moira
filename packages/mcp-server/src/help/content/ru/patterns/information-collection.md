@@ -22,6 +22,7 @@ description: Сбор возможностей агента или предпо�
   "type": "agent-directive",
   "id": "collect-info",
   "directive": "Determine agent capabilities:\n- File system access?\n- Web fetch access?\n- Test framework?",
+  "completionCondition": "Relevant capabilities checked in the current environment; unavailable access reported honestly",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -45,7 +46,7 @@ description: Сбор возможностей агента или предпо�
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "has_file_access" },
+        "left": { "contextPath": "collect-info.has_file_access" },
         "right": true
       },
       "output": "has-file-access"
@@ -60,23 +61,25 @@ description: Сбор возможностей агента или предпо�
 
 ## Использование собранных значений
 
-После сбора значения находятся в контексте. Используйте их с условными шаблонами:
+Значения локальны для ноды. Здесь показаны фрагменты нод и конфигурации; целевые ноды должны существовать в содержащем workflow. В последующих шаблонах указывайте ID производителя:
 
 ```json
 {
-  "directive": "{{#if has_file_access}}Save to {{output_path}}{{else}}Store in context variable{{/if}}"
+  "directive": "{{#if collect-info.has_file_access}}Discover an authorized output path and save the result there{{else}}Return the result in the workflow answer{{/if}}"
 }
 ```
 
 ## Реальный пример
 
-Из `development-flow.json`:
+Фрагмент конфигурации для сбора контекста проекта (при создании ноды добавьте connections и completionCondition):
 
 ```json
 {
   "type": "agent-directive",
   "id": "get-initial-requirements",
-  "directive": "Study project and collect ALL information for development.\n\n1) Find CLAUDE.md or similar agent instructions\n2) Determine test command (npm test, pytest, etc.)\n3) Check for project checklist\n4) Check for agent onboarding document\n...",
+  "completionCondition": "Relevant project rules and validation entries identified from actual sources",
+  "connections": { "success": "next-step" },
+  "directive": "Read applicable project instructions and identify the validation entry relevant to the requested change. Record discovered paths and report unavailable commands rather than guessing.",
   "inputSchema": {
     "properties": {
       "test_command": { "type": "string" },
@@ -86,14 +89,18 @@ description: Сбор возможностей агента или предпо�
       "has_checklist": { "type": "string", "enum": ["yes", "no"] },
       "has_browser_ui": { "type": "string", "enum": ["yes", "no"] }
     },
-    "required": ["test_command", "has_tests", "build_command", "has_checklist"]
+    "required": ["has_tests", "has_checklist"],
+    "if": { "properties": { "has_tests": { "const": "yes" } }, "required": ["has_tests"] },
+    "then": {
+      "required": ["test_command"],
+      "properties": { "test_command": { "type": "string", "minLength": 1 } }
+    }
   }
 }
 ```
 
 :::tip
-Собирайте всю конфигурацию заранее, а не запрашивайте по ходу workflow. Это улучшает
-пользовательский опыт и позволяет использовать условное ветвление.
+Собирайте сведения тогда, когда они нужны потребителю. Доступные факты проекта выясняйте самостоятельно; спрашивайте только о решениях или доступе, которые нельзя установить из разрешённого контекста. Флаг наличия возможности не даёт разрешения ею пользоваться.
 :::
 
 ## Связанные паттерны

@@ -101,4 +101,41 @@ describe("McpTextService", () => {
       service.getSystemReminderWithOverride({ agent: "cursor", model: "small" }),
     ).resolves.toBe("");
   });
+
+  it.each([
+    {
+      name: "model",
+      values: { model: "", agent: "agent", default: "default" },
+      expectedKeys: [MCP_TEXT_KEYS.modelSystemPrompt("cursor", "small")],
+    },
+    {
+      name: "agent after missing model",
+      values: { model: null, agent: "", default: "default" },
+      expectedKeys: [
+        MCP_TEXT_KEYS.modelSystemPrompt("cursor", "small"),
+        MCP_TEXT_KEYS.agentSystemPrompt("cursor"),
+      ],
+    },
+    {
+      name: "default after missing overrides",
+      values: { model: undefined, agent: null, default: "" },
+      expectedKeys: [
+        MCP_TEXT_KEYS.modelSystemPrompt("cursor", "small"),
+        MCP_TEXT_KEYS.agentSystemPrompt("cursor"),
+        MCP_TEXT_KEYS.systemPrompt,
+      ],
+    },
+  ])("preserves an intentional empty system prompt at $name", async ({ values, expectedKeys }) => {
+    const stored: Record<string, string | null | undefined> = {
+      [MCP_TEXT_KEYS.modelSystemPrompt("cursor", "small")]: values.model,
+      [MCP_TEXT_KEYS.agentSystemPrompt("cursor")]: values.agent,
+      [MCP_TEXT_KEYS.systemPrompt]: values.default,
+    };
+    repository.getValue.mockImplementation((key) => Promise.resolve(stored[key]));
+
+    await expect(
+      service.getSystemPromptWithOverride({ agent: "cursor", model: "small" }),
+    ).resolves.toBe("");
+    expect(repository.getValue.mock.calls.map(([key]) => key)).toEqual(expectedKeys);
+  });
 });

@@ -97,6 +97,7 @@ ENV STATIC_ARTIFACTS_DOMAIN=${STATIC_ARTIFACTS_DOMAIN}
 # MCP/static URLs baked into documentation pages.
 COPY packages/mcp-server/ ./packages/mcp-server/
 COPY packages/docs/ ./packages/docs/
+COPY config/prompts/systemPrompt.md ./config/prompts/systemPrompt.md
 RUN --mount=type=cache,id=astro-docs-${BUILD_ID},target=/app/packages/docs/node_modules/.astro \
     cd packages/docs && npx astro build
 
@@ -222,11 +223,6 @@ COPY config/favicon/ /var/www/html/favicon/
 # emits the `/docs/` (and `/ru/docs/`) URL structure (Starlight nested folder
 # pattern), so its dist contains a `docs/` dir served by nginx at /docs.
 COPY --from=docs-build /app/packages/docs/dist/ /var/www/html/
-
-# Copy the checked-in default system prompt read by runtime initialization and
-# help composition. Portable help ships with its owning MCP package.
-COPY packages/docs/src/content/docs/docs/SYSTEM-PROMPT.md ./docs/SYSTEM-PROMPT.md
-ENV DOCS_DIR=/app/docs
 
 # Create required directories
 RUN mkdir -p \

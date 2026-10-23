@@ -26,7 +26,7 @@ mcp__moira__manage({
 ```typescript
 mcp__moira__start({
   action: "prepare",
-  workflowId: "workflow-management-flow",
+  workflowId: "moira/workflow-management-flow",
   parentExecutionId: "none",
 });
 mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" });
@@ -69,13 +69,16 @@ moira-workflow ./workflow.json set-variable-schema result --file ./result-schema
 
 ```bash
 moira-workflow ./workflow.json update review \
-  --cases '[{"when":{"operator":"eq","left":{"contextPath":"verdict"},"right":"blocked"},"output":"blocked"}]'
+  --cases '[{"when":{"operator":"eq","left":{"contextPath":"review.verdict"},"right":"blocked"},"output":"blocked"}]'
 moira-workflow ./workflow.json update review --expressions '["attempts = attempts + 1"]'
 moira-workflow ./workflow.json update review --add-connection blocked fix-issues
 ```
 
 Все три команды адресуют одну ноду-директиву, которая произвела вердикт: её case, её счётчик и
-соединение, которое называет case.
+соединение, которое называет case. Здесь `verdict` — поле объявленной схемы ответа ноды `review`,
+а `attempts` заранее объявлена в `variableRegistry` как числовая глобальная переменная с начальным
+значением. Локальные ответы читаются как `node-id.field`; простые имена в шаблонах и условиях
+требуют объявленных глобальных переменных.
 
 Команды только для чтения показывают результат: `schema` печатает по строке
 `CASE <output> WHEN <условие>` на каждый case и по строке `EDGE` на каждое соединение,
@@ -95,13 +98,18 @@ moira-workflow ./workflow.json rename review independent-review
 moira-workflow ./workflow.json delete legacy-check --retarget review.success=deliver
 ```
 
-Чтобы привести файл к текущей схеме definition, выполните `migrate`. Команда перезаписывает файл на
-месте, предварительно создавая резервную копию, как и любая запись, и сообщает
-«Already at schema version 1; nothing to migrate», когда делать нечего:
+Чтобы привести файл к текущей схеме definition, выполните `migrate`. Если миграция нужна, команда
+создаёт резервную копию существующего файла перед перезаписью. Иначе она сообщает
+«Already at schema version 1; nothing to migrate», не перезаписывая файл:
 
 ```bash
 moira-workflow ./workflow.json migrate
 ```
+
+Команды изменения существующего workflow сохраняют уникальную копию до записи в `workflow-backups/`
+текущего каталога вызывающей стороны. Это не резервирование каждого вывода: `create` и `copy`
+создают новые файлы workflow, а `export-node` пишет выбранный выходной файл без автоматического
+резервирования этого файла.
 
 Вид процесса использует тот же файловый authoring surface. Задайте полный список блоков из JSON
 командой `set-progress` (или наращивайте его через `add-block` / `edit-block`), затем назначьте
@@ -297,14 +305,22 @@ mcp__moira__manage({
 
 ## Безопасный процесс редактирования
 
-1. **Получите текущую структуру**
+1. **Загрузите полную исходную версию**
 
    ```typescript
    mcp__moira__manage({
-     action: "get-structure",
+     action: "get",
      workflowId: "my-workflow",
+     includeNodes: true,
+     includeValidation: true,
    });
    ```
+
+   Сохраните возвращённую revision и прочитайте определения всех нод, связи, объявления переменных,
+   runtime policy и привязки прогресса до выбора затронутых зависимостей. Здесь не задавайте
+   пагинацию нод; если намеренно читаете постранично, соберите все страницы. `get-structure` даёт
+   сводку, а не базу для правки. Изучите связанные подграфы и playbook, если изменение от них зависит,
+   в пределах разрешённого объёма работы.
 
 2. **Найдите узлы для редактирования**
 
@@ -328,10 +344,14 @@ mcp__moira__manage({
 
 4. **Примените изменения**
 
+   Передайте возвращённую revision исходной версии как `expectedRevision`. При конфликте загрузите
+   текущее определение и согласуйте с ним намеренную правку, не затирая более новый граф вслепую.
+
    ```typescript
    mcp__moira__manage({
      action: "edit",
      workflowId: "my-workflow",
+     expectedRevision: baselineRevision,
      changes: {/* ... */},
    });
    ```
@@ -410,7 +430,7 @@ workflow.
       changes: {
         cases: [
           {
-            when: { operator: "eq", left: { contextPath: "status" }, right: "success" },
+            when: { operator: "eq", left: { contextPath: "inspection.status" }, right: "success" },
             output: "passed",
           },
         ],
@@ -424,7 +444,8 @@ workflow.
 }
 ```
 
-У ноды agent-directive те же три поля правятся так же. Её выход по умолчанию — `success`, а не
+Здесь `inspection.status` — поле результата существующей ноды inspection. У ноды agent-directive
+те же три поля правятся так же. Её выход по умолчанию — `success`, а не
 `default`, её case читают контекст, в который уже влит её собственный валидированный ответ, а
 `error`/`timeout` остаются зарезервированными под управление потоком: их не может назвать ни один
 case:
@@ -438,7 +459,7 @@ case:
         expressions: ["review_round = review_round + 1"],
         cases: [
           {
-            when: { operator: "eq", left: { contextPath: "review_verdict" }, right: "blocked" },
+            when: { operator: "eq", left: { contextPath: "review.verdict" }, right: "blocked" },
             output: "blocked",
           },
         ],
@@ -451,6 +472,9 @@ case:
   ];
 }
 ```
+
+Нода review должна объявлять `verdict` в схеме ответа, а `review_round` до увеличения выражением
+должна быть объявленной числовой глобальной переменной с начальным значением.
 
 **Решай на той ноде, у которой есть свидетельство.** Когда направление прогона определяет
 собственный ответ шага, перенесите case на этот шаг, а оставшийся исход отдайте `success`; одиночный
@@ -544,6 +568,7 @@ mcp__moira__manage({
       type: "agent-directive",
       id: "inserted-node",
       directive: "New step",
+      completionCondition: "The new step's stated result is verified",
       connections: { success: "original-target" }
     }
   ],

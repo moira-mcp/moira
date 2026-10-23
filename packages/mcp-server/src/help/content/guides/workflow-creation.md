@@ -7,27 +7,30 @@ This guide covers workflow creation from scratch, including common patterns, val
 
 ## Quick Start
 
-1. Define the workflow goal and main stages 2. Design the node graph structure 3. Create JSON with
-   proper node definitions 4. Validate connections and reachability 5. Save via MCP tools
+1. Define the workflow goal and main responsibilities.
+2. Design the node graph and its decision boundaries.
+3. Create JSON with complete node definitions.
+4. Validate connections, declarations and intended routes.
+5. Save through the authorized MCP operation.
 
 ## Workflow Structure
 
 Every workflow needs:
 
-```json
+```jsonc
 {
   "id": "my-workflow",
   "metadata": {
     "name": "Human Readable Name",
     "version": "1.0.0",
-    "description": "What this workflow does"
+    "description": "What this workflow does",
   },
   "nodes": [
     // start node (exactly one)
     // action nodes — the node that has the evidence carries the cases that route it
     // condition nodes — for a decision several nodes share, or one that stands on its own
     // end node (at least one)
-  ]
+  ],
 }
 ```
 
@@ -36,62 +39,55 @@ Every workflow needs:
 ### Validation Loop
 
 Use when you need to verify results and retry on failure. The node that produced the result reports
-whether it holds and routes on that answer; the fix node counts the attempt on its way back:
+whether it holds and routes on that answer; the repair owner fixes confirmed findings before the next check:
 
 ```mermaid
 flowchart LR
     A[do-work] -->|valid| B[next-step]
     A -->|success| C[fix-issues]
-    C -->|iteration + 1| A
+    C -->|repair completed| A
 ```
 
 ```json
-{
-  "id": "do-work",
-  "type": "agent-directive",
-  "directive": "Complete the task",
-  "completionCondition": "Task completed",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "result_valid": { "type": "string", "enum": ["yes", "no"] }
-    },
-    "required": ["result_valid"]
-  },
-  "cases": [
-    {
-      "when": {
-        "operator": "eq",
-        "left": { "contextPath": "do-work.result_valid" },
-        "right": "yes"
+[
+  {
+    "id": "do-work",
+    "type": "agent-directive",
+    "directive": "Complete the task",
+    "completionCondition": "Task completed",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "result_valid": { "type": "string", "enum": ["yes", "no"] }
       },
-      "output": "valid"
+      "required": ["result_valid"]
+    },
+    "cases": [
+      {
+        "when": {
+          "operator": "eq",
+          "left": { "contextPath": "do-work.result_valid" },
+          "right": "yes"
+        },
+        "output": "valid"
+      }
+    ],
+    "connections": {
+      "success": "fix-issues",
+      "valid": "next-step"
     }
-  ],
-  "connections": {
-    "success": "fix-issues",
-    "valid": "next-step"
+  },
+  {
+    "id": "fix-issues",
+    "type": "agent-directive",
+    "directive": "Fix the issues found",
+    "completionCondition": "Every issue reported by the previous attempt is fixed",
+    "connections": { "success": "do-work" }
   }
-},
-{
-  "id": "fix-issues",
-  "type": "agent-directive",
-  "directive": "Fix the issues found",
-  "completionCondition": "Every issue reported by the previous attempt is fixed",
-  "expressions": ["iteration = iteration + 1"],
-  "connections": { "success": "do-work" }
-}
+]
 ```
 
-`iteration` is declared in the workflow `variableRegistry`, because an expression may only assign a
-declared global. Counting the attempt needs nothing else: a node whose whole job is `iteration + 1`
-is one more hop for the reader and one more place to forget.
-
-:::tip
-Separate responsibilities: action nodes DO the work and report their own verdict, fix nodes ONLY
-repair. Keep the iteration counter on a node the loop already passes through, and route on it to
-prevent infinite loops.
-:::
+These are node fragments in a containing workflow, not a complete graph. Named targets must exist. Diagnose and repair the cause before repeating; retain independent review when the contract requires it. A counter is needed only for a real budget or artifact consumer; declare its numeric registry entry with a default and update it through expressions.
 
 ### Branching by Action Type
 
@@ -186,7 +182,12 @@ routes on it — and a run that was not approved falls through `success` to the 
       "approved": { "type": "string", "enum": ["yes", "no"] },
       "feedback": { "type": "string" }
     },
-    "required": ["approved"]
+    "required": ["approved"],
+    "if": { "properties": { "approved": { "const": "no" } }, "required": ["approved"] },
+    "then": {
+      "required": ["feedback"],
+      "properties": { "feedback": { "type": "string", "minLength": 1 } }
+    }
   },
   "cases": [
     {
@@ -311,6 +312,8 @@ selects.
 
 ### Complex Condition Example
 
+This fragment assumes prepare-items returns local status and count, and its targets exist in the containing workflow.
+
 ```json
 {
   "id": "check-ready",
@@ -322,12 +325,12 @@ selects.
         "conditions": [
           {
             "operator": "eq",
-            "left": { "contextPath": "status" },
+            "left": { "contextPath": "prepare-items.status" },
             "right": "ready"
           },
           {
             "operator": "gt",
-            "left": { "contextPath": "count" },
+            "left": { "contextPath": "prepare-items.count" },
             "right": 0
           }
         ]
@@ -372,7 +375,7 @@ Reference in directives:
 ```
 
 :::tip
-This makes workflows self-documenting. All knowledge is embedded, no external docs needed.
+Registry defaults suit stable workflow-owned text. Read applicable project rules at their actual owner; shared playbooks and materialized references retain their own contracts. Delivery does not prove compliance.
 :::
 
 ## Validation Checklist
@@ -386,9 +389,9 @@ Before saving, verify:
    - All connections point to existing nodes
 
 2. **Reachability**
-   - All nodes reachable from start
+   - Ordinary nodes are reachable from start; declared teleport entries are checked separately
    - No orphan nodes
-   - All paths lead to end
+   - Routes finish or enter an intended wait, repair or escalation; no blind unchanged retry
 
 3. **Node Definitions**
    - `directive` not empty
@@ -459,6 +462,7 @@ Different agents have different capabilities. Design workflows to detect and ada
 ```json
 {
   "id": "detect-capabilities",
+  "completionCondition": "Current capabilities checked honestly within host access policy",
   "type": "agent-directive",
   "directive": "Report your capabilities: can you access the file system? can you fetch URLs?",
   "inputSchema": {
@@ -502,8 +506,7 @@ the process view sees where the flow splits:
 ```
 
 :::tip
-Always provide fallback paths for agents with limited capabilities. MCP tools are always
-available.
+Provide only supported fallback paths. MCP availability depends on host configuration and access policy; report a blocker when a required capability is unavailable.
 :::
 
 ## Planning Pattern
@@ -554,7 +557,7 @@ The main problem: agent loses context (session archival, simple forgetting). Pla
 | Full file paths             | Agent shouldn't guess                 | `/full/path/to/file.json`, not "in appropriate folder"                     |
 | Redundancy where it applies | Repeat what this item genuinely needs | "Make commit" repeated in an item that ends in a commit, not in every item |
 
-### Item Atomicity (S9)
+### Item Atomicity
 
 Each plan or task item must be self-contained. An agent often receives ONE item's directive in isolation — without the rest of the plan — so the item must carry everything needed to execute it:
 
@@ -562,7 +565,7 @@ Each plan or task item must be self-contained. An agent often receives ONE item'
 - Repeat the relevant original requirement inside the item.
 - Repeat a cross-cutting action (progress report, run tests, commit) in the items it genuinely applies to.
 
-There is no shared or global scope across items, so an item that leans on "as above" is unexecutable. The answer is what the executor needs when it is alone, judged item by item — not unconditional duplication: repeated text becomes a second source of truth that drifts, and an item required to carry everything grows until it carries the deliverable itself. See [Redundancy Required in Every Plan Item](/docs/patterns/anti-patterns/).
+Do not rely on an executor remembering other items, so an item that leans on "as above" is unexecutable. The answer is what the executor needs when it is alone, judged item by item — not unconditional duplication: repeated text becomes a second source of truth that drifts, and an item required to carry everything grows until it carries the deliverable itself. See [Redundancy Required in Every Plan Item](/docs/patterns/anti-patterns/).
 
 ```json
 {
@@ -583,55 +586,54 @@ delivery.
 
 ### Implementation Example
 
+The following complete workflow covers plan drafting and approval only; execution and independent review are separate domain responsibilities to add when the task contract requires them. The same owner revises the canonical plan after feedback. No path, deployment or VCS action is authorized by this example.
+
 ```json
 {
+  "id": "c4786f09-0769-4437-84b7-b032eab5396f",
+  "metadata": {
+    "name": "Draft and approve a plan",
+    "version": "1.0.0",
+    "description": "Prepare a scoped plan and obtain the user's actual approval"
+  },
   "variableRegistry": {
-    "plan_writing_requirements": {
-      "type": "string",
-      "description": "Rules the agent follows when writing the plan",
-      "default": "PLAN WRITING REQUIREMENTS:\n\n- Flat linear list — no hierarchy, no nested sub-items, just 1, 2, 3...\n- One item = one task — not micro-step ('download file'), but complete task ('update workflow to v2.1.0')\n- Full self-sufficiency — contains EVERYTHING for execution: why do it, what to do, which files to read/modify, where to save, what to commit\n- NO separate 'global rules' — everything needed for item must be IN the item\n- Explicit actions — not 'as usual', but specifically: 'upload to moira-local via token', 'make commit'\n- Redundancy allowed — better repeat 'make commit' in each item than forget\n- Full file paths — not 'in appropriate folder', but /full/path/to/file.json\n- Measurable result — easy to verify item completion"
-    }
+    "plan": { "type": "string", "description": "Current canonical plan" }
   },
   "nodes": [
+    { "id": "start", "type": "start", "connections": { "default": "prepare-plan" } },
     {
-      "type": "start",
-      "id": "start",
-      "connections": { "default": "analyze-task" }
-    },
-    {
-      "id": "decompose-into-steps",
+      "id": "prepare-plan",
       "type": "agent-directive",
-      "directive": "Create a plan for task execution.\n\nFollow requirements: {{plan_writing_requirements}}\n\nFor each step provide:\n- What to do (action)\n- Expected output (measurable result)",
+      "directive": "Read the actual requirements and applicable project instructions. Prepare a plan of verifiable outcomes with dependency order, source owners, relevant validation and authority limits. {{#if present-plan.user_feedback}}Revise the plan against the user's feedback: {{present-plan.user_feedback}}{{/if}}",
+      "completionCondition": "The current plan covers the requirements without claiming unperformed work or unauthorized effects",
       "inputSchema": {
         "type": "object",
-        "properties": {
-          "steps": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "action": { "type": "string" },
-                "expected_output": { "type": "string" }
-              },
-              "required": ["action", "expected_output"]
-            }
-          }
-        },
-        "required": ["steps"]
+        "globalInputs": ["plan"],
+        "properties": {},
+        "required": ["plan"]
       },
       "connections": { "success": "present-plan" }
     },
     {
       "id": "present-plan",
       "type": "agent-directive",
-      "directive": "Present the plan and ask whether it is approved. `approved` records the user's own answer; without one there is nothing to record.",
+      "directive": "Present {{plan}} and wait for the user's actual answer. Record plan_approved=yes only for explicit approval of this version. Otherwise record no and the user's feedback; do not repair the plan at this gate.",
+      "completionCondition": "The user has actually approved this plan or supplied the feedback recorded for revision",
       "inputSchema": {
         "type": "object",
         "properties": {
           "plan_approved": { "type": "string", "enum": ["yes", "no"] },
           "user_feedback": { "type": "string" }
         },
-        "required": ["plan_approved"]
+        "required": ["plan_approved"],
+        "if": {
+          "properties": { "plan_approved": { "const": "no" } },
+          "required": ["plan_approved"]
+        },
+        "then": {
+          "required": ["user_feedback"],
+          "properties": { "user_feedback": { "type": "string", "minLength": 1 } }
+        }
       },
       "cases": [
         {
@@ -643,17 +645,9 @@ delivery.
           "output": "approved"
         }
       ],
-      "connections": {
-        "success": "revise-plan",
-        "approved": "execute-steps"
-      }
+      "connections": { "success": "prepare-plan", "approved": "end" }
     },
-    {
-      "id": "revise-plan",
-      "type": "agent-directive",
-      "directive": "User didn't approve plan. Feedback: {{present-plan.user_feedback}}\n\nRevise plan based on feedback.\nFollow: {{plan_writing_requirements}}",
-      "connections": { "success": "present-plan" }
-    }
+    { "id": "end", "type": "end", "connections": {} }
   ]
 }
 ```
@@ -686,27 +680,7 @@ complete field reference.
 
 ### Update Plan During Execution
 
-For long workflows, add ability to update plan mid-execution:
-
-```json
-{
-  "id": "update-plan-during-execution",
-  "type": "agent-directive",
-  "directive": "Update plan during execution.\n\nCurrent step: {{current_step_index}}\nReason for update: {{update_reason}}\n\n1. Analyze current progress\n2. Update remaining steps (don't change completed ones)\n3. Save history to ./plan-changes-history.md\n\nFollow: {{plan_writing_requirements}}",
-  "connections": { "success": "reinitialize-tracking" }
-},
-{
-  "id": "reinitialize-tracking",
-  "type": "agent-directive",
-  "directive": "Reinitialize tracking after plan update.\n\n1. Update tracking.json with new total_steps\n2. Adjust current_step_index if needed\n3. Continue execution",
-  "connections": { "success": "execute-current-step" }
-}
-```
-
-:::tip
-Store plan in a file (e.g., `./plan.md`) instead of context for large plans. This prevents context
-overflow and enables recovery after session archival.
-:::
+Use [Process Revision](/docs/patterns/process-revision/) and [Replan](/docs/patterns/replan/): one authorized teleport enters the existing revision owner, and the new version passes normal review and any required approval. Preserve completed item positions and evidence; derive dependent totals from the actual plan instead of manually resetting progress in a separate relay turn.
 
 ## Escalation Pattern
 
@@ -748,91 +722,101 @@ flowchart TD
 
 ### Implementation Example
 
-The step that checks the result owns the whole decision: it counts the attempt in `expressions`, and
+The following example illustrates a chosen budget: its containing workflow declares numeric step_retry with description and default: 0. This budget is not universal. Check a clean result before exhaustion; an independent blocker requires escalation rather than blind repetition. The step that checks the result owns the whole decision: it counts the attempt in `expressions`, and
 its cases send a clean result forward, an exhausted budget to the escalation, and everything else
 back for another attempt through `success`.
 
 ```json
-{
-  "id": "validate-step",
-  "type": "agent-directive",
-  "directive": "ONLY CHECK the result of the step. Count any issues found. Attempt {{step_retry}}.",
-  "completionCondition": "Issue count reported",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "issues_count": { "type": "number", "minimum": 0 }
-    },
-    "required": ["issues_count"]
-  },
-  "expressions": ["step_retry = step_retry + 1"],
-  "cases": [
-    {
-      "when": {
-        "operator": "eq",
-        "left": { "contextPath": "validate-step.issues_count" },
-        "right": 0
+[
+  {
+    "id": "validate-step",
+    "type": "agent-directive",
+    "directive": "ONLY CHECK the result of the step. Count any issues found. Attempt {{step_retry}}.",
+    "completionCondition": "Issue count reported",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "issues_count": { "type": "number", "minimum": 0 }
       },
-      "output": "clean"
+      "required": ["issues_count"]
     },
-    {
-      "when": { "operator": "gte", "left": { "contextPath": "step_retry" }, "right": 3 },
-      "output": "exhausted"
+    "expressions": ["step_retry = step_retry + 1"],
+    "cases": [
+      {
+        "when": {
+          "operator": "eq",
+          "left": { "contextPath": "validate-step.issues_count" },
+          "right": 0
+        },
+        "output": "clean"
+      },
+      {
+        "when": { "operator": "gte", "left": { "contextPath": "step_retry" }, "right": 3 },
+        "output": "exhausted"
+      }
+    ],
+    "connections": {
+      "success": "retry-action",
+      "clean": "next-step",
+      "exhausted": "notify-escalation"
     }
-  ],
-  "connections": {
-    "success": "retry-action",
-    "clean": "next-step",
-    "exhausted": "notify-escalation"
-  }
-},
-{
-  "id": "notify-escalation",
-  "type": "user-notification",
-  "message": "⚠️ *The step keeps failing its check*\n\nChoose: go back and revise the plan, ask a person for help with the specific problem, or skip the step if it is optional.",
-  "format": "markdown",
-  "connections": { "default": "ask-escalation-decision", "error": "ask-escalation-decision" }
-},
-{
-  "id": "ask-escalation-decision",
-  "type": "agent-directive",
-  "directive": "Step failed after {{step_retry}} attempts.\n\nAsk user for decision:\n1. **revise_plan** — go back to planning and reconsider approach\n2. **ask_user** — request human help with specific problem\n3. **skip** — skip this step and continue\n\n`decision` records the user's own choice: each of the three routes elsewhere, so an assumed answer picks a route on their behalf.",
-  "completionCondition": "The user chose one of the three options",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "escalation_decision": {
-        "type": "string",
-        "enum": ["revise_plan", "ask_user", "skip"]
-      },
-      "user_input": { "type": "string" }
-    },
-    "required": ["escalation_decision"]
   },
-  "cases": [
-    {
-      "when": {
-        "operator": "eq",
-        "left": { "contextPath": "ask-escalation-decision.escalation_decision" },
-        "right": "revise_plan"
+  {
+    "id": "notify-escalation",
+    "type": "user-notification",
+    "message": "⚠️ *The step keeps failing its check*\n\nChoose: go back and revise the plan, ask a person for help with the specific problem, or skip the step if it is optional.",
+    "format": "markdown",
+    "connections": { "default": "ask-escalation-decision", "error": "ask-escalation-decision" }
+  },
+  {
+    "id": "ask-escalation-decision",
+    "type": "agent-directive",
+    "directive": "Step failed after {{step_retry}} attempts.\n\nAsk user for decision:\n1. **revise_plan** — go back to planning and reconsider approach\n2. **ask_user** — request human help with specific problem\n3. **skip** — skip this step and continue\n\n`decision` records the user's own choice: each of the three routes elsewhere, so an assumed answer picks a route on their behalf.",
+    "completionCondition": "The user chose one of the three options",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "escalation_decision": {
+          "type": "string",
+          "enum": ["revise_plan", "ask_user", "skip"]
+        },
+        "user_input": { "type": "string" }
       },
-      "output": "revise"
+      "required": ["escalation_decision"],
+      "if": {
+        "properties": { "escalation_decision": { "const": "ask_user" } },
+        "required": ["escalation_decision"]
+      },
+      "then": {
+        "required": ["user_input"],
+        "properties": { "user_input": { "type": "string", "minLength": 1 } }
+      }
     },
-    {
-      "when": {
-        "operator": "eq",
-        "left": { "contextPath": "ask-escalation-decision.escalation_decision" },
-        "right": "skip"
+    "cases": [
+      {
+        "when": {
+          "operator": "eq",
+          "left": { "contextPath": "ask-escalation-decision.escalation_decision" },
+          "right": "revise_plan"
+        },
+        "output": "revise"
       },
-      "output": "skip"
+      {
+        "when": {
+          "operator": "eq",
+          "left": { "contextPath": "ask-escalation-decision.escalation_decision" },
+          "right": "skip"
+        },
+        "output": "skip"
+      }
+    ],
+    "connections": {
+      "success": "handle-user-help",
+      "revise": "revise-plan",
+      "skip": "mark-step-skipped"
     }
-  ],
-  "connections": {
-    "success": "handle-user-help",
-    "revise": "revise-plan",
-    "skip": "mark-step-skipped"
   }
-}
+]
 ```
 
 Three outcomes need no extra node either: two cases name the branches that leave the ordinary path,
@@ -856,13 +840,12 @@ flowchart LR
 The `revise_plan` option loops back to the Planning phase, allowing the agent to reconsider the approach based on what it learned from failures.
 
 :::tip
-Set `max_retries` based on task complexity. Simple tasks: 2-3 retries. Complex tasks: 3-5 retries.
-Always provide `skip` option for non-critical steps.
+Choose a retry budget only from applicable policy, not an arbitrary complexity estimate. Skip applies only to an explicitly optional condition; it cannot waive required review, approval or external-effect authority.
 :::
 
 ## Production Patterns
 
-Real patterns from production workflows (development-flow, 104 nodes).
+The examples below illustrate individual responsibilities. Select them for their real consumers and applicable authority.
 
 ### Express/Full Mode Branching
 
@@ -915,33 +898,18 @@ Present plan → get feedback → refine → confirm:
 
 ### Numeric Validation Pattern (Recommended)
 
-:::caution
-**Problem with boolean validation:** Agents tend to be optimistic. When asked "Is result valid?
-yes/no", they may answer "yes" even when issues were found. This defeats the purpose of validation
-loops.
-:::
-
-**Solution:** Use numeric issue count instead of boolean. The engine mechanically checks if count equals zero — no room for interpretation.
+Use a finding count when the route genuinely depends on the number of confirmed findings. The reviewer must inspect the actual artifact against its requirements and explain findings in one canonical report. A count can be misstated just like a boolean; the engine validates the answer's shape and evaluates the route, not the truth of the review.
 
 ```json
 {
   "id": "validate-result",
   "type": "agent-directive",
-  "directive": "ONLY CHECK the result. Count any issues found.",
-  "completionCondition": "Issue count reported",
+  "directive": "Inspect the real artifact against its requirements. Write the complete current findings and reasoning to the agreed report, then return its actual actionable finding count. Do not repair at this independent gate.",
+  "completionCondition": "Required independent review completed on an unchanged artifact and current findings recorded honestly",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "issues_count": {
-        "type": "number",
-        "minimum": 0,
-        "description": "Number of issues found (0 = valid)"
-      },
-      "issues": {
-        "type": "array",
-        "items": { "type": "string" },
-        "description": "List of issues if any"
-      }
+      "issues_count": { "type": "integer", "minimum": 0 }
     },
     "required": ["issues_count"]
   },
@@ -955,56 +923,15 @@ loops.
       "output": "clean"
     }
   ],
-  "connections": {
-    "success": "fix-issues",
-    "clean": "next-step"
-  }
+  "connections": { "success": "fix-issues", "clean": "next-step" }
 }
 ```
 
-**Why this works:**
-
-- Agent cannot lie about a count (number is objective)
-- The case `issues_count == 0` is checked mechanically by the engine, on the node that produced the
-  count
-- No room for "almost ready" or "minor issues" interpretation
-
-**When to use:** ALL validation loops should use this pattern. Replace existing `is_valid: enum["yes","no"]` with `issues_count: number`.
+This is a node fragment: the report destination and named target nodes belong to its containing workflow. A reasoned pass/repair verdict may serve another workflow better. Do not replace qualitative assessment with an arbitrary numeric score or require counts that nobody consumes.
 
 ### Numeric Validation with Test Counts
 
-Validate using numeric checks instead of yes/no:
-
-```json
-{
-  "id": "run-tests",
-  "type": "agent-directive",
-  "directive": "Run tests and report results",
-  "completionCondition": "Passed and failed counts reported from a real run",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "tests_passed": { "type": "number" },
-      "tests_failed": { "type": "number" }
-    },
-    "required": ["tests_passed", "tests_failed"]
-  },
-  "cases": [
-    {
-      "when": {
-        "operator": "eq",
-        "left": { "contextPath": "run-tests.tests_failed" },
-        "right": 0
-      },
-      "output": "all-passed"
-    }
-  ],
-  "connections": {
-    "success": "fix-tests",
-    "all-passed": "continue"
-  }
-}
-```
+Report counts only from a real selected test run when the report's reader needs them. Zero failed tests alone does not prove that the intended tests ran: an empty selection, skips, an infrastructure refusal or a failed process may also produce zero. Inspect the actual runner outcome and selected coverage before choosing a pass route; preserve failures and blockers in the evidence.
 
 ### User Notifications
 
@@ -1055,22 +982,24 @@ Announce the plan once it is ready, with the whole list. An interactive run asks
 an autonomous run goes ahead:
 
 ```json
-{
-  "id": "notify-plan-approval",
-  "type": "user-notification",
-  "message": "📋 *Plan ready for your approval* — approve it and the work goes ahead, or reject it with feedback and the plan is revised.",
-  "format": "markdown",
-  "planList": "full",
-  "connections": { "default": "present-plan-to-user" }
-},
-{
-  "id": "notify-work-started",
-  "type": "user-notification",
-  "message": "▶️ *Plan approved — the work goes ahead.*",
-  "format": "markdown",
-  "planList": "full",
-  "connections": { "default": "execute-step" }
-}
+[
+  {
+    "id": "notify-plan-approval",
+    "type": "user-notification",
+    "message": "📋 *Plan ready for your approval* — approve it and the work goes ahead, or reject it with feedback and the plan is revised.",
+    "format": "markdown",
+    "planList": "full",
+    "connections": { "default": "present-plan-to-user" }
+  },
+  {
+    "id": "notify-work-started",
+    "type": "user-notification",
+    "message": "▶️ *Plan ready — work continues within the agreed scope.*",
+    "format": "markdown",
+    "planList": "full",
+    "connections": { "default": "execute-step" }
+  }
+]
 ```
 
 Place the first on the interactive branch of the mode route, the second on the autonomous one.
@@ -1132,212 +1061,116 @@ knows the process is alive.
 
 ## File Persistence Patterns
 
-For agents with file system access, use files to:
-
-- Offload large data from workflow context
-- Track execution progress across iterations
-- Enable recovery after interruptions
-- Create audit trail
-
-:::note
-These patterns only work for agents with file access. Design fallback paths for MCP-only agents.
-:::
+Files give large or shared artifacts a canonical address. Engine variables and execution history are already persisted; a file is not required merely because the conversation may be interrupted. Use the project's designated ignored workspace and respect filesystem and disclosure authority.
 
 ### Directory Structure
 
-Use templates for organized file storage:
+For example, after the workspace owner has declared and initialized global `workspace_path`:
 
+```text
+{{workspace_path}}/
+├── process-id.txt
+├── plan.md
+├── steps/
+│   └── result.md
+└── final-report.md
 ```
-./{{task_name}}/
-├── process-id.txt              # Workflow execution ID
-├── plan.md                     # Current plan
-├── step-{{step_index}}/
-│   ├── iteration-{{iteration}}/
-│   │   ├── result.md           # Step result
-│   │   └── artifacts/          # Generated files
-│   └── summary.md              # Step summary
-└── final-report.md             # Completion report
-```
+
+See [Workspace](/docs/patterns/workspace/) for ownership, local ignore and materialization. These paths are examples, not a command to create a directory in the project root.
 
 ### Progress Tracking
 
-Save process ID for recovery:
-
-```json
-{
-  "id": "save-process-id",
-  "type": "agent-directive",
-  "directive": "Save process ID to ./{{task_name}}/process-id.txt for recovery",
-  "completionCondition": "File created with process ID",
-  "connections": { "success": "next-step" }
-}
-```
+The substantive workspace owner writes the execution ID alongside its other handoff artifacts, or delivers stable registry-backed files through `materialize`. Do not add an agent turn whose only job is copying an ID. A found handoff is not authority to resume a cancelled or unrelated execution; inspect the matching execution's current state first.
 
 ### Iteration Snapshots
 
-Store iteration results in files instead of context:
-
-```json
-{
-  "id": "save-iteration-result",
-  "type": "agent-directive",
-  "directive": "Save iteration {{current_iteration}} result to ./{{task_name}}/step-{{step_index}}/iteration-{{current_iteration}}/result.md",
-  "completionCondition": "Result saved to file",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "file_path": { "type": "string" }
-    },
-    "required": ["file_path"]
-  },
-  "connections": { "success": "next-iteration" }
-}
-```
+Use separate snapshots when a real reviewer or recovery contract needs immutable versions. If their names use an iteration number, declare and initialize that numeric registry value and advance it in an existing expression owner. Do not add counters or snapshot files without a reader. Keep the reviewed bytes unchanged until the review returns.
 
 ### Context Offloading
 
-Reference files instead of storing large data in context:
+Keep one detailed artifact in its canonical file and pass its path to consumers. The producer `produce-analysis` can return local `file_path`; a later complete node fragment can read it:
 
 ```json
 {
   "id": "analyze-with-file-reference",
   "type": "agent-directive",
-  "directive": "Read analysis from {{analysis_file_path}} and continue processing",
-  "completionCondition": "Analysis loaded and processed"
+  "directive": "Read the relevant analysis at {{produce-analysis.file_path}} and complete the requested assessment against the actual requirements.",
+  "completionCondition": "Analysis applied and substantive assessment completed with limitations reported",
+  "connections": { "success": "next-step" }
 }
 ```
 
 ### When to Use File Persistence
 
-| Use Case            | File Approach                | Context Approach     |
-| ------------------- | ---------------------------- | -------------------- |
-| Large code analysis | Save to file, reference path | Not recommended      |
-| Iteration history   | Save each iteration to file  | Only keep current    |
-| Recovery data       | process-id.txt required      | Lost on interruption |
-| Audit trail         | Append to log file           | Not available        |
-| Small status flags  | Either works                 | Simpler              |
-
-:::tip
-Detect agent capabilities first (see Agent Capabilities Detection) and provide both file-based and
-context-only paths.
-:::
+Use files for navigable reports, large bodies and artifacts shared with independent readers. Use persisted workflow values for small decisions and data with direct consumers. Provide a supported context-only path when files are optional; if the required file contract cannot be fulfilled, report the blocker instead of inventing a fallback result.
 
 ## User Input Problem
 
-When a workflow requires user confirmation, the agent may "optimize" by filling inputSchema fields without actually asking the user.
+A schema accepts a submitted answer's shape; it does not establish that a human supplied it. When the workflow requires a real user decision, the agent must actually wait for that decision.
 
 ### The Problem
 
-```json
-{
-  "id": "approve-plan",
-  "directive": "Show plan to user. Ask: 'Do you approve? (yes/no)'",
-  "inputSchema": {
-    "properties": {
-      "approved": { "type": "string", "enum": ["yes", "no"] }
-    }
-  }
-}
-```
-
-**What happens:** Agent shows the plan, then immediately fills `approved: "yes"` without waiting for user response.
-
-**Why:** The agent sees it can fill the field and "optimizes" by not stopping to wait.
+Presenting a plan and immediately submitting `approved: "yes"` invents the approval. A field named approval, a required evidence string or a humanGate annotation does not make an assumed answer legitimate.
 
 ### Solution: Say What the Answer Is
 
-State that the field records something that happened, and what happens if it did not:
+The field records the user's answer about the current artifact. This is a node fragment; its named targets must exist in the containing workflow:
 
 ```json
 {
   "id": "approve-plan",
-  "directive": "Present the plan and ask whether it is approved. `approved` records the user's own answer: without one there is nothing to record, and an assumed answer sends the run down a branch the user never chose. `user_response_text` is that answer verbatim.",
-  "completionCondition": "User explicitly responded yes or no (not assumed)",
-  "inputSchema": {
-    "properties": {
-      "approved": { "type": "string", "enum": ["yes", "no"] },
-      "user_response_text": {
-        "type": "string",
-        "description": "Exact text of user's response"
-      }
-    },
-    "required": ["approved", "user_response_text"]
-  }
-}
-```
-
-### Key Techniques
-
-1. **Say whose answer the field records** — `approved` holds the user's answer, so without one there
-   is nothing to put there
-2. **Require `user_response_text`** — the verbatim answer is what makes the record checkable later
-3. **Name the consequence of each answer** — where a no routes, what a yes closes; an assumed answer
-   sends the run down a branch the user never chose
-4. **Split the node when the risk justifies a turn** — see below
-
-### Split into Two Nodes (Alternative)
-
-For critical approvals, split into separate nodes:
-
-```
-[show-information] → [get-user-confirmation, routes on the answer]
-```
-
-First node only displays; the second captures the response and routes on it:
-
-```json
-{
-  "id": "show-plan",
-  "directive": "Display the plan to user. Explain each step.",
-  "inputSchema": {
-    "properties": {
-      "plan_shown": { "type": "string", "enum": ["yes"] }
-    }
-  },
-  "connections": { "success": "get-plan-approval" }
-},
-{
-  "id": "get-plan-approval",
-  "directive": "The plan is displayed above. Ask whether it is approved. `approved` records the user's own answer; an assumed one commits the run to a branch they never chose.",
+  "type": "agent-directive",
+  "directive": "Present the current plan and wait for the user's actual answer. approved records that answer: without one there is nothing to submit. Record user_response_text verbatim. Rejection feedback belongs to the revision owner, not to an unreviewed repair at this gate.",
+  "completionCondition": "The user actually responded about this version and the answer is recorded without assumption",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "approved": { "type": "string", "enum": ["yes", "no"] }
+      "approved": { "type": "string", "enum": ["yes", "no"] },
+      "user_response_text": { "type": "string", "minLength": 1 }
     },
-    "required": ["approved"]
+    "required": ["approved", "user_response_text"]
   },
   "cases": [
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "get-plan-approval.approved" },
+        "left": { "contextPath": "approve-plan.approved" },
         "right": "yes"
       },
       "output": "approved"
     }
   ],
-  "connections": {
-    "success": "revise-plan",
-    "approved": "proceed"
-  }
+  "connections": { "success": "revise-plan", "approved": "proceed" }
 }
 ```
 
-:::caution
-This is a known limitation of agent-executed workflows. Always test user input nodes manually
-before deploying.
-:::
+### Key Techniques
+
+- Identify whose decision it is, which version is being decided and where each answer leads.
+- Wait using the host's supported user-input mechanism; do not equate displaying a question with receiving an answer.
+- Record actual feedback so the revision owner can address it and repeat any required review.
+- Do not infer authority to publish, deploy or perform another external effect from approval of a plan unless the caller's contract explicitly grants it.
+
+### Split into Two Nodes (Alternative)
+
+A separate presentation responsibility is useful only when it adds a distinct artifact or decision boundary. Merely separating display from answer collection does not prevent fabricated approval and needlessly adds turns:
+
+```text
+[prepare substantive artifact] → [obtain actual user decision] → approved / revision
+```
+
+Check the real wait, actual answer, rejection feedback and resulting route when validating a user-input interaction. JSON parsing alone cannot verify human participation.
 
 ## Best Practices
 
-1. **One node = one responsibility** — don't mix checking and fixing
+1. **One node = one responsibility** — keep required independent review separate from repair; a producer may run its own focused checks
 2. **Decide where the evidence is** — the node that produced the answer carries the `cases` that
    route on it; a standalone `condition` is for a shared or named decision
 3. **Clear directives** — start with verb: Create, Check, Fix
 4. **Explicit negations** — "DO NOT fix, ONLY check"
-5. **Use inputSchema** — always define expected response structure
-6. **Numeric validation** — use counts instead of yes/no for precise checks
-7. **Iteration counters** — prevent infinite loops
+5. **Use inputSchema** — define data a real consumer needs
+6. **Reasoned validation** — choose observations and verdicts for the property being checked
+7. **Retry for a reason** — diagnose the cause, change the work or follow an applicable budget; a counter alone does not stop a loop
 8. **User approval gates** — for critical actions
 9. **Self-documenting** — declare knowledge as variableRegistry defaults
 10. **Graceful notifications** — channel errors should not block the workflow when notification is optional

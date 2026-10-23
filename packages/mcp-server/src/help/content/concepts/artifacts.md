@@ -3,14 +3,14 @@ title: Artifacts
 description: Static HTML hosting for workflow outputs - reports, dashboards, and visualizations with public URLs
 ---
 
-Artifacts provide static HTML hosting for workflow outputs. Upload HTML content (reports, dashboards, visualizations) and receive public URLs for sharing. Artifacts may include JavaScript: each artifact runs on its own isolated origin inside a sandboxed frame with no network access, and is served with a Moira branding bar.
+Artifacts provide static HTML hosting for workflow outputs. Upload HTML content (reports, dashboards, visualizations) and receive public URLs for sharing. JavaScript runs inside a sandboxed frame with a Moira branding bar. Origin layout depends on deployment configuration; use the returned URL. Public artifacts must not contain credentials or confidential data.
 
 ## Use Cases
 
 - **Reports**: Generate analysis reports accessible via URL
 - **Dashboards**: Create interactive HTML dashboards (JavaScript runs in-page)
 - **Visualizations**: Host charts, graphs, and data visualizations with the data
-  embedded in the HTML (no network access at runtime)
+  embedded in the HTML (application API calls are blocked)
 - **Documentation**: Publish generated documentation
 - **Previews**: Share work-in-progress outputs with stakeholders
 
@@ -139,9 +139,10 @@ Artifacts may contain JavaScript, so each one is sandboxed at multiple layers:
 - **Sandboxed frame** — artifact content runs inside an `<iframe sandbox="allow-scripts">`
   (no `allow-same-origin`, no forms, no top-navigation, no popups) within a
   Moira-controlled wrapper page. Scripts run, but cannot reach the wrapper.
-- **No network access** — the artifact frame is served with `connect-src 'none'`,
-  so JavaScript cannot make `fetch`/`XHR`/`WebSocket` requests. Data cannot be
-  sent anywhere; visualizations must embed their data in the HTML.
+- **Restricted connections** — `connect-src 'none'` blocks fetch/XHR/WebSocket/beacon,
+  and forms are blocked. HTTPS images and the explicitly allowed script/style/font resources
+  can still load. This is not a guarantee against all outbound requests or disclosure; embed
+  visualization data and never publish secrets.
 - **First-visit warning** — viewers see an interstitial noting the content is
   user-generated and not endorsed by Moira before the artifact is shown.
 
@@ -153,7 +154,7 @@ Artifacts may contain JavaScript, so each one is sandboxed at multiple layers:
 | Origin isolation       | deployment-configured artifact URL                                             |
 
 :::caution
-JavaScript runs but has **no network access** — `fetch`, `XHR`, and `WebSocket` are blocked. Use
+JavaScript runs but **application connections are blocked** — `fetch`, `XHR`, and `WebSocket` are blocked. Use
 artifacts for self-contained interactive content (dashboards, calculators, visualizations with
 embedded data), not for anything that needs to call a server.
 :::
@@ -166,7 +167,8 @@ Every artifact is shown inside a wrapper page with a fixed footer bar:
   wrapper (a separate document from the artifact), artifact content cannot
   overlap or remove it.
 - **Report** — a "Report" link lets viewers flag abusive content for review.
-  Administrators are notified (those who have Telegram configured in settings).
+  Administrator notification uses their enabled, configured communication channels and is best effort;
+  absence or failure of delivery does not invalidate the report submission.
 
 The wrapper chrome (the first-visit warning and the footer) is shown in English
 or Russian based on the viewer's browser language, with an EN/RU toggle in the

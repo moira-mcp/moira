@@ -7,7 +7,7 @@ import { Aside, Steps } from '@astrojs/starlight/components';
 
 Robust Task runs complex multi-step work from a durable filesystem workspace. The executor owns a complete coherent result; independent reviewers classify blocking findings by their earliest cause and route them to repair or replanning. Immutable plans, attempts, decisions, and reviews make the run recoverable after context loss, while bounded repair prevents unresolved work from being reported as complete.
 
-The workflow requires an agent with filesystem access. For smaller bounded tasks, use [Quick Task](/docs/reference/workflows/quick-task/).
+The workflow requires an agent with filesystem access. For smaller bounded tasks, use [Quick Task](/docs/reference/workflows/quick-task/). For repository implementation or refactoring, use [Software Development Flow](/docs/reference/workflows/software-development-flow/), which owns the complete software lifecycle.
 
 ## Start
 
@@ -187,7 +187,7 @@ takes the three decisions itself, so on those steps it is not shown as waiting f
 
 ## Use cases
 
-- complex implementation or refactoring with several dependent stages;
+- complex analysis, research or other general work with dependent stages;
 - work that must survive agent-context loss;
 - tasks requiring durable per-attempt evidence and independent gates;
 - critical work where unresolved obligations must not be silently treated as complete.

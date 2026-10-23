@@ -5,7 +5,7 @@ description: Store curated instructions and standards as variableRegistry defaul
 
 ## Overview
 
-Static Workflow Configuration is the practice of declaring curated rules, standards, checklists, and instructions as global variables in the workflow `variableRegistry` with a `default` value. These are deliberately placed so the agent sees them on every relevant step, ensuring consistent behavior throughout the workflow.
+Static Workflow Configuration is the practice of declaring curated rules, standards, checklists, and instructions as global variables in the workflow `variableRegistry` with a `default` value. These are deliberately placed so the agent sees them on every relevant step, making the authored text available where it is referenced. Delivery does not prove understanding or compliance.
 
 :::tip
 This is a **correct pattern** — do not confuse with [Dynamic Data in Workflow
@@ -32,17 +32,12 @@ variableRegistry (with default values):
 
 Step directive: "Create plan following {{planning_standards}}"
 → Workflow engine injects the registry default into the directive
-→ Agent sees rules every time, no extra I/O, no hallucination risk
+→ Agent receives the referenced text and remains responsible for applying it
 ```
 
 ## Why Not Files?
 
-Storing critical instructions in external files and asking the agent to read them creates [Externalizing Critical Instructions to Files](/docs/patterns/anti-patterns/#externalizing-critical-instructions-to-files):
-
-| Approach                     | Delivery guarantee                    | I/O cost            | Hallucination risk                  |
-| ---------------------------- | ------------------------------------- | ------------------- | ----------------------------------- |
-| **variableRegistry default** | ✅ Engine injects into directive      | None                | None — text is literal              |
-| **External file**            | ❌ Agent may skip or read selectively | Extra read per step | High — agent may recall from memory |
+A short workflow-owned rule can be interpolated directly. A long reference needs a canonical address for selective reading and independent reviewers. Materializing it once is valid; existing project instructions remain owned by their project files. In either case require actual access and application, not an assertion that delivery guarantees correctness.
 
 ## Examples
 
@@ -78,12 +73,12 @@ Directive references: `"Create development plan following {{planning_standards}}
 
 ### Not This Pattern: Dynamic Extraction Results
 
-```json
+```jsonc
 // ❌ This is dynamic data in workflow variables, not static configuration
 {
   "inputSchema": {
-    "extraction_results": { "type": "object" }
-  }
+    "extraction_results": { "type": "object" },
+  },
 }
 // Data generated during execution, grows unboundedly
 ```
@@ -120,8 +115,7 @@ records that it ran without that text.
 
 ## When the Text Needs an Address
 
-A registry default is the source of the text in every case. What changes with the size and role of
-the text is whether the run also writes it down.
+For workflow-authored stable text, a registry default can be the canonical source. Project rules and shared playbooks retain their own source owners. Choose whether the run also needs a readable file address.
 
 A short rule that one node applies whole belongs in that node's directive: giving it a path would add
 a read and an indirection for nothing. A body of criteria that outlives the step — planning rules,
@@ -144,10 +138,16 @@ into a prompt. That failure is catalogued as
 
 ## Size Guidance
 
-Static configuration is acceptable at any size if the content is:
+Respect the active transport and context limits. Prefer a materialized reference when readers need selected sections. Static configuration should be:
 
 - Deliberately curated (not auto-generated)
 - Stable across executions
 - Essential for agent behavior
 
-The bundled workflows use this for their largest instruction sets: `moira/workflow-management-flow` carries its complete authoring reference as a `workflow_authoring_reference` default, and `moira/software-development-flow` carries its planning requirements the same way.
+The bundled Workflow Management Flow stores thematic authoring references in `workflow_reference_*`
+string defaults, including engine, design, artifacts, review/repair, validation, authority, patterns,
+antipatterns, progress, and requirements-conversation guidance. Its `workflow_template_*` defaults
+hold starting JSON workflows. The bootstrap materializes them under `reference/` and
+`reference/templates/`; each substantive consumer reads its applicable files. See the
+[actual bootstrap declaration](/docs/reference/materialize/#apply-it-in-workflow-management-flow).
+Software Development Flow likewise stores its planning criteria in the `planning_standards` string default.

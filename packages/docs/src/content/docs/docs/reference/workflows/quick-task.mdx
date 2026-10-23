@@ -8,7 +8,7 @@ import { Aside } from '@astrojs/starlight/components';
 Quick Task runs a bounded multi-step non-development task as Plan → Approve → Execute → Review → Accept; in autonomous mode the approval and acceptance steps are skipped (see [Operating mode](#operating-mode)). It keeps complete task, plan, review, decision, change, and evidence records in an execution-specific filesystem workspace. Workflow context carries only bounded file references, the plan's unit titles and length, the execution cursor, a one-line result, and short values used for routing.
 
 <Aside type="tip">
-Use Quick Task when an agent has filesystem access and bounded non-development work fits a plan of at most ten meaningful units. For software implementation, bug fixing, refactoring, migrations, or rollout, use [Software Development Flow](./software-development-flow/); its plan scales the lifecycle to the actual change. Use [Robust Task](/docs/reference/workflows/robust-task/) when a complex general task needs a stronger recovery policy for partial execution or operational failures.
+Use Quick Task when an agent has filesystem access and bounded non-development work fits a plan of at most ten meaningful units. For software implementation, bug fixing, refactoring, migrations, or rollout, use [Software Development Flow](/docs/reference/workflows/software-development-flow/); its plan scales the lifecycle to the actual change. Use [Robust Task](/docs/reference/workflows/robust-task/) when a complex general task needs a stronger recovery policy for partial execution or operational failures.
 </Aside>
 
 ## Start

@@ -23,12 +23,17 @@ description: Возможность пропуска необязательны�
   "type": "agent-directive",
   "id": "optional-analysis",
   "directive": "Perform optional deep analysis. User can skip if not needed by providing skip='yes'.",
+  "completionCondition": "Optional analysis completed or explicitly skipped under the workflow's rules",
   "inputSchema": {
     "type": "object",
     "properties": {
       "analysis_result": { "type": "string" },
       "skip": { "type": "string", "enum": ["yes"] }
-    }
+    },
+    "oneOf": [
+      { "required": ["skip"], "not": { "required": ["analysis_result"] } },
+      { "required": ["analysis_result"], "not": { "required": ["skip"] } }
+    ]
   },
   "connections": { "success": "check-skip" }
 }
@@ -50,7 +55,7 @@ description: Возможность пропуска необязательны�
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "skip" },
+        "left": { "contextPath": "optional-analysis.skip" },
         "right": "yes"
       },
       "output": "skipped"
@@ -86,13 +91,16 @@ description: Возможность пропуска необязательны�
 ```json
 {
   "id": "collect-preferences",
+  "type": "agent-directive",
   "directive": "Ask user: do you want detailed analysis?",
+  "completionCondition": "Actual user preference recorded",
   "inputSchema": {
     "properties": {
       "want_detailed_analysis": { "type": "boolean" }
     },
     "required": ["want_detailed_analysis"]
-  }
+  },
+  "connections": { "success": "route-preferences" }
 }
 ```
 
@@ -104,7 +112,7 @@ description: Возможность пропуска необязательны�
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "want_detailed_analysis" },
+        "left": { "contextPath": "collect-preferences.want_detailed_analysis" },
         "right": false
       },
       "output": "skipped"
@@ -119,11 +127,14 @@ description: Возможность пропуска необязательны�
 
 ## Реальный пример
 
-Из `workflow-management-flow.json`:
+Пример необязательного чтения существующего определения; он не разрешает пропуск обязательного ревью или чтения исходного baseline перед редактированием:
 
 ```json
 {
   "id": "review-existing-workflow",
+  "type": "agent-directive",
+  "completionCondition": "Applicable source review completed, or inapplicable new-workflow source review explicitly skipped",
+  "connections": { "success": "route-review-result" },
   "directive": "If editing, review the existing workflow structure.\nIf creating new workflow, skip this step.",
   "inputSchema": {
     "properties": {

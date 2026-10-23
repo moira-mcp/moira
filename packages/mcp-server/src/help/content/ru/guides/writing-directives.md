@@ -5,7 +5,8 @@ description: Лучшие практики написания ясных и эф
 
 ## Структура директивы
 
-Каждый узел agent-directive должен содержать:
+Ноде `agent-directive` нужны ID, директива, условие завершения и связь success.
+Добавьте `inputSchema`, если агент должен вернуть данные:
 
 ```json
 {
@@ -13,10 +14,16 @@ description: Лучшие практики написания ясных и эф
   "id": "unique-id",
   "directive": "Что агент должен сделать",
   "completionCondition": "Когда задача завершена",
-  "inputSchema": {/* ожидаемая структура ответа */},
+  "inputSchema": {
+    "type": "object",
+    "properties": { "result": { "type": "string" } },
+    "required": ["result"]
+  },
   "connections": { "success": "next-node" }
 }
 ```
+
+Без `inputSchema` завершайте шаг пустым объектом: произвольные поля будут отклонены.
 
 ## Написание ясных директив
 
@@ -31,7 +38,7 @@ description: Лучшие практики написания ясных и эф
 ✅ Хорошо:
 
 ```
-"Fix TypeScript compilation errors in src/auth/.\n\nSteps:\n1. Run tsc --noEmit\n2. Fix each error\n3. Verify compilation succeeds"
+"Устраните обнаруженные ошибки TypeScript в src/auth/, сохранив ожидаемое поведение аутентификации. Сообщите команду проверки типов проекта, её фактический результат и оставшиеся ошибки."
 ```
 
 ### Включайте контекст
@@ -39,8 +46,13 @@ description: Лучшие практики написания ясных и эф
 Используйте шаблонные переменные:
 
 ```
-"Implement step {{current_step_index}} of {{total_steps}}: {{current_step_name}}\n\nExpected outcome: {{expected_outcome}}"
+"Выполните шаг {{plan.current_step_index}} из {{plan.total_steps}}: {{plan.current_step_name}}\n\nОжидаемый результат: {{plan.expected_outcome}}"
 ```
+
+Здесь `plan` — предыдущая нода, проверенный ответ которой содержит эти поля. Локальные результаты
+читаются как `node-id.field`; простое имя доступно только после объявления в `variableRegistry`.
+Не выдумывайте отсутствующие значения: сообщите о недостающей предпосылке или выберите явный путь
+восстановления.
 
 ### Указывайте требования к выводу
 
@@ -77,8 +89,10 @@ description: Лучшие практики написания ясных и эф
 ```
 
 :::caution
-Агенты заявляют о завершении, когда считают что условие выполнено. Делайте условия однозначными,
-чтобы предотвратить преждевременное завершение.
+Однозначное условие помогает агенту или ревьюеру оценить результат, но не доказывает выполнение
+работы. Требуйте подходящие свидетельства и предусмотрите честный исход сбоя или блокировки,
+если критерий невыполним. Схема проверяет форму ответа, а не истинность утверждений. Директива
+также не выдаёт отсутствующие права доступа или согласие пользователя.
 :::
 
 ## Эффективное использование InputSchema
@@ -88,6 +102,7 @@ description: Лучшие практики написания ясных и эф
 ```json
 {
   "inputSchema": {
+    "type": "object",
     "properties": {
       "task_completed": { "type": "string", "enum": ["yes", "no"] },
       "evidence": {
@@ -105,6 +120,7 @@ description: Лучшие практики написания ясных и эф
 ```json
 {
   "inputSchema": {
+    "type": "object",
     "properties": {
       "quality_check": {
         "type": "string",
@@ -120,7 +136,23 @@ description: Лучшие практики написания ясных и эф
 ### Маршрутизация по ответу
 
 Ответ-enum обычно и решает, куда пойдёт прогон дальше. Ставьте `cases` на ту же ноду, чтобы решал
-шаг, у которого есть свидетельство:
+шаг, у которого есть свидетельство. Если для workflow согласован бюджет из трёх ревью, объявите
+его счётчик в workflow:
+
+```json
+{
+  "variableRegistry": {
+    "review_round": {
+      "type": "integer",
+      "description": "Количество проверенных по схеме ответов ревью, учтённых в лимите проверок",
+      "minimum": 0,
+      "default": 0
+    }
+  }
+}
+```
+
+Затем используйте этот фрагмент ноды, определив в графе все цели связей:
 
 ```json
 {
@@ -130,55 +162,68 @@ description: Лучшие практики написания ясных и эф
   "completionCondition": "Verdict recorded with the findings that support it",
   "inputSchema": {
     "type": "object",
-    "globalInputs": ["review_verdict"],
     "properties": {
-      "findings": { "type": "string" }
+      "verdict": { "type": "string", "enum": ["pass", "repair", "blocked"] },
+      "findings": { "type": "string", "minLength": 1 }
     },
-    "required": ["review_verdict"]
+    "required": ["verdict", "findings"]
   },
   "expressions": ["review_round = review_round + 1"],
   "cases": [
     {
-      "when": { "operator": "gte", "left": { "contextPath": "review_round" }, "right": 3 },
-      "output": "exhausted"
+      "when": { "operator": "eq", "left": { "contextPath": "review.verdict" }, "right": "pass" },
+      "output": "passed"
     },
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "review_verdict" },
+        "left": { "contextPath": "review.verdict" },
         "right": "blocked"
       },
       "output": "blocked"
+    },
+    {
+      "when": { "operator": "gte", "left": { "contextPath": "review_round" }, "right": 3 },
+      "output": "exhausted"
     }
   ],
   "connections": {
-    "success": "merge",
-    "blocked": "fix-issues",
+    "success": "fix-issues",
+    "passed": "merge",
+    "blocked": "escalate",
     "exhausted": "escalate",
     "error": "handle-error"
   }
 }
 ```
 
-`review_verdict` и `review_round` объявлены в `variableRegistry` workflow, поэтому обе читаются по
-простому имени; локальный выход ноды читается как `review.findings`. Выражения выполняются после
-валидации ответа и до case, поэтому case может прочитать вычисленное ими. Case перебираются по
-порядку, а `success` — запасной выход: успешный вердикт в пределах бюджета кругов уходит в `merge`.
+`review.verdict` и `review.findings` — локальные результаты ноды. Только `review_round` является
+объявленной глобальной переменной. Выражения выполняются после проверки ответа и до cases, поэтому
+cases видят вычисленные значения. Порядок важен: успешное ревью ведёт в `merge`, в том числе на
+последнем разрешённом круге; блокировка ведёт к эскалации; вердикт repair при исчерпанном бюджете —
+тоже. В остальных случаях запасной выход `success` ведёт в `fix-issues`. Счётчик ограничивает
+попытки, но не доказывает качество.
 `error` и `timeout` зарезервированы под управление потоком: их не может назвать ни один case, и case
 им не нужен.
+
+Используйте `inputSchema.globalInputs`, только если ответ должен изменить объявленную глобальную
+переменную: локальному результату глобальная запись не нужна. `directive` и `completionCondition`
+обрабатываются как шаблоны, а `inputSchema` передаётся как схема: строки `{{...}}` внутри неё
+не подставляются.
 
 ### Сбор структурированных данных
 
 ```json
 {
   "inputSchema": {
+    "type": "object",
     "properties": {
       "test_results": {
         "type": "object",
         "properties": {
-          "total": { "type": "number" },
-          "passed": { "type": "number" },
-          "failed": { "type": "number" }
+          "total": { "type": "integer", "minimum": 0 },
+          "passed": { "type": "integer", "minimum": 0 },
+          "failed": { "type": "integer", "minimum": 0 }
         },
         "required": ["total", "passed", "failed"]
       }
@@ -200,9 +245,9 @@ description: Лучшие практики написания ясных и эф
 угадывать, и то, что позволяет рецензенту спорить с правилом по существу, а не по признаку
 соблюдения.
 
-Если свод правил достаточно длинный, чтобы его начали обходить пункт за пунктом, откройте его
-оговоркой: правило, неприменимое к текущему изменению, считается соблюдённым, и доказывать
-неприменимость ничем не нужно. Иначе свод снова превращается в чеклист.
+Задайте область применимости каждого критерия. Не создавайте артефакты ради посторонних требований,
+но объясните исключение, если от него зависит приёмка. Неизвестность о применимости правила не
+доказывает, что оно выполнено.
 
 ❌ Процедура:
 
@@ -235,7 +280,7 @@ description: Лучшие практики написания ясных и эф
 ### Условные инструкции
 
 ```
-"{{#if has_tests}}Run test suite: {{test_command}}{{else}}No tests configured, skip testing{{/if}}"
+"{{#if inspection.has_tests}}Запустите подходящий набор: {{inspection.test_command}}{{else}}Сообщите, что набор не настроен, и проверьте результат доступным подходящим способом.{{/if}}"
 ```
 
 ### Требования к верификации
@@ -257,7 +302,7 @@ description: Лучшие практики написания ясных и эф
 ✅ Решение:
 
 ```
-"Refactor auth module:\n- Extract validation logic to separate function\n- Add error handling for null inputs\n- Add JSDoc comments"
+"Приведите проверку auth к одной существующей границе валидации: допустимые входы сохраняют поведение, недопустимые получают документированный отказ. Выберите реализацию после изучения вызывающего кода и сообщите свидетельства этих свойств."
 ```
 
 ### Отсутствие контекста
@@ -271,7 +316,7 @@ description: Лучшие практики написания ясных и эф
 ✅ Решение:
 
 ```
-"Fix error in {{file_path}}:\n\nError message: {{last_error}}\nIteration: {{current_iteration}}"
+"Исследуйте сбой в {{diagnosis.file_path}}:\n\nНаблюдаемая ошибка: {{diagnosis.last_error}}\nПодтвердите причину до изменения кода и сообщите, отличает ли выбранная проверка исправленное поведение."
 ```
 
 ### Избыточная маршрутизирующая обвязка

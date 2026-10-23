@@ -66,7 +66,7 @@ to the same revision owner instead of retrying the step:
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "step_scope" },
+        "left": { "contextPath": "review-step.step_scope" },
         "right": "plan"
       },
       "output": "plan"
@@ -79,8 +79,7 @@ to the same revision owner instead of retrying the step:
 }
 ```
 
-The reviewing node writes `step_scope` through `inputSchema.globalInputs`, and the global is declared
-in `variableRegistry` with the two values the routes handle.
+The `review-step` node declares local `step_scope` with enum `step` / `plan` in inputSchema. No global is needed. These fragments assume their named targets exist in the containing workflow.
 
 ## 3. Coverage check before delivery
 
@@ -95,8 +94,8 @@ Gaps route to the revision owner, which extends the plan; zero gaps route to del
   "completionCondition": "Every requirement checked against the artifact and gap count reported",
   "inputSchema": {
     "type": "object",
-    "globalInputs": ["requirements_gaps_count"],
     "properties": {
+      "requirements_gaps_count": { "type": "integer", "minimum": 0 },
       "coverage_notes": { "type": "string" }
     },
     "required": ["requirements_gaps_count"]
@@ -113,7 +112,7 @@ Gaps route to the revision owner, which extends the plan; zero gaps route to del
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "requirements_gaps_count" },
+        "left": { "contextPath": "validate-requirements-coverage.requirements_gaps_count" },
         "right": 0
       },
       "output": "complete"

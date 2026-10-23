@@ -7,6 +7,8 @@ description: Публикация HTML контента с публичными 
 
 Публикация статического HTML контента, доступного по публичному URL. Генерация отчётов, дашбордов и документов для просмотра в браузере.
 
+Примеры нод — фрагменты содержащего workflow: названные производители данных и целевые ноды должны существовать. Ответ локален для производителя: уведомление ниже читает `generate-and-upload.report_url`; альтернативная загрузка требует своего соответствующего пути. Публикация HTML не доказывает доставку уведомления и требует разрешения на публичный доступ.
+
 ## Когда использовать
 
 | Сценарий                        | Пример                                                         |
@@ -31,6 +33,8 @@ description: Публикация HTML контента с публичными 
 
 ## Реализация
 
+Простые примеры ниже показывают только успешную загрузку: переходить дальше можно лишь после подтверждённого принятия и получения настоящего URL. При отказе или неизвестном исходе оставайтесь на паузе либо используйте явный маршрут из раздела «Обработка ошибок». Недостающие полномочия не разрешают попытку публикации.
+
 ### Паттерн прямой загрузки
 
 Когда агент генерирует HTML в памяти:
@@ -43,10 +47,9 @@ description: Публикация HTML контента с публичными 
   "completionCondition": "Отчёт загружен и URL получен",
   "inputSchema": {
     "type": "object",
-    "required": ["report_url", "uploaded"],
+    "required": ["report_url"],
     "properties": {
-      "report_url": { "type": "string" },
-      "uploaded": { "type": "boolean" }
+      "report_url": { "type": "string" }
     }
   },
   "connections": { "success": "notify-user" }
@@ -60,13 +63,15 @@ description: Публикация HTML контента с публичными 
 ```json
 {
   "id": "upload-via-token",
+  "connections": { "success": "notify-token-user" },
   "type": "agent-directive",
-  "directive": "Загрузи файл отчёта.\n\n1. Получи токен: artifacts({ action: \"token\", ttlMinutes: 30 })\n2. Прочитай файл из {{report_file_path}}\n3. POST на uploadUrl с контентом\n4. Сохрани url из ответа",
+  "completionCondition": "Actual HTML upload accepted and returned URL captured",
+  "directive": "Загрузи файл отчёта.\n\n1. Получи токен: artifacts({ action: \"token\", ttlMinutes: 30 })\n2. Прочитай файл из {{create-html.file_path}}\n3. POST на uploadUrl как multipart/form-data с полем file либо JSON с name и content\n4. Сохрани url из ответа",
   "inputSchema": {
     "properties": {
-      "report_url": { "type": "string" },
-      "uploaded": { "type": "boolean" }
-    }
+      "report_url": { "type": "string" }
+    },
+    "required": ["report_url"]
   }
 }
 ```
@@ -83,7 +88,7 @@ description: Публикация HTML контента с публичными 
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "can_create_files" },
+        "left": { "contextPath": "collect-capabilities.can_create_files" },
         "right": true
       },
       "output": "can-create-files"
@@ -113,7 +118,7 @@ artifacts({
   <h1 class="text-2xl font-bold">Отчёт</h1>
 </body>
 </html>`,
-  executionId: "exec-123", // Опционально: связь с workflow
+  executionId: "00000000-0000-4000-8000-000000000001", // Опционально: связь с workflow
 });
 ```
 
@@ -137,7 +142,7 @@ artifacts({
 ```typescript
 artifacts({
   action: "update",
-  uuid: "a1b2c3d4...",
+  uuid: "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
   content: "<html>...обновлённый контент...</html>",
   name: "report-v2.html", // Опционально
 });
@@ -170,7 +175,7 @@ artifacts({
 ответе источником истины. Допустимый срок действия upload-токена задан схемой `ttlMinutes`.
 
 :::tip
-Проверяйте квоту перед загрузкой с помощью `artifacts({ action: "stats" })`. Очищайте старые artifacts при приближении к лимитам.
+Проверяйте квоту перед загрузкой с помощью `artifacts({ action: "stats" })`. Удаляйте только artifacts, на удаление которых есть разрешение; предупреждение о квоте не разрешает удалять другой результат.
 :::
 
 ## Советы по генерации HTML
@@ -248,9 +253,9 @@ artifacts({
 
 ```json
 {
-  "id": "notify-with-link",
+  "id": "notify-user",
   "type": "user-notification",
-  "message": "Отчёт готов: {{report_url}}",
+  "message": "Отчёт готов: {{generate-and-upload.report_url}}",
   "format": "plain",
   "connections": { "default": "end", "error": "end" }
 }
@@ -263,12 +268,13 @@ artifacts({
 ```json
 {
   "id": "create-report",
+  "connections": { "success": "notify-report-user" },
+  "completionCondition": "Report reflects the actual analysis and publication is authorized and accepted",
   "type": "agent-directive",
   "directive": "Создай HTML отчёт с рекомендациями продуктов.\n\n**Данные анализа:**\n{{note:purchase-{{executionId}}-03-analysis}}\n\nСгенерируй адаптивный HTML:\n- Карточки продуктов с изображениями, ценами, ссылками\n- Сравнительная таблица\n- Итоговые рекомендации\n\nЗагрузи: artifacts({ action: \"upload\", name: \"purchase-{{executionId}}.html\", content: html, executionId: \"{{executionId}}\" })",
   "inputSchema": {
     "properties": {
-      "report_url": { "type": "string" },
-      "uploaded": { "type": "boolean" }
+      "report_url": { "type": "string" }
     },
     "required": ["report_url"]
   }
@@ -302,21 +308,76 @@ artifacts({
 
 - Отслеживание какое выполнение создало artifact
 - Запрос artifacts по выполнению
-- Очистка при архивации выполнения
+- Связь с выполнением не означает автоматическое удаление artifact при его архивации
 
 ### Обработка ошибок
 
+Владелец загрузки записывает фактический исход и выбирает маршрут по своему локальному ответу. Уведомление об успехе читает URL этого владельца, а не результат предыдущего примера прямой загрузки. Добавьте следующие ноды в содержащий workflow с существующей целью `end`:
+
 ```json
-{
-  "id": "upload-report",
-  "type": "agent-directive",
-  "directive": "Загрузи отчёт. Сначала проверь квоту. При ошибке загрузки сообщи пользователю.",
-  "connections": {
-    "success": "notify-user",
-    "error": "handle-upload-error"
+[
+  {
+    "id": "upload-report",
+    "type": "agent-directive",
+    "directive": "Публикуй HTML-отчёт только в пределах имеющихся полномочий и изучи настоящий ответ загрузки. Верни uploaded, только когда установлены принятие и полученный URL. При явном отказе верни refused, при таймауте или потерянном ответе с неизвестным результатом — uncertain. Для refused и uncertain запиши наблюдаемую причину; не придумывай URL. Перед повтором неопределённой операции выясни её фактический результат. Если проверка установила уже принятый artifact, верни его достоверный URL без повторной загрузки.",
+    "completionCondition": "Фактический исход загрузки честно записан вместе с принятым URL либо настоящей причиной отказа или неопределённости",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "upload_outcome": { "type": "string", "enum": ["uploaded", "refused", "uncertain"] },
+        "report_url": { "type": "string", "minLength": 1 },
+        "upload_reason": { "type": "string", "minLength": 1 }
+      },
+      "required": ["upload_outcome"],
+      "if": {
+        "properties": { "upload_outcome": { "const": "uploaded" } },
+        "required": ["upload_outcome"]
+      },
+      "then": {
+        "required": ["report_url"],
+        "not": { "required": ["upload_reason"] }
+      },
+      "else": {
+        "required": ["upload_reason"],
+        "not": { "required": ["report_url"] }
+      }
+    },
+    "cases": [
+      {
+        "when": {
+          "operator": "neq",
+          "left": { "contextPath": "upload-report.upload_outcome" },
+          "right": "uploaded"
+        },
+        "output": "upload-blocked"
+      }
+    ],
+    "connections": {
+      "success": "notify-upload-result",
+      "upload-blocked": "handle-upload-error"
+    }
+  },
+  {
+    "id": "notify-upload-result",
+    "type": "user-notification",
+    "message": "Отчёт готов: {{upload-report.report_url}}",
+    "format": "plain",
+    "connections": { "default": "end", "error": "end" }
+  },
+  {
+    "id": "handle-upload-error",
+    "type": "agent-directive",
+    "directive": "Исход загрузки: {{upload-report.upload_outcome}}. Наблюдаемая причина: {{upload-report.upload_reason}}. Сохрани отчёт и объясни пользователю настоящий блокер. Диагностируй явный отказ либо выясни, была ли принята загрузка с неизвестным исходом, прежде чем рассматривать повтор. Действуй только в пределах имеющихся полномочий. Если обязательное решение, доступ или достоверный результат недоступны, оставайся на паузе и получи их поддерживаемым механизмом ввода пользователя; не отправляй успешное завершение и не повторяй операцию вслепую.",
+    "completionCondition": "Причина отказа устранена либо неопределённый исход достоверно установлен и обосновано конкретное разрешённое продолжение через владельца загрузки; иначе оставаться на паузе",
+    "connections": { "success": "upload-report" }
   }
-}
+]
 ```
+
+Пустой ответ здесь невалиден. Ответ `refused` или `uncertain`, соответствующий схеме, выбирает авторский маршрут `upload-blocked`; только `uploaded` ведёт к уведомлению об успехе. Схема проверяет форму ответа, а не истинность заявления о загрузке. Владелец восстановления не завершает ноду при нерешённом блокере; повтор обосновывается устранённой причиной или установленным исходом, а не новым значением счётчика.
+
+Ошибка инструмента внутри agent-directive сама по себе не выбирает зарезервированный `connections.error`. Этот управляющий выход отличается от явного маршрута по наблюдаемому исходу. Публичная загрузка по токену принимает POST multipart/form-data с полем `file` либо JSON `{name, content}`; соблюдайте лимиты размера, срок и одноразовость токена.
 
 ## Антипаттерны
 

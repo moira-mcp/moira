@@ -7,6 +7,10 @@ description: Handle failures with user intervention
 
 When automated retries fail, escalate to user for manual intervention. Prevents infinite loops and allows human judgment for complex failures.
 
+The examples below are fragments whose targets must exist in the containing workflow. `current_iteration`, `validation_round` and `max_validation_rounds` serve an applicable retry policy only; declare them as numeric registry entries with initial defaults, as in Validation Loop. Error outputs belong to `handle-error`; a user decision belongs to the node that obtained the actual answer.
+
+`continue` and `skip` apply only to explicitly optional or waivable conditions. They cannot bypass mandatory review, approval, access or external-effect authority. Preserve work and escalate at those blockers. Resetting a counter does not authorize replay of an external action with an uncertain outcome.
+
 ## Bounded-Loop Limit Escalation
 
 When a bounded loop (a [validation loop](/docs/patterns/validation-loop/) or fix/retry cycle) reaches its iteration limit, the limit branch routes to an ask-user node. It never silently skips to the next phase — that hides unresolved issues from the user.
@@ -19,7 +23,8 @@ The ask-user node offers two decisions:
 ```mermaid
 flowchart LR
     F[fix] --> V[validate]
-    V --> C{count < max?}
+    V -->|clean| N[next phase]
+    V -->|unresolved| C{count < max?}
     C -->|under-limit| F
     C -->|default| A[ask-user-limit]
     A --> D{decision}
@@ -34,7 +39,7 @@ The decision is captured with a two-option enum:
 {
   "type": "agent-directive",
   "id": "ask-user-limit",
-  "directive": "Validation reached its limit of {{max_validation_rounds}} rounds with {{issues_count}} issues remaining.\n\nAsk the user how to proceed:\n- continue: accept the current result and move on\n- reset: keep fixing (the round counter resets to 0)",
+  "directive": "Validation reached its limit of {{max_validation_rounds}} rounds with {{validate-result.issues_count}} issues remaining.\n\nAsk the user how to proceed:\n- continue: accept the current result and move on\n- reset: keep fixing (the round counter resets to 0)",
   "completionCondition": "User chose continue or reset",
   "inputSchema": {
     "type": "object",
@@ -57,7 +62,7 @@ Route the decision: `continue` proceeds to the next phase, `reset` runs the coun
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "decision" },
+        "left": { "contextPath": "ask-user-limit.decision" },
         "right": "reset"
       },
       "output": "reset"
@@ -122,14 +127,20 @@ it through an ask-user node so the user keeps control over unresolved issues.
 {
   "type": "agent-directive",
   "id": "escalate-to-user",
-  "directive": "Automated resolution failed after {{current_iteration}} attempts.\n\nProblem: {{last_error}}\nAttempted fixes: {{attempted_fixes}}\n\nAsk user how to proceed:\n- Continue with current result as-is?\n- Reset counter and try fixing again?\n- Provide manual fix instructions?\n- Skip this step?\n- Abort workflow?",
+  "completionCondition": "Actual user decision and any required repair instructions recorded without waiving mandatory authority or review",
+  "directive": "Automated resolution failed after {{current_iteration}} attempts.\n\nProblem: {{handle-error.last_error}}\nAttempted fixes: {{handle-error.attempted_fix}}\n\nAsk user how to proceed:\n- Continue with current result as-is?\n- Reset counter and try fixing again?\n- Provide manual fix instructions?\n- Skip this step?\n- Abort workflow?",
   "inputSchema": {
     "type": "object",
     "properties": {
       "user_decision": { "type": "string", "enum": ["continue", "reset", "fix", "skip", "abort"] },
       "user_instructions": { "type": "string" }
     },
-    "required": ["user_decision"]
+    "required": ["user_decision"],
+    "if": { "properties": { "user_decision": { "const": "fix" } }, "required": ["user_decision"] },
+    "then": {
+      "required": ["user_instructions"],
+      "properties": { "user_instructions": { "type": "string", "minLength": 1 } }
+    }
   },
   "connections": { "success": "route-user-decision" }
 }
@@ -154,7 +165,7 @@ output, as `continue` and `skip` do here.
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "user_decision" },
+        "left": { "contextPath": "escalate-to-user.user_decision" },
         "right": "reset"
       },
       "output": "reset"
@@ -162,7 +173,7 @@ output, as `continue` and `skip` do here.
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "user_decision" },
+        "left": { "contextPath": "escalate-to-user.user_decision" },
         "right": "continue"
       },
       "output": "proceed"
@@ -170,7 +181,7 @@ output, as `continue` and `skip` do here.
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "user_decision" },
+        "left": { "contextPath": "escalate-to-user.user_decision" },
         "right": "skip"
       },
       "output": "proceed"
@@ -178,7 +189,7 @@ output, as `continue` and `skip` do here.
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "user_decision" },
+        "left": { "contextPath": "escalate-to-user.user_decision" },
         "right": "abort"
       },
       "output": "abort"
@@ -209,13 +220,16 @@ Track errors during retries:
 ```json
 {
   "id": "handle-error",
+  "type": "agent-directive",
+  "completionCondition": "Observed failure and attempted repair recorded for the escalation consumer",
+  "connections": { "success": "escalate-to-user" },
   "directive": "Record error details for escalation context.\n\nCurrent iteration: {{current_iteration}}\nError encountered: [describe error]",
   "inputSchema": {
     "properties": {
       "last_error": { "type": "string" },
       "attempted_fix": { "type": "string" }
     },
-    "required": ["last_error"]
+    "required": ["last_error", "attempted_fix"]
   }
 }
 ```
@@ -226,6 +240,7 @@ Track errors during retries:
 {
   "type": "agent-directive",
   "id": "workflow-aborted",
+  "completionCondition": "Owned partial results and unresolved work recorded; only authorized cleanup performed",
   "directive": "User chose to abort workflow.\n\nCleanup tasks:\n- Save partial progress\n- Document what was completed\n- Note why abort was necessary",
   "inputSchema": {
     "properties": {
@@ -237,6 +252,8 @@ Track errors during retries:
   "connections": { "success": "end-aborted" }
 }
 ```
+
+Reaching an authored `end` produces an ordinarily completed run with the stated partial outcome; it does not set status `stopped`. For an actual stop, use the authorized `session stop` contract rather than submitting a fictitious successful answer.
 
 ## Escalation Levels
 
@@ -250,11 +267,14 @@ For complex workflows, consider multiple escalation levels:
 
 ## Real Example
 
-From `development-flow.json`:
+Example of a user-feedback responsibility; its decision must feed a matching route in the containing workflow:
 
 ```json
 {
   "id": "collect-user-feedback",
+  "type": "agent-directive",
+  "completionCondition": "Actual user decision and relevant guidance recorded",
+  "connections": { "success": "route-feedback" },
   "directive": "Verification failed {{current_iteration}} times.\n\nAsk user:\n- Provide guidance for resolution?\n- Skip this step?\n- Modify the plan?\n\nSummarize the problem and what has been attempted.",
   "inputSchema": {
     "properties": {

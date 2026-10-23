@@ -27,7 +27,7 @@ durable workspace so a run survives interruptions, sends review findings back to
 caused them, replans when new facts change the task, and reports a partial result honestly
 instead of calling it done.
 
-**Pick it when** the task is large or important, or likely to run into problems along the way.
+**Pick it when** general non-development work is large or important, or likely to run into problems along the way. For repository implementation requiring a complete development lifecycle, select the matching software-development workflow from the current catalog.
 
 [Robust Task reference](/docs/reference/workflows/robust-task/)
 

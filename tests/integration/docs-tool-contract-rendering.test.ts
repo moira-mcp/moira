@@ -5,11 +5,24 @@ import path from "node:path";
 
 import { describe, expect, test } from "@jest/globals";
 import { getToolReferenceModel } from "@mcp-moira/mcp-server/tool-contract";
+import { renderPortableHelpTokens } from "@mcp-moira/shared/portable-help";
+import { createMarkdownProcessor, parseFrontmatter } from "@astrojs/markdown-remark";
 import { defaultTreeAdapter, parse, type DefaultTreeAdapterMap } from "parse5";
 
 const normalizeText = (value: string): string => value.replace(/\s+/g, " ").trim();
 
 const getTextContent = (node: DefaultTreeAdapterMap["node"]): string => {
+  // Starlight inserts accessible permalink labels into headings; they are page chrome,
+  // not authored prompt text. Preserve the heading itself and every source paragraph.
+  if (
+    defaultTreeAdapter.isElementNode(node) &&
+    node.tagName === "a" &&
+    node.attrs.some(
+      ({ name, value }) => name === "class" && value.split(/\s+/).includes("sl-anchor-link"),
+    )
+  ) {
+    return "";
+  }
   if (defaultTreeAdapter.isTextNode(node)) {
     return defaultTreeAdapter.getTextNodeContent(node);
   }
@@ -24,7 +37,7 @@ const renderedText = (html: string): string => {
 };
 
 describe("public MCP tool contract rendering", () => {
-  test("real EN and RU routes render every fact from the direct contract model", () => {
+  test("real EN and RU routes render their tool contracts and default prompts", async () => {
     const docsRoot = path.resolve("packages/docs");
     const outputRoot = mkdtempSync(path.join(tmpdir(), "moira-tool-contract-docs-"));
 
@@ -67,6 +80,22 @@ describe("public MCP tool contract rendering", () => {
           }
         }
         expect(html).toContain("code-block-wrapper");
+      }
+
+      const markdown = await createMarkdownProcessor();
+      for (const [relativePath, sourcePath] of [
+        ["docs/integration/agent-instructions/index.html", "config/prompts/systemPrompt.md"],
+        [
+          "ru/docs/integration/agent-instructions/index.html",
+          "packages/docs/src/content/docs/docs/SYSTEM-PROMPT-RU.md",
+        ],
+      ]) {
+        const html = readFileSync(path.join(outputRoot, relativePath), "utf8");
+        const { content: source } = parseFrontmatter(
+          readFileSync(path.resolve(sourcePath), "utf8"),
+        );
+        const renderedSource = await markdown.render(renderPortableHelpTokens(source));
+        expect(renderedText(html)).toContain(renderedText(renderedSource.code));
       }
     } finally {
       rmSync(outputRoot, { recursive: true, force: true });

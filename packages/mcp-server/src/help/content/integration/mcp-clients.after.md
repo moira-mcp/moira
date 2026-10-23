@@ -15,9 +15,12 @@ Moira supports two authentication methods:
 
 ### OAuth 2.1 (Default)
 
-1. Client initiates connection to MCP endpoint 2. Server returns authentication required response
-2. Client opens browser for OAuth flow 4. User authenticates with Moira 5. Client receives access
-   token 6. Subsequent requests include token
+1. Client connects to the MCP endpoint.
+2. Server requests authentication.
+3. Client opens the OAuth flow in a browser.
+4. User authenticates with Moira.
+5. Client receives an access token.
+6. Subsequent requests include that token.
 
 :::note
 OAuth token refresh is handled automatically and preserves the catalog state accepted by the
@@ -29,9 +32,11 @@ initialization step described below. If the credential expires, re-authenticatio
 
 For MCP clients that do not support OAuth (custom scripts, CI/CD pipelines, headless environments), use API tokens:
 
-1. Log in to Moira web UI 2. Go to **Settings → Apps & tokens → API tokens** 3. Click **Create Token**, enter a
-   name and expiration 4. Copy the token (shown once, starts with `moira_`) 5. Configure your client
-   with the token as Bearer authorization
+1. Log in to Moira web UI.
+2. Open **Settings → Apps & tokens → API tokens**.
+3. Choose **Create Token**, then enter its name and expiration.
+4. Copy the token, shown once and starting with `moira_`.
+5. Configure the client with Bearer authorization; keep the token out of committed files and logs.
 
 Example configuration for a custom MCP client:
 
@@ -138,20 +143,22 @@ Preparation returns a `startAttemptId` without creating an execution. Execute it
 
 Common error responses:
 
-| Error                               | Cause                             | Solution                               |
-| ----------------------------------- | --------------------------------- | -------------------------------------- |
-| `UNAUTHORIZED`                      | Invalid/expired token             | Re-authenticate                        |
-| `NOT_FOUND`                         | Invalid workflow/process ID       | Verify IDs                             |
-| `FORBIDDEN`                         | No access to resource             | Check permissions                      |
-| `upgrade_required`                  | MCP catalog must be refreshed     | Reconnect using the same credential    |
-| `VALIDATION_ERROR`                  | Invalid input                     | Check input schema                     |
-| `ATTEMPT_PROCESSING`                | Duplicate still executing         | Retry the same attempt and input       |
-| `ATTEMPT_STALE`                     | Presentation is no longer current | Read `current_step` and retry once     |
-| `ATTEMPT_CONFLICT`                  | Attempt is bound to other input   | Read `current_step`; discard old input |
-| `ATTEMPT_INVALID_OR_EXPIRED` (step) | Attempt is unavailable            | Read `current_step`; discard attempt   |
-| `ATTEMPT_OUTCOME_UNKNOWN`           | Effect may have occurred          | Inspect the returned Process ID        |
+| Error                               | Cause                             | Solution                                                |
+| ----------------------------------- | --------------------------------- | ------------------------------------------------------- |
+| `UNAUTHORIZED`                      | Invalid/expired token             | Re-authenticate                                         |
+| `NOT_FOUND`                         | Invalid workflow/process ID       | Verify IDs                                              |
+| `FORBIDDEN`                         | No access to resource             | Check permissions                                       |
+| `upgrade_required`                  | MCP catalog must be refreshed     | Reconnect using the same credential                     |
+| `VALIDATION_ERROR`                  | Invalid input                     | Check input schema                                      |
+| `ATTEMPT_PROCESSING`                | Duplicate still executing         | Retry the same attempt and input                        |
+| `ATTEMPT_STALE`                     | Presentation is no longer current | Read `current_step`; reconcile intent before submission |
+| `ATTEMPT_CONFLICT`                  | Attempt is bound to other input   | Read `current_step`; discard old input                  |
+| `ATTEMPT_INVALID_OR_EXPIRED` (step) | Attempt is unavailable            | Read `current_step`; discard attempt                    |
+| `ATTEMPT_OUTCOME_UNKNOWN`           | Effect may have occurred          | Inspect the returned Process ID                         |
 
 ## Self-Hosted Setup
+
+For full recovery distinctions, see [Troubleshooting](/docs/integration/troubleshooting/). A fresh presentation never authorizes carrying an old answer into another step; an unknown outcome is collected, not automatically replayed.
 
 For self-hosted Moira:
 

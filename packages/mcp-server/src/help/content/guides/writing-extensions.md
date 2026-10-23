@@ -225,6 +225,9 @@ export default defineExtension({ nodes: [send] });
 
 The manifest is the schema authority. A schema may also be repeated in `defineNode`; if it is, the
 runner requires the two declarations to be identical when the child process first loads the code.
+This snippet exports only the node. To use the combined manifest above, also implement its channel
+below and export both contributions from the same entrypoint; a declared handler that is missing
+from the module makes the bundle fail to load.
 
 The handler receives:
 
@@ -236,7 +239,11 @@ The handler receives:
 | `signal`                | Aborted when the call is cancelled or reaches its deadline                |
 | `services`              | Explicit capabilities granted by the manifest                             |
 
-There is no ambient access to Moira's database, environment, configuration, or filesystem.
+The handler ABI passes no Moira database, application configuration or filesystem service. The
+ordinary runner child receives a narrow environment rather than the application's secrets. These
+are service and process boundaries, not a restriction on arbitrary trusted Node.js code: the child
+can still use its own runtime and filesystem access. Manifest grants constrain the provided
+services; they do not make untrusted code safe to install.
 
 ## Communication channel handler
 
@@ -263,6 +270,13 @@ const notifications = defineChannel({
 });
 
 export default defineExtension({ communicationChannels: [notifications] });
+```
+
+That export is for a channel-only manifest. When combining the two handlers with the manifest above,
+use one module with both definitions and one final export:
+
+```typescript
+export default defineExtension({ nodes: [send], communicationChannels: [notifications] });
 ```
 
 The ordinary text handler receives a portable message, schema-checked nonsecret settings,
@@ -417,11 +431,17 @@ across calls and may run several calls in it concurrently; it replaces that proc
 deadline, or cancellation. Do not rely on process-local state. Handlers must be re-entrant and safe
 to terminate.
 
+The workflow node's `timeout` is in milliseconds and defaults to 30,000 when omitted. A timeout,
+lost response or invalid output does not prove that an external request had no effect. Before
+retrying a side effect, inspect its provider receipt or use a provider-supported idempotency contract;
+do not treat a new handler invocation as collection of the previous result.
+
 :::caution
-An extension node is one synchronous, deadline-bounded call. Extensions cannot create native
-background tasks, wake an agent, or install a callback. Model a long operation as workflow nodes:
-start it, store its handle in node-scoped output, check it later, and loop through a condition node.
-Do not keep one handler waiting.
+An extension node is one awaited, deadline-bounded call. The SDK exposes no durable background-task,
+agent wake-up or callback-registration API. Model a long provider operation as explicit workflow
+nodes: start it, retain its handle in node-scoped output, then check or collect that same operation.
+Place routing cases on the node that has the result, or use a standalone condition for a shared
+decision. Do not rely on an unawaited promise or timer surviving cancellation or process replacement.
 :::
 
 ## Generic workflow editor

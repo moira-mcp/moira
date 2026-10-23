@@ -41,6 +41,7 @@ Ensure each workflow step is truly complete before moving to the next. Prevents 
 {
   "type": "agent-directive",
   "id": "verify-step",
+  "completionCondition": "The real artifact checked against the expected result and the evidence or remaining gap reported",
   "directive": "Verify step {{current_step_name}} completed:\n- Expected: {{expected_output}}\n- Check actual result matches expected\n- Provide evidence",
   "inputSchema": {
     "type": "object",
@@ -55,7 +56,7 @@ Ensure each workflow step is truly complete before moving to the next. Prevents 
 ```
 
 :::caution
-Require `verification_evidence` to prevent agents from claiming completion without proof.
+verification_evidence records reasoning, but a string alone proves nothing. The reader checks the relevant artifact or observed action.
 :::
 
 ### Check Node
@@ -68,7 +69,7 @@ Require `verification_evidence` to prevent agents from claiming completion witho
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "step_verified" },
+        "left": { "contextPath": "verify-step.step_verified" },
         "right": "yes"
       },
       "output": "verified"
@@ -87,7 +88,7 @@ Specify what counts as evidence:
 
 ```json
 {
-  "directive": "Verify implementation. Evidence must include:\n- Test command output (npm test results)\n- API response (curl output)\n- File diff (git diff)\n- Screenshot (for UI changes)"
+  "directive": "Select evidence for the property actually changed: observed focused test/API results for behavior, the stored artifact for representation, viewed screenshots for appearance, and reasoned primary-source review for meaning and architecture. Report unavailable checks and limitations honestly; do not run unrelated checks to fill a list."
 }
 ```
 
@@ -145,18 +146,22 @@ Use expression nodes to update:
 {
   "type": "expression",
   "id": "increment-step",
-  "expressions": ["current_step_index = current_step_index + 1"]
+  "expressions": ["current_step_index = current_step_index + 1"],
+  "connections": { "default": "load-next-step" }
 }
 ```
 
 ## Real Example
 
-From `development-flow.json`:
+This example assumes declared step metadata and existing target nodes in the containing workflow:
 
 ```json
 {
   "id": "verify-step-implementation",
-  "directive": "Verify step {{current_step_index}} ({{current_step_name}}) implementation.\n\nExpected outcome: {{expected_outcome}}\n\nVerification checklist:\n- Functionality works as expected\n- Tests pass (if applicable)\n- No regressions introduced\n\nProvide concrete evidence for each claim.",
+  "type": "agent-directive",
+  "completionCondition": "Actual step artifact checked against the expected outcome and remaining gaps recorded",
+  "connections": { "success": "check-verification" },
+  "directive": "Verify step {{current_step_index}} ({{current_step_name}}) implementation.\n\nExpected outcome: {{expected_output}}\n\nVerification checklist:\n- Functionality works as expected\n- Tests pass (if applicable)\n- No regressions introduced\n\nProvide concrete evidence for each claim.",
   "inputSchema": {
     "properties": {
       "step_verified": { "type": "string", "enum": ["yes", "no"] },
@@ -170,7 +175,7 @@ From `development-flow.json`:
 
 ## Handling Verification Failure
 
-On failure, either retry or escalate:
+Diagnose failure, retry changed work or escalate a real blocker. This example assumes an applicable budget and numeric current_iteration declared in the registry with an initial default:
 
 ```json
 {

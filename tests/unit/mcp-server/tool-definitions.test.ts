@@ -135,15 +135,15 @@ async function inspectPublishedContract(instructions: string, context?: { agent?
 }
 
 describe("MCP tool definitions", () => {
-  it("keeps the fileless-agent codespace instruction in every system-prompt copy", () => {
+  it("keeps the fileless-agent codespace instruction in the canonical default prompt", () => {
     const canonical = readFileSync(resolve("config/prompts/systemPrompt.md"), "utf8");
     expect(canonical).toContain(
-      "If you cannot read or write the user's files, do not tell them what to run in a terminal you cannot see. Use a codespace: look for one that already fits the task, and offer to create one when none does.",
+      "inspect the available workspace capabilities and look for an authorized codespace that fits",
     );
-    expect(readFileSync(resolve("docs/SYSTEM-PROMPT.md"), "utf8")).toBe(canonical);
-    expect(
-      readFileSync(resolve("packages/docs/src/content/docs/docs/SYSTEM-PROMPT.md"), "utf8"),
-    ).toBe(canonical);
+    expect(canonical).toContain("creating or accessing it still requires the user's authority");
+    expect(canonical).toContain(
+      "rather than claim execution or verification you could not observe",
+    );
   });
 
   it("publishes purpose tools instead of the three removed flat dispatchers", () => {

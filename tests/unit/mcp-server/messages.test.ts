@@ -52,7 +52,7 @@ describe("MCP Messages Module", () => {
     it("should generate documentation_file_not_found with path info", () => {
       const result = ERRORS.documentation_file_not_found("nodes.mdx", "/app/docs");
       expect(result).toContain("Documentation file not found: nodes.mdx");
-      expect(result).toContain("DOCS_DIR");
+      expect(result).toContain("MCP package includes its portable help content");
       expect(result).toContain("/app/docs");
     });
   });

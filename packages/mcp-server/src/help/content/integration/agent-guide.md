@@ -155,7 +155,7 @@ Valid response:
 }
 ```
 
-Submit a single flat object containing exactly the properties in `inputSchema` — one object per step, with every `required` property present. Keys not described in the schema are rejected. Some of a step's values are workflow-wide and some are local to the step, but the schema you receive already merges both into one ordinary object: you do not declare or distinguish them — just match the schema.
+Submit one object matching the presented schema, with every required property present. It may contain nested objects or arrays when declared. Response keys must be declared even when additionalProperties is true. Global and node-local fields are already combined in the presented schema; callers do not add a separate scope wrapper. Schema validity does not establish that an external action happened: inspect the evidence before reporting completion.
 
 ## Navigation Tools
 
@@ -218,7 +218,7 @@ start({ action: "prepare", workflowId: "dev-flow", note: "Feature: auth system",
 start({ action: "execute", startAttemptId: "start-attempt-123" })
 ```
 
-Update note during execution via `step()` input:
+Update note during execution via `step()` input only when that step's schema declares `execution_note`:
 
 ```json
 step({
@@ -332,7 +332,7 @@ step({ processId: "xyz", attemptId: "attempt-1", input: { findings: "..." } })
 ```json
 // 1. Find your execution
 session({ action: "executions" })
-// → [{ executionId: "xyz", status: "waiting", ... }]
+// → a page of active executions; choose the exact original Process ID
 
 // 2. Get current step
 session({ action: "current_step", executionId: "xyz" })
@@ -354,8 +354,9 @@ If `step()` returns validation error, check:
 `ATTEMPT_PROCESSING` means another caller still owns this exact mutation; retry the same Process ID,
 Step attempt ID, and input, or the same Start attempt ID for `start({ action: "execute" })`.
 `ATTEMPT_STALE` was rejected before handler work. Automatically read
-`session({ action: "current_step", executionId })` and retry the intended submission once with the
-returned Step attempt ID; user guidance is not required.
+`session({ action: "current_step", executionId })` and reconcile its node, directive, schema and
+current intent before submitting with the returned Step attempt ID. Do not carry old input into
+another step or overwrite a newer user answer.
 `ATTEMPT_CONFLICT` means the attempt is already bound to different input. Automatically read
 `session({ action: "current_step", executionId })`, discard the conflicting attempt, and continue
 from the returned directive and input schema without replaying the rejected input; user guidance is
@@ -371,8 +372,8 @@ execution with its current revision through
 A write made on a revision that is no longer current — a reminder, parent, context or cancellation
 whose `expectedRevision` or target revision is older than the stored one, or a message that says
 "reload" or "is stale" — is rejected before anything is written. Re-read that state (`reminders`,
-`variables`, `execution_context`, or the workflow for a workflow revision) and retry with its
-current revisions; user guidance is not required.
+`variables`, `execution_context`, or the workflow for a workflow revision). Reconcile the intended
+change with the new state before using its revisions; stale guards do not authorize replacing concurrent work.
 
 When an error carries an `AGENT INSTRUCTIONS` section, follow it. It tells you to stop only where a
 person is needed: missing permission, an authentication or connection problem you cannot resolve, a
@@ -384,6 +385,6 @@ you cannot obtain yourself.
 
 ## Related Documentation
 
-- [MCP Tools Reference](/docs/docs/reference/tools) - Full tool documentation
-- [Agent Instructions](/docs/docs/integration/agent-instructions) - System prompt
-- [Troubleshooting](/docs/docs/integration/troubleshooting) - Common issues
+- [MCP Tools Reference](/docs/reference/tools/) - Full tool documentation
+- [Agent Instructions](/docs/integration/agent-instructions/) - System prompt
+- [Troubleshooting](/docs/integration/troubleshooting/) - Common issues

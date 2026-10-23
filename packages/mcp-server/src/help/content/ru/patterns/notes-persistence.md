@@ -5,7 +5,7 @@ description: Сохранение и получение данных между 
 
 ## Назначение
 
-Сохранение структурированных данных, которые переживают перезапуски workflow или должны передаваться между шагами. Notes обеспечивают key-value хранилище с версионированием и тегами.
+Сохраняйте каноническое значение, которому нужен адрес за пределами одного выполнения. Notes обеспечивают key-value хранилище с версионированием и тегами. Движок уже сохраняет переменные выполнения: обычное прерывание не требует копирования этих данных в notes.
 
 ## Когда использовать
 
@@ -19,8 +19,7 @@ description: Сохранение и получение данных между 
 
 :::caution
 Не используйте notes для временных вычислений (используйте context variables), данных только для
-следующего шага (используйте inputSchema), данных сверх действующей политики notes (используйте
-artifacts), бинарных данных.
+следующего шага (используйте inputSchema), данных сверх действующей политики notes или бинарных данных. Обычные файлы храните в принадлежащем выполнению workspace; artifacts публикуют HTML.
 :::
 
 ## Структура
@@ -40,7 +39,7 @@ artifacts), бинарных данных.
   "id": "save-analysis",
   "type": "write-note",
   "key": "purchase-{{executionId}}-01-analysis",
-  "source": "{{analyze-step-output}}",
+  "source": "{{analyze-step.analysis}}",
   "tags": ["purchase-{{executionId}}", "analysis"],
   "connections": {
     "default": "next-step",
@@ -66,13 +65,13 @@ artifacts), бинарных данных.
 {
   "id": "save-batch",
   "type": "write-note",
-  "source": "{{items-to-save}}",
+  "source": "collect-items.items",
   "batchMode": true,
   "connections": { "default": "next" }
 }
 ```
 
-Формат массива source:
+Пакетный `source` — путь в контексте без шаблонных скобок. Здесь `collect-items` возвращает `items`. Остальные примеры предполагают наличие названных производителей данных и целевых нод в содержащем workflow. Формат массива source:
 
 ```json
 [
@@ -83,7 +82,7 @@ artifacts), бинарных данных.
 
 ### Нода read-note
 
-Загрузка notes в context variable:
+Загрузка notes в локальные данные ноды: далее используйте `load-data.previousData`:
 
 ```json
 {
@@ -97,7 +96,7 @@ artifacts), бинарных данных.
 }
 ```
 
-**Режим single** для единственной note:
+**Режим single** возвращает объект только при ровно одном результате в возвращённой странице; при нуле или нескольких совпадениях остаётся массив. Обработчик читает одну ограниченную страницу, а не проверяет уникальность среди всех notes. Результат примера доступен как `load-preferences.userPrefs`:
 
 ```json
 {
@@ -112,7 +111,7 @@ artifacts), бинарных данных.
 
 ### Нода upsert-note
 
-Обновление существующей или создание новой:
+Обновление первого возвращённого совпадения либо создание новой note, если результат не найден. Используйте достаточно узкий поиск; это не проверка уникальности:
 
 ```json
 {
@@ -123,7 +122,7 @@ artifacts), бинарных данных.
     "keyPattern": "prefs-{{userId}}"
   },
   "keyTemplate": "prefs-{{userId}}-new",
-  "value": "{{collected-preferences}}",
+  "value": "{{collect-preferences.preferences}}",
   "tags": ["user-prefs"],
   "outputVariable": "saveResult",
   "connections": { "default": "confirm" }
@@ -139,7 +138,8 @@ artifacts), бинарных данных.
   "id": "research-step",
   "type": "agent-directive",
   "directive": "Исследуй на основе потребностей пользователя.\n\n**Потребности:**\n{{note:purchase-{{executionId}}-01-user-needs}}\n\nОпредели основные категории.",
-  "completionCondition": "Исследование завершено"
+  "completionCondition": "Исследование завершено",
+  "connections": { "success": "next-step" }
 }
 ```
 
@@ -178,20 +178,16 @@ notes({
 });
 ```
 
-## Исторический пример
+## Каноническое долговечное значение
 
-Раньше Smart Purchase Assistant демонстрировал сохранение каждого этапа через write-note. Текущая
-production-версия в `workflows/production/flows/b33e227c-cc2c-4931-ae5d-2de69932e41e.json`
-использует один execution-correlated файловый пакет: дублирование подробного содержимого в notes и
-workflow variables создаёт конкурирующие источники истины. Write-note по-прежнему подходит, когда
-сама note является каноническим долговечным значением:
+Выберите один канонический подробный результат. Файловый пакет и note с одним отчётом создают конкурирующие источники. Write-note подходит, когда сама note является долговечным значением:
 
 ```json
 {
   "id": "write-note-01",
   "type": "write-note",
   "key": "purchase-{{executionId}}-01-user-needs",
-  "source": "{{analyze-user-needs}}",
+  "source": "{{analyze-user-needs.needs}}",
   "tags": ["analysis-{{executionId}}", "research"],
   "connections": { "default": "research-product-category" }
 }
@@ -212,7 +208,7 @@ workflow variables создаёт конкурирующие источники 
   "id": "write-critical",
   "type": "write-note",
   "key": "critical-data-{{executionId}}",
-  "source": "{{results}}",
+  "source": "{{produce-results.result}}",
   "connections": {
     "default": "continue",
     "error": "handle-write-error"
@@ -224,13 +220,13 @@ workflow variables создаёт конкурирующие источники 
 
 - Объекты и массивы автоматически сериализуются в JSON
 - Примитивные значения сохраняются как строки
-- Для больших объектов рассмотрите разбиение или artifacts
+- Большие объекты храните в принадлежащем выполнению workspace; artifacts используйте для публикации HTML
 
 ## Антипаттерны
 
 ### Отсутствие изоляции выполнения
 
-```json
+```jsonc
 // Неправильно - общий между выполнениями
 { "key": "user-analysis" }
 
@@ -244,7 +240,7 @@ workflow variables создаёт конкурирующие источники 
 
 ### Хранение больших бинарных данных
 
-Notes предназначены для структурированных текстовых данных. Используйте [Artifacts](/ru/docs/patterns/artifacts-publishing/) для HTML контента или больших файлов.
+Notes предназначены для структурированных текстовых данных. Используйте [Artifacts](/ru/docs/patterns/artifacts-publishing/) для публикации HTML, а принадлежащий выполнению workspace — для бинарных и обычных больших файлов.
 
 ## Связанные паттерны
 

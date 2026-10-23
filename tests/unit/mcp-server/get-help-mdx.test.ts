@@ -4,6 +4,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 
 import { describe, it, expect, beforeEach } from "@jest/globals";
 import { _testing } from "../../../packages/mcp-server/src/tools/get-help.js";
@@ -266,6 +270,53 @@ tags:
   });
 
   describe("portable runtime topics", () => {
+    it("composes the canonical default prompt from an unrelated working directory", () => {
+      const directory = fs.mkdtempSync(path.join(tmpdir(), "moira-default-help-"));
+      const moduleUrl = pathToFileURL(
+        path.resolve("packages/mcp-server/src/tools/get-help.ts"),
+      ).href;
+      const loaderUrl = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
+      const canonical = fs.readFileSync(path.resolve("config/prompts/systemPrompt.md"), "utf8");
+      try {
+        const emptyEnv = path.join(directory, "empty.env");
+        fs.writeFileSync(emptyEnv, "");
+        const output = execFileSync(
+          process.execPath,
+          [
+            "--import",
+            loaderUrl,
+            "--input-type=module",
+            "-e",
+            `const { _testing } = await import(${JSON.stringify(moduleUrl)}); process.stdout.write(JSON.stringify(_testing.composePortableHelpFile("integration/agent-instructions.before.md")));`,
+          ],
+          {
+            cwd: directory,
+            env: {
+              ...process.env,
+              NODE_ENV: "test",
+              TEST_ENV: "true",
+              DOTENV_CONFIG_PATH: emptyEnv,
+              DOTENV_CONFIG_QUIET: "true",
+              ENV_FILE_FOLDER: directory,
+              DB_PATH: path.join(directory, "test.db"),
+              LOG_FILE: "",
+              LOG_LEVEL: "error",
+            },
+            encoding: "utf8",
+          },
+        );
+        expect(JSON.parse(output)).toBe(
+          composePortableHelpFile("integration/agent-instructions.before.md", {
+            helpDirectory,
+            systemPrompt: canonical,
+          }),
+        );
+        expect(JSON.parse(output)).toContain(_testing.stripFrontmatter(canonical));
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    });
+
     it("uses each MCP-owned semantic source from both public language shells", () => {
       const discovered = scanHelpFiles(helpDirectory, helpDirectory);
       const discoveredIds = discovered.map(filePathToTopicId).sort();
@@ -426,7 +477,15 @@ tags:
           for (const title of titles) expect(section).toContain(`**${title}**`);
         }
         expect(clients).toContain("Authorization");
-        expect(read("integration/claude-code.md")).toContain("https://help.example.test/mcp");
+        expect(read("integration/claude-code.md")).toContain(
+          "[MCP Clients](/docs/integration/mcp-clients/)",
+        );
+        const claude = getClientSetupPresentation("en", "https://help.example.test/mcp").find(
+          (presentation) => presentation.client.id === "claude-code",
+        )!;
+        const claudeSection = clients.split(`### ${claude.label}\n`)[1]?.split("\n### ")[0];
+        expect(claudeSection).toContain("https://help.example.test/mcp");
+        expect(claudeSection).toContain(claude.primary!.code.trim());
         expect(read("concepts/artifacts.md")).toContain("artifacts.example.test");
         expect(read("integration/agent-instructions.before.md")).toContain("## Purpose");
         expect(read("concepts/nodes.md")).toContain("### Telegram Notification");

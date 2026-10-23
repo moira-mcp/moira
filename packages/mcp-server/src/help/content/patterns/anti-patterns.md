@@ -24,15 +24,15 @@ Directive tells agent to collect data, then `inputSchema` asks agent to return t
    inputSchema: { project_name: string, version: string, description: string }
    // Agent copies data from file to schema fields — pointless roundtrip
 
-✅ Use expression node to extract data, or capture agent's ANALYSIS in inputSchema
+✅ Read files with a filesystem tool; expressions transform existing context.
+   Capture substantive analysis or values with named downstream readers.
    inputSchema: { architecture_assessment: string, risks_identified: string[] }
 ```
 
 ### Decorative Outputs
 
 An `inputSchema` asks for `done`, `success`, `status`, `result_code`, pass numbers, or evidence that
-no downstream node reads. A successful node transition already means that its completion condition
-was met; JSON Schema does not make redundant confirmation useful.
+no downstream node reads. A successful transition records the agent's answer, not independent proof of the completion condition. JSON Schema does not make redundant confirmation useful.
 
 **Detection:** An output has no reader, does not affect a condition, and is not part of the required
 user-facing result.
@@ -74,7 +74,7 @@ through workflow context or repeated inside another artifact.
 
 ### Context Duplication
 
-Copying information already in agent's context into workflow variables. Redundant and bloats context.
+Copying information into workflow variables without a durable consumer or route. Conversation memory is not persisted execution state: save a value when a real later reader needs it.
 
 **Detection:** `inputSchema` that captures data the agent already has in conversation context (e.g., directory listings, project info from prior analysis).
 
@@ -87,16 +87,16 @@ Copying information already in agent's context into workflow variables. Redundan
 
 ### Dynamic Data in Workflow Variables
 
-Storing **dynamic data generated during workflow execution** (file contents, API responses, HTML output, extraction results) in workflow variables. These variables get injected into every directive via templates, bloating context with potentially unbounded content.
+Storing **dynamic data generated during workflow execution** (file contents, API responses, HTML output, extraction results) in workflow variables. Values are injected only where templates reference them. Repeatedly interpolating large payloads bloats context; an observed value for a real reader is legitimate.
 
-**Detection:** Variables that receive dynamic content through `inputSchema` during execution, especially content >1KB or content that grows unboundedly.
+**Detection:** Variables that receive dynamic content through `inputSchema` during execution, where large or growing payloads are repeatedly interpolated instead of keeping a canonical file.
 
 **Scope:** This anti-pattern applies to **data flowing between workflow steps** — NOT to static configuration stored as a `variableRegistry` default. See the [Static Workflow Configuration](/docs/patterns/static-configuration/) pattern for the distinction.
 
 ```
 ❌ inputSchema: { html_content: string }
    Next directive: "Publish {{step.html_content}}"
-   // Entire HTML page stored in variable, injected into every subsequent directive
+   // Entire HTML page stored in variable, copied through context instead of keeping a canonical file
 
 ❌ inputSchema: { extraction_results: object }
    Next directive: "Analyze {{extraction_results}}"
@@ -194,7 +194,7 @@ Referencing a bare-name variable that is not declared in the workflow `variableR
    // Counter starts at a real value; increments and templates resolve
 ```
 
-Give every counter and flag a `default`. The validator emits a declared-but-no-default warning when a referenced variable has no `default` and is never written upstream.
+Initialize arithmetic inputs before use. Keep review verdicts and evidence outputs absent until their owner produces them; default pass/zero/false can conceal that a review never ran. Schema property defaults do not populate answers. The validator emits a declared-but-no-default warning when a referenced variable has no `default` and is never written upstream.
 
 ### Manual Index Management by Agent
 
@@ -213,19 +213,19 @@ Agent manually tracks array indices, counters, or pagination through `inputSchem
 
 ### Template-in-Data
 
-A `{{name}}` the agent writes into data returned via `step()` renders `[[UNDEFINED_VARIABLE]]` when that value is later interpolated into a directive.
+A `{{name}}` inside returned data stays literal when interpolated later. The defect is expecting substituted data to be evaluated recursively.
 
 **Detection:** Returned `inputSchema` values that contain bare `{{...}}` template syntax.
 
 ```
 ❌ step() returns: { summary: "Report for {{project_name}}" }
-   Next directive: "Publish {{summary}}"  // {{project_name}} renders [[UNDEFINED_VARIABLE]]
+   Next directive: "Publish {{step-id.summary}}"  // {{project_name}} remains literal
 
 ✅ step() returns: { summary: "Report for acme-api" }
    // Substituted data values are treated as literal text, never re-parsed as templates
 ```
 
-Never write bare `{{...}}` into `step()` data; templates belong only in static node fields (directive, completionCondition, message). The engine treats substituted data values as literal.
+Return resolved text when the consumer needs a computed value. Literal template examples are valid data and stay literal; templates execute in author-controlled static fields.
 
 ### Template Injection (SSTI)
 
@@ -253,14 +253,14 @@ System-level consideration. `systemReminder` is static and applied to ALL steps.
 
 Passing entire workflow JSON through MCP tool parameters for large workflows. Hits size limits.
 
-**Detection:** `manage({ action: "create", workflow: <large JSON> })` with workflow >50KB.
+**Detection:** `manage({ action: "create", workflow: <large JSON> })` where a file-based upload would avoid copying a large body.
 
 ```
-❌ manage({ action: "create", workflow: <50KB JSON> })
+❌ manage({ action: "create", workflow: <large JSON> })
    // May hit parameter size limits
 
-✅ token({ action: "upload" }) → HTTP PUT with file content
-   // Token-based upload handles any size
+✅ token({ action: "upload" }) → follow the returned upload instructions
+   // Observe active upload limits and response; do not assume a method or unlimited size
 ```
 
 ### Hidden Runtime in Temporary Tools
@@ -273,9 +273,9 @@ Perform the edit with the official CLI or API, and keep the workflow JSON the ar
 
 ### Implicit Fix Loops
 
-Directive says "fix until done" without explicit loop structure in the graph. Agent retries internally without workflow control.
+A directive authorizes blind repetition across an ownership, approval or external-effect boundary. Ordinary diagnosis, repair and focused checking inside one substantive responsibility do not need a node per tool call.
 
-**Detection:** Words like "retry", "keep trying", "fix until" in directive without corresponding condition node creating a graph loop.
+**Detection:** An unchanged action repeats without diagnosis, or a required independent review/user decision is hidden inside a producer turn.
 
 ```
 ❌ Directive: "Keep fixing tests until they all pass"
@@ -334,13 +334,13 @@ user could skip. Consolidation must preserve applicability, order, and failure a
 
 ### Review Loop via InputSchema Instead of Files
 
-Review feedback passed through `inputSchema` text fields instead of persistent files. Agent loses context between iterations.
+Detailed review findings lack a canonical address or are duplicated between report and workflow fields. Node outputs persist; they are not lost just because a retry occurs.
 
 **Detection:** Review/fix cycle where fix node receives feedback only via `inputSchema` text, not via persistent file.
 
 ```
 ❌ Review node → inputSchema: { feedback: string } → Fix node reads feedback from input
-   // Feedback is ephemeral, lost on retry
+   // Detailed findings have no separate address for other readers
 
 ✅ Review node writes review.md → Fix node reads review.md
    // Results persist across iterations and retries
@@ -377,9 +377,7 @@ look bounded do not solve this — they only cap the number of identical attempt
 
 ### Mixed Validation and Repair
 
-One node both diagnoses and fixes, so nothing independent confirms that the fix worked and the
-report describes the state before the change. Keep the validator separate, let a repair owner mutate
-the artifact, and return the changed artifact to the same validator.
+At an independent review gate, the reviewer also mutates the artifact, so the report no longer describes a frozen version produced by someone else. Keep that review separate and return repaired work to it. A producer may diagnose, fix and rerun mechanical checks within its own substantive responsibility; that does not replace required independent review.
 
 ### Repeating Irrelevant Checks
 
@@ -525,23 +523,22 @@ drifts. State what the executor needs when it is alone, and let duplication be j
 
 ### Externalizing Critical Instructions to Files
 
-Moving essential agent instructions and standards from a `variableRegistry` default to external files, expecting the agent to read them each time. This creates risk of hallucination and adds unnecessary I/O.
+Referencing unavailable, unowned or incomplete instructions without ensuring the responsible reader can obtain them. A canonical project file or run-owned reference is valid; inline delivery does not prove understanding or compliance.
 
-**Detection:** Directive says "read rules from file X" for content that should be consistently available. Instructions that are critical for agent behavior stored outside the workflow.
+**Detection:** A required reader has no access to the canonical instructions, or a directive substitutes an unowned/stale copy for the actual source.
 
 ```
-❌ Directive: "Read planning standards from ./standards.md before creating plan"
+❌ Directive: "Use the standards from an unspecified or unavailable file"
    // Agent may skip reading, recall from training data, or read selectively
    // Extra I/O operation on every step that needs these rules
 
 ✅ Declare as a variableRegistry default: planning_standards = "1. Each step must... 2. Tests built-in..."
    Directive: "Create plan following {{planning_standards}}"
-   // Workflow engine guarantees delivery; no I/O; no hallucination risk
+   // Engine delivers the text; the agent must still apply it
 ```
 
 :::caution
-This anti-pattern applies to instructions the agent MUST follow consistently. Externalization is
-fine for large reference data the agent only needs occasionally (e.g., a 100KB dataset).
+Keep stable workflow text in its canonical owner and choose delivery for the reader. Use a materialized run-owned reference when the text needs an address; read project instructions from their actual source.
 :::
 
 ### A Reference With No Address

@@ -16,6 +16,10 @@ Route workflow execution to different paths based on user choice, collected data
 
 ## Implementation
 
+The examples below are node fragments; connection targets must exist in the containing workflow.
+Answers remain in their producing node's scope unless declared in the registry and written through
+`globalInputs`. Prefer placing `cases` directly on that producer when it owns the decision.
+
 ### Choice Collection
 
 ```json
@@ -23,6 +27,7 @@ Route workflow execution to different paths based on user choice, collected data
   "type": "agent-directive",
   "id": "get-action",
   "directive": "Ask user: create new or edit existing?",
+  "completionCondition": "The user selected create or edit",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -44,7 +49,7 @@ Route workflow execution to different paths based on user choice, collected data
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "action" },
+        "left": { "contextPath": "get-action.action" },
         "right": "create"
       },
       "output": "create"
@@ -73,7 +78,7 @@ authored order; the first whose `when` holds selects its output, and `default` c
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "action" },
+        "left": { "contextPath": "get-action.action" },
         "right": "create"
       },
       "output": "create"
@@ -81,7 +86,7 @@ authored order; the first whose `when` holds selects its output, and `default` c
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "action" },
+        "left": { "contextPath": "get-action.action" },
         "right": "edit"
       },
       "output": "edit"
@@ -90,16 +95,19 @@ authored order; the first whose `when` holds selects its output, and `default` c
   "connections": {
     "create": "create-branch",
     "edit": "edit-branch",
-    "default": "delete-branch"
+    "default": "clarify-action"
   }
 }
 ```
 
 :::tip
-For multi-way branches, order cases from most to least common for efficiency.
+Case order expresses precedence: overlapping predicates select the first match. Reordering by
+frequency can change behavior. An unknown action must not default to a destructive operation.
 :::
 
 ## Branching by Boolean Flag
+
+Assume `collect-capabilities` returned the string enum `has_tests: "yes" | "no"`; this is not a boolean.
 
 ```json
 {
@@ -109,7 +117,7 @@ For multi-way branches, order cases from most to least common for efficiency.
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "has_tests" },
+        "left": { "contextPath": "collect-capabilities.has_tests" },
         "right": "yes"
       },
       "output": "has-tests"
@@ -124,6 +132,8 @@ For multi-way branches, order cases from most to least common for efficiency.
 
 ## Branching by Numeric Value
 
+Here `validate-result` returns an observed error count; a supplied count alone does not prove quality.
+
 ```json
 {
   "type": "condition",
@@ -132,7 +142,7 @@ For multi-way branches, order cases from most to least common for efficiency.
     {
       "when": {
         "operator": "gt",
-        "left": { "contextPath": "error_count" },
+        "left": { "contextPath": "validate-result.error_count" },
         "right": 0
       },
       "output": "has-errors"
@@ -148,6 +158,7 @@ For multi-way branches, order cases from most to least common for efficiency.
 ## Complex Conditions
 
 Combine multiple checks inside a single case:
+`prepare-result` and `collect-items` must have produced the referenced values before routing.
 
 ```json
 {
@@ -156,12 +167,12 @@ Combine multiple checks inside a single case:
     "conditions": [
       {
         "operator": "eq",
-        "left": { "contextPath": "status" },
+        "left": { "contextPath": "prepare-result.status" },
         "right": "ready"
       },
       {
         "operator": "gt",
-        "left": { "contextPath": "items_count" },
+        "left": { "contextPath": "collect-items.items_count" },
         "right": 0
       }
     ]

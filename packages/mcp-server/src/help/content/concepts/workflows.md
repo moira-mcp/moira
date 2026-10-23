@@ -68,8 +68,8 @@ are `pending`. Returning to an earlier block through repair, a loop, or replan m
 again and counts another pass. Nothing unvisited is ever reported done, and an execution created
 before routes were recorded reports only its current block as active with `routeRecorded: false`.
 The same projection lists the route with loop markers and every variable with its history;
-values set from outside the flow appear as adjustments with their actor. Connections never route
-execution.
+values set from outside the flow appear as adjustments with their actor. Display-only progress
+connections never route execution.
 
 Every visit records when it was entered and left, so each block also reports its `timing` — every
 pass with its duration, the total over all passes and how long the pass in progress has lasted —
@@ -97,7 +97,7 @@ for its block; other blocks focus their first mapped primary node in workflow or
 skipped blocks keep summary, details, and next guidance but hide `outcome`, so an older revision
 or unit result cannot appear current during an engine-owned transition.
 
-The engine renders the run's progress picture as the run page's map, rasterised: the same ported
+The paired owner renders the run's progress picture as the run page's map, rasterised: the same ported
 cards (a title band with the block's number, name, pass count and status word — `waiting for you`
 only when a person must act, `agent on the step` while the agent is on it, `completed`,
 `repeated`, `skipped` (the name struck through), `pending` —
@@ -232,11 +232,11 @@ rewrites a file in place when you want the upgraded shape on disk.
 
 `variableRegistry` declares the workflow's global variables once — the single source of truth for each variable's type and description. Each entry is keyed by variable name:
 
-| Field         | Required | Description                                         |
-| ------------- | -------- | --------------------------------------------------- |
-| `type`        | Yes      | `string`, `number`, `boolean`, `object`, or `array` |
-| `description` | Yes      | What the variable holds                             |
-| `default`     | No       | Initial value seeded at workflow start              |
+| Field         | Required | Description                                                            |
+| ------------- | -------- | ---------------------------------------------------------------------- |
+| `type`        | Yes      | `string`, `number`, `integer`, `boolean`, `object`, `array`, or `null` |
+| `description` | Yes      | What the variable holds                                                |
+| `default`     | No       | Initial value seeded at workflow start                                 |
 
 Globals are referenced by bare name (`{{project_name}}`); a node writes a global by listing its name in `inputSchema.globalInputs`.
 
@@ -373,8 +373,8 @@ Nodes connect via the `connections` object that defines the flow. Each node type
 
 Workflows have visibility settings:
 
-- **private** - Only the owner can access
-- **public** - All users can start the workflow
+- **private** - The owner and callers with a current explicit/group grant can access it according to their permissions; operator access follows the installation's policy.
+- **public** - Available to authenticated users under the installation's current admission and access policy. Visibility does not grant authority for effects described by a workflow.
 
 ## Best Practices
 
@@ -382,7 +382,7 @@ Workflows have visibility settings:
 2. **End with end** - Use end nodes to mark completion
 3. **Clear Directives** - Write unambiguous instructions
 4. **Measurable Conditions** - Completion conditions should be verifiable
-5. **Error Handling** - Include error connections for graceful failures
+5. **Error Handling** - Use a node's supported error output for its documented failures. Invalid agent input pauses for correction; an authored error connection does not turn every handler error into a branch.
 6. **Documentation** - Add descriptions to complex nodes
 
 ## Related

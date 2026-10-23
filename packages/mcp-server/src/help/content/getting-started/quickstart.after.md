@@ -68,8 +68,13 @@ Here's what a typical workflow session looks like:
 
 ```
 Agent: I'll start the full development workflow.
-       [calls start with workflowId: "moira/software-development-flow"
-        and parentExecutionId: "none"]
+       [calls start with action: "prepare",
+        workflowId: "moira/software-development-flow", parentExecutionId: "none"]
+
+Moira: Start attempt ID: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+
+Agent: [calls start with action: "execute" and that exact startAttemptId;
+        after a lost reply, repeats this execute call instead of preparing again]
 
 Moira: Process ID: 123e4567-e89b-42d3-a456-426614174000
        Step attempt ID: 11111111-1111-4111-8111-111111111111

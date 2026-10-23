@@ -94,8 +94,8 @@ export const ERRORS = {
     `Cannot edit execution in state '${status}'. Only 'running' executions can be edited.`,
 
   // Help/Documentation errors
-  documentation_file_not_found: (file: string, docsDir: string) =>
-    `Documentation file not found: ${file}\n\nMake sure DOCS_DIR is configured correctly. Current: ${docsDir}`,
+  documentation_file_not_found: (file: string, helpDirectory: string) =>
+    `Documentation file not found: ${file}\n\nCheck that the MCP package includes its portable help content. Current directory: ${helpDirectory}`,
   unknown_help_topic: (topic: string) => `Unknown topic: ${topic}`,
 
   // File/Token errors

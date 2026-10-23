@@ -24,7 +24,7 @@ mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки за�
 
 Business claims выводятся из metadata, directives, outcomes или переданного контекста и обозначают supported inference либо unavailable context. Technical content сохраняет важные routes и contracts. Большие workflows используют понятный overview плюс searchable/collapsible полную topology или appendix вместо плоского списка или пропущенных nodes.
 
-`presentation.html` содержит embedded CSS и опциональный embedded JavaScript, semantic headings, keyboard-usable navigation, responsive/print styles и не зависит от CDN, внешних fonts/scripts/styles, fetch, forms или runtime network. Файл пригоден для network-isolated Moira static-artifact sandbox, если позже будет отдельно разрешена публикация.
+`presentation.html` содержит embedded CSS и опциональный embedded JavaScript, semantic headings, keyboard-usable navigation, responsive/print styles и не зависит от CDN, внешних fonts/scripts/styles, fetch, forms или runtime network. Файл пригоден для Moira static-artifact sandbox, если позже будет отдельно разрешена публикация. Sandbox блокирует fetch/XHR/WebSocket и отправку форм, но допускает HTTPS-изображения и отдельные внешние ресурсы; самодостаточность файла не делает публичный хостинг приватным или полностью изолированным от сети.
 
 Deterministic checks отвечают за файлы, HTML parseability, anchors, self-containment и identity source/projection. Independent reviewer отвечает за business accuracy, technical faithfulness, progressive disclosure, redaction, hierarchy, accessibility и visual usefulness. Findings source, content, HTML, completion и validation возвращаются самому раннему владельцу; ошибочные criteria проходят independently reviewed contract correction.
 

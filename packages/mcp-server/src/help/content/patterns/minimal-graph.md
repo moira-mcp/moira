@@ -3,8 +3,7 @@ title: Minimal Graph
 description: Start linear, and let each branch, loop, and agent turn be earned by a real requirement
 ---
 
-A workflow graph is read by an agent one step at a time, so every node it contains costs a turn and
-every branch costs a decision. The default shape is therefore a straight line: `start` → the
+Agent-facing pauses cost turns; automatic expression and condition nodes do not each require an agent turn. The default shape is a straight line: `start` → the
 responsibilities the task actually has → `end`. Branches, loops, and extra turns are added when
 something in the task requires them, not to make the graph look thorough.
 

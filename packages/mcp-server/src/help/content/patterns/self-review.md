@@ -23,18 +23,18 @@ Declare coverage values without defaults so an execution that has not completed 
 {
   "coverage_report_path": {
     "type": "string",
-    "minLength": 1,
-    "maxLength": 1000
+    "description": "Canonical completed coverage report path",
+    "minLength": 1
   },
   "total_requirements": {
     "type": "integer",
-    "minimum": 1,
-    "maximum": 100
+    "description": "Actual number of requirements reviewed",
+    "minimum": 1
   },
   "requirements_gaps_count": {
     "type": "integer",
-    "minimum": 0,
-    "maximum": 100
+    "description": "Requirements without adequate completion evidence",
+    "minimum": 0
   }
 }
 ```

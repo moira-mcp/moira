@@ -9,10 +9,14 @@ Execution Retrospective анализирует один завершённый, 
 mcp__moira__start({
   action: "prepare",
   workflowId: "moira/execution-retrospective",
-  parentExecutionId: "<subject-execution-id>"
+  parentExecutionId: "none"
 })
 mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ```
+
+Назовите анализируемый запуск на первом шаге. Его ID и родитель запуска — разные вещи:
+завершённый запуск не может быть родителем. Для отдельной ретроспективы используйте `"none"`,
+а для дочерней — ID действительно выполняющегося процесса, который её запускает.
 
 ## Evidence и процесс
 
@@ -22,4 +26,4 @@ Partial или unavailable execution evidence не превращается в �
 
 ## Полномочия
 
-Workflow только предлагает изменения. Он не редактирует execution, workflow или prompt, не публикует, не уведомляет, не коммитит, не выпускает release, не deploy и не меняет production. Для реализации принятых изменений workflow отдельно используйте [Workflow Management Flow](./workflow-management-flow/).
+Workflow только предлагает изменения. Он не редактирует execution, workflow или prompt, не публикует, не уведомляет, не коммитит, не выпускает release, не deploy и не меняет production. Для реализации принятых изменений workflow отдельно используйте [Workflow Management Flow](/ru/docs/reference/workflows/workflow-management-flow/).

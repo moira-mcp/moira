@@ -5,7 +5,8 @@ description: Best practices for writing clear and effective workflow directives
 
 ## Directive Structure
 
-Every agent-directive node needs:
+An `agent-directive` node needs an ID, directive, completion condition and success connection.
+Add `inputSchema` when the agent must return data:
 
 ```json
 {
@@ -13,10 +14,16 @@ Every agent-directive node needs:
   "id": "unique-id",
   "directive": "What the agent should do",
   "completionCondition": "When the task is complete",
-  "inputSchema": {/* expected response structure */},
+  "inputSchema": {
+    "type": "object",
+    "properties": { "result": { "type": "string" } },
+    "required": ["result"]
+  },
   "connections": { "success": "next-node" }
 }
 ```
+
+Without `inputSchema`, complete the step with an empty object; arbitrary fields are refused.
 
 ## Writing Clear Directives
 
@@ -31,7 +38,7 @@ Every agent-directive node needs:
 ✅ Good:
 
 ```
-"Fix TypeScript compilation errors in src/auth/.\n\nSteps:\n1. Run tsc --noEmit\n2. Fix each error\n3. Verify compilation succeeds"
+"Resolve the reported TypeScript errors in src/auth/ without changing the intended authentication behavior. Report the project typecheck command, its actual result, and any unresolved errors."
 ```
 
 ### Include Context
@@ -39,8 +46,12 @@ Every agent-directive node needs:
 Use template variables:
 
 ```
-"Implement step {{current_step_index}} of {{total_steps}}: {{current_step_name}}\n\nExpected outcome: {{expected_outcome}}"
+"Implement step {{plan.current_step_index}} of {{plan.total_steps}}: {{plan.current_step_name}}\n\nExpected outcome: {{plan.expected_outcome}}"
 ```
+
+Here `plan` is an earlier node whose validated output contains those fields. Read local outputs as
+`node-id.field`; a bare name is available only when declared in `variableRegistry`. Do not invent
+values for missing context. Report the missing prerequisite or take an explicit recovery route.
 
 ### Specify Output Requirements
 
@@ -77,8 +88,10 @@ Use template variables:
 ```
 
 :::caution
-Agents will claim completion when they believe the condition is met. Make conditions unambiguous
-to prevent premature completion.
+An unambiguous condition helps an agent or reviewer judge completion; it does not prove the work
+was done. Require evidence appropriate to the result, and provide a truthful failure or blocked
+route when the criterion cannot be met. A schema validates the submitted shape, not the truth of
+its claims. A directive also cannot grant missing access or user approval.
 :::
 
 ## Using InputSchema Effectively
@@ -88,6 +101,7 @@ to prevent premature completion.
 ```json
 {
   "inputSchema": {
+    "type": "object",
     "properties": {
       "task_completed": { "type": "string", "enum": ["yes", "no"] },
       "evidence": {
@@ -105,6 +119,7 @@ to prevent premature completion.
 ```json
 {
   "inputSchema": {
+    "type": "object",
     "properties": {
       "quality_check": {
         "type": "string",
@@ -120,7 +135,23 @@ to prevent premature completion.
 ### Route on the Answer
 
 An enum answer usually decides where the run goes next. Put the `cases` on the same node, so the
-step that has the evidence is the step that decides:
+step that has the evidence is the step that decides. If the workflow has an authorized budget of
+three reviews, declare its counter in the workflow:
+
+```json
+{
+  "variableRegistry": {
+    "review_round": {
+      "type": "integer",
+      "description": "Number of validated review answers counted against the review budget",
+      "minimum": 0,
+      "default": 0
+    }
+  }
+}
+```
+
+Then use this node fragment, with every connection target defined in the graph:
 
 ```json
 {
@@ -130,54 +161,65 @@ step that has the evidence is the step that decides:
   "completionCondition": "Verdict recorded with the findings that support it",
   "inputSchema": {
     "type": "object",
-    "globalInputs": ["review_verdict"],
     "properties": {
-      "findings": { "type": "string" }
+      "verdict": { "type": "string", "enum": ["pass", "repair", "blocked"] },
+      "findings": { "type": "string", "minLength": 1 }
     },
-    "required": ["review_verdict"]
+    "required": ["verdict", "findings"]
   },
   "expressions": ["review_round = review_round + 1"],
   "cases": [
     {
-      "when": { "operator": "gte", "left": { "contextPath": "review_round" }, "right": 3 },
-      "output": "exhausted"
+      "when": { "operator": "eq", "left": { "contextPath": "review.verdict" }, "right": "pass" },
+      "output": "passed"
     },
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "review_verdict" },
+        "left": { "contextPath": "review.verdict" },
         "right": "blocked"
       },
       "output": "blocked"
+    },
+    {
+      "when": { "operator": "gte", "left": { "contextPath": "review_round" }, "right": 3 },
+      "output": "exhausted"
     }
   ],
   "connections": {
-    "success": "merge",
-    "blocked": "fix-issues",
+    "success": "fix-issues",
+    "passed": "merge",
+    "blocked": "escalate",
     "exhausted": "escalate",
     "error": "handle-error"
   }
 }
 ```
 
-`review_verdict` and `review_round` are declared in the workflow `variableRegistry`, so both are
-readable by bare name; a node-local output is read as `review.findings`. The expressions run after
-the answer is validated and before the cases, so a case can read what they computed. Cases are tried
-in order and `success` is the fallback — a passing verdict inside the round budget goes to `merge`.
+`review.verdict` and `review.findings` are node-local outputs. Only `review_round` is a declared
+global. The expressions run after the answer is validated and before the cases, so a case can read
+what they computed. Cases are tried in order: a passing review goes to `merge`, including on the
+last allowed round; blocked work escalates; a repair verdict at the budget limit escalates. Otherwise
+the `success` fallback goes to `fix-issues`. A counter bounds attempts; it does not establish quality.
 `error` and `timeout` are reserved for control flow: no case may name them, and they need none.
+
+Use `inputSchema.globalInputs` only when an answer must update a declared global; node-local output
+needs no global write. `directive` and `completionCondition` are templated, while `inputSchema`
+is presented as a schema: do not expect `{{...}}` strings inside it to be expanded.
 
 ### Collect Structured Data
 
 ```json
 {
   "inputSchema": {
+    "type": "object",
     "properties": {
       "test_results": {
         "type": "object",
         "properties": {
-          "total": { "type": "number" },
-          "passed": { "type": "number" },
-          "failed": { "type": "number" }
+          "total": { "type": "integer", "minimum": 0 },
+          "passed": { "type": "integer", "minimum": 0 },
+          "failed": { "type": "integer", "minimum": 0 }
         },
         "required": ["total", "passed", "failed"]
       }
@@ -197,9 +239,9 @@ so it is right exactly where the author's picture holds and quietly wrong everyw
 reason is what lets an executor apply a rule to an unforeseen case instead of guessing, and what
 lets a reviewer argue with the rule on the merits rather than on whether it was obeyed.
 
-Where a body of criteria is long enough to be walked item by item, open it by saying that a rule
-which does not apply to the current change is met and needs nothing produced to prove it
-inapplicable — otherwise it turns back into a checklist.
+State each criterion's scope. Do not manufacture artifacts for unrelated criteria, but explain an
+exclusion when it affects acceptance. Uncertainty about whether a rule applies is not proof that
+it is satisfied.
 
 ❌ Procedure:
 
@@ -231,7 +273,7 @@ Give the order only where the order is a real dependency, and say what makes it 
 ### Conditional Instructions
 
 ```
-"{{#if has_tests}}Run test suite: {{test_command}}{{else}}No tests configured, skip testing{{/if}}"
+"{{#if inspection.has_tests}}Run the relevant suite: {{inspection.test_command}}{{else}}Report that no suite is configured and verify the result by the available appropriate method.{{/if}}"
 ```
 
 ### Verification Requirements
@@ -253,7 +295,7 @@ Give the order only where the order is a real dependency, and say what makes it 
 ✅ Solution:
 
 ```
-"Refactor auth module:\n- Extract validation logic to separate function\n- Add error handling for null inputs\n- Add JSDoc comments"
+"Refactor auth validation so callers use one existing validation boundary, accepted inputs keep their behavior, and invalid inputs produce the documented refusal. Choose the implementation after inspecting current callers and report the evidence for those properties."
 ```
 
 ### Missing Context
@@ -267,7 +309,7 @@ Give the order only where the order is a real dependency, and say what makes it 
 ✅ Solution:
 
 ```
-"Fix error in {{file_path}}:\n\nError message: {{last_error}}\nIteration: {{current_iteration}}"
+"Investigate the failure in {{diagnosis.file_path}}:\n\nObserved error: {{diagnosis.last_error}}\nConfirm the cause before changing code, and report whether the selected check now distinguishes the corrected behavior."
 ```
 
 ### Avoidable Routing Scaffolding

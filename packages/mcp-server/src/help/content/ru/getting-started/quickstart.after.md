@@ -70,8 +70,13 @@ Moira также предоставляет операции управлени�
 
 ```
 Агент: Запускаю полный воркфлоу разработки.
-       [вызывает start с workflowId: "moira/software-development-flow"
-        и parentExecutionId: "none"]
+       [вызывает start с action: "prepare",
+        workflowId: "moira/software-development-flow", parentExecutionId: "none"]
+
+Moira: Start attempt ID: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+
+Агент: [вызывает start с action: "execute" и именно этим startAttemptId;
+        при потере ответа повторяет execute, а не готовит новый запуск]
 
 Moira: Process ID: 123e4567-e89b-42d3-a456-426614174000
        Step attempt ID: 11111111-1111-4111-8111-111111111111

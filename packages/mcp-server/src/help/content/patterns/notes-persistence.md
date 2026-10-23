@@ -5,7 +5,7 @@ description: Store and retrieve data across workflow steps and executions
 
 ## Purpose
 
-Persist structured data that survives workflow restarts or needs to be shared between workflow steps. Notes provide key-value storage with versioning and tagging.
+Persist a canonical value that needs an address beyond one execution. Notes provide key-value storage with versioning and tagging. The engine already persists execution variables; ordinary interruption does not require copying them into notes.
 
 ## When to Use
 
@@ -19,7 +19,7 @@ Persist structured data that survives workflow restarts or needs to be shared be
 
 :::caution
 Don't use notes for temporary calculations (use context variables), data only needed in the next
-step (use inputSchema), data that exceeds the active note policy (use artifacts), or binary data.
+step (use inputSchema), data that exceeds the active note policy, or binary data. Use an owned workspace for general files; artifacts publish HTML.
 :::
 
 ## Structure
@@ -39,7 +39,7 @@ Store output from an agent-directive node:
   "id": "save-analysis",
   "type": "write-note",
   "key": "purchase-{{executionId}}-01-analysis",
-  "source": "{{analyze-step-output}}",
+  "source": "{{analyze-step.analysis}}",
   "tags": ["purchase-{{executionId}}", "analysis"],
   "connections": {
     "default": "next-step",
@@ -65,13 +65,13 @@ Write multiple notes from an array:
 {
   "id": "save-batch",
   "type": "write-note",
-  "source": "{{items-to-save}}",
+  "source": "collect-items.items",
   "batchMode": true,
   "connections": { "default": "next" }
 }
 ```
 
-Source array format:
+Batch `source` is a context path, without template braces. Here `collect-items` returns `items`. Other node examples assume the named producers and connection targets exist in the containing workflow. Source array format:
 
 ```json
 [
@@ -82,7 +82,7 @@ Source array format:
 
 ### Read Note Node
 
-Load notes into context variable:
+Load notes into node-local data, referenced later as `load-data.previousData`:
 
 ```json
 {
@@ -96,7 +96,7 @@ Load notes into context variable:
 }
 ```
 
-**Single mode** for exactly one note:
+**Single mode** returns an object only when exactly one note is in the returned page; zero or multiple results remain arrays. The handler reads one bounded list page, so it does not enforce uniqueness across all notes. Read this example through `load-preferences.userPrefs`:
 
 ```json
 {
@@ -111,7 +111,7 @@ Load notes into context variable:
 
 ### Upsert Note Node
 
-Update existing or create new:
+Update the first returned search match, or create a new note if none was returned. Use a sufficiently narrow search; this is not a uniqueness check:
 
 ```json
 {
@@ -122,7 +122,7 @@ Update existing or create new:
     "keyPattern": "prefs-{{userId}}"
   },
   "keyTemplate": "prefs-{{userId}}-new",
-  "value": "{{collected-preferences}}",
+  "value": "{{collect-preferences.preferences}}",
   "tags": ["user-prefs"],
   "outputVariable": "saveResult",
   "connections": { "default": "confirm" }
@@ -138,7 +138,8 @@ Access notes directly in directives:
   "id": "research-step",
   "type": "agent-directive",
   "directive": "Research based on user needs.\n\n**User needs:**\n{{note:purchase-{{executionId}}-01-user-needs}}\n\nDetermine main categories.",
-  "completionCondition": "Research completed"
+  "completionCondition": "Research completed",
+  "connections": { "success": "next-step" }
 }
 ```
 
@@ -177,20 +178,16 @@ notes({
 });
 ```
 
-## Historical example
+## Canonical durable value
 
-Smart Purchase Assistant previously demonstrated per-stage write-note persistence. Its current
-production definition at `workflows/production/flows/b33e227c-cc2c-4931-ae5d-2de69932e41e.json`
-uses one execution-correlated filesystem package instead, because duplicating the same detailed
-content in notes and workflow variables creates competing sources of truth. A write-note remains
-appropriate when the note itself is the canonical durable value:
+Choose one canonical detailed value. A filesystem package and a note containing the same report create competing sources. A write-note is appropriate when the note itself is the durable value:
 
 ```json
 {
   "id": "write-note-01",
   "type": "write-note",
   "key": "purchase-{{executionId}}-01-user-needs",
-  "source": "{{analyze-user-needs}}",
+  "source": "{{analyze-user-needs.needs}}",
   "tags": ["analysis-{{executionId}}", "research"],
   "connections": { "default": "research-product-category" }
 }
@@ -211,7 +208,7 @@ appropriate when the note itself is the canonical durable value:
   "id": "write-critical",
   "type": "write-note",
   "key": "critical-data-{{executionId}}",
-  "source": "{{results}}",
+  "source": "{{produce-results.result}}",
   "connections": {
     "default": "continue",
     "error": "handle-write-error"
@@ -223,13 +220,13 @@ appropriate when the note itself is the canonical durable value:
 
 - Objects and arrays auto-serialize to JSON
 - Primitive values stored as strings
-- For large objects, consider chunking or artifacts
+- For large objects, use an owned workspace; use artifacts when publishing HTML
 
 ## Anti-patterns
 
 ### Not Using Execution Isolation
 
-```json
+```jsonc
 // Wrong - shared across executions
 { "key": "user-analysis" }
 
@@ -243,7 +240,7 @@ Don't store loop counters or temporary values in notes. Use expression nodes or 
 
 ### Storing Large Binary Data
 
-Notes are for structured text data. Use [Artifacts](/docs/patterns/artifacts-publishing/) for HTML content or large files.
+Notes are for structured text data. Use [Artifacts](/docs/patterns/artifacts-publishing/) for HTML publication and an owned workspace for binary or general large files.
 
 ## Related Patterns
 
