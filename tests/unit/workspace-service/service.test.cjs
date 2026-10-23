@@ -712,15 +712,17 @@ test("collection rechecks terminal proof when preflight finishes across its orig
     hook,
     `const fs=require('node:fs');
 const promises=require('node:fs/promises');
+const path=require('node:path');
 const paths=${JSON.stringify({ resultPath, membership, publication, release, armed, readHeld, collected, index: join(value.stateRoot, "active-requests"), directory: value.directory })};
+function samePath(actual,expected){return typeof actual==='string'&&path.basename(actual)===path.basename(expected)&&fs.realpathSync(path.dirname(actual))===fs.realpathSync(path.dirname(expected))}
 function reached(path){return new Promise(done=>{const check=()=>{if(fs.existsSync(path)){watcher.close();done()}};const watcher=fs.watch(paths.directory,check);check()})}
 const rename=promises.rename;
-promises.rename=async(from,to)=>{if(to===paths.resultPath){fs.writeFileSync(paths.publication,'ready');await reached(paths.release)}return rename(from,to)};
+promises.rename=async(from,to)=>{if(samePath(to,paths.resultPath)){fs.writeFileSync(paths.publication,'ready');await reached(paths.release)}return rename(from,to)};
 const readFile=promises.readFile;
 let misses=0,resumeRead;
-promises.readFile=async(...args)=>{try{return await readFile(...args)}catch(error){if(args[0]===paths.resultPath&&error.code==='ENOENT'&&fs.existsSync(paths.armed)&&++misses===2){fs.writeFileSync(paths.readHeld,'two absent result observations');await new Promise(done=>{resumeRead=done})}throw error}};
+promises.readFile=async(...args)=>{try{return await readFile(...args)}catch(error){if(error.code==='ENOENT'&&samePath(args[0],paths.resultPath)&&fs.existsSync(paths.armed)&&++misses===2){fs.writeFileSync(paths.readHeld,'two absent result observations');await new Promise(done=>{resumeRead=done})}throw error}};
 const open=promises.open;
-promises.open=async(...args)=>{const handle=await open(...args);if(args[0]===paths.index){const close=handle.close.bind(handle);handle.close=async()=>{await close();if(resumeRead&&fs.existsSync(paths.resultPath)&&!fs.existsSync(paths.membership)){const done=resumeRead;resumeRead=null;setImmediate(()=>{fs.writeFileSync(paths.collected,'terminal proof retired by original collector');done()})}}}return handle};
+promises.open=async(...args)=>{const handle=await open(...args);if(samePath(args[0],paths.index)){const close=handle.close.bind(handle);handle.close=async()=>{await close();if(resumeRead&&fs.existsSync(paths.resultPath)&&!fs.existsSync(paths.membership)){const done=resumeRead;resumeRead=null;setImmediate(()=>{fs.writeFileSync(paths.collected,'terminal proof retired by original collector');done()})}}}return handle};
 require('node:module').syncBuiltinESMExports();`,
   );
   value.environment = { NODE_OPTIONS: `--require=${hook}` };
