@@ -241,7 +241,7 @@ describe("Settings Repository (InMemory)", () => {
     });
   });
 
-  describe("getSettingsForApi - encrypted masking (Issue #374)", () => {
+  describe("getSettingsForApi - encrypted masking", () => {
     beforeEach(() => {
       const now = Date.now();
 

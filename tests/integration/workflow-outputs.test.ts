@@ -1,6 +1,5 @@
 /**
  * Snapshot tests for workflow execution outputs
- * Stage 19: Comprehensive Snapshot Coverage
  */
 
 import { describe, test, expect } from "@jest/globals";

@@ -38,7 +38,7 @@ describe("Workflow Management Flow carries the process block contract", () => {
     "repeated",
     "skipped",
     "routeRecorded: false",
-    // The four facts the unit 4 review left for the reference pass (parent unit 8).
+    // Derivation, frontier, routing and legacy connection facts belong to the same reference.
     "`no-start`, which only\n`derive` reports",
     "before the furthest visited block in process order",
     "routing nodes alone",

@@ -4,13 +4,13 @@
  * Long-running test to detect memory leaks, resource exhaustion,
  * and stability issues over time.
  *
- * Load profile: 50 RPS sustained for 30 minutes
+ * Load profile: 50 virtual users sustained for 30 minutes
  *
  * Usage:
  *   k6 run load-tests/k6/scenarios/soak.js
  *
  * Environment variables:
- *   BASE_URL - Base URL of target system (default: http://localhost:4201)
+ *   TARGET_BASE_URL - Base URL of the explicitly selected test system
  *   LOAD_TEST_SECRET - Secret for load test authentication
  *   SOAK_DURATION - Override soak duration (default: 30m)
  */
@@ -76,14 +76,6 @@ export const options = {
 // Shared data between VUs
 var sharedData = {};
 
-// Track metrics over time windows (reserved for future use)
-var _timeWindowMetrics = {
-  windowStart: 0,
-  windowErrors: 0,
-  windowRequests: 0,
-  windowDurations: [],
-};
-
 /**
  * Setup function - runs once before test
  */
@@ -94,11 +86,8 @@ export function setup() {
   console.log("Profile: " + soakProfile.description);
   console.log("Load test secret configured: " + isLoadTestSecretConfigured());
   console.log("");
-  console.log("Soak test monitors for:");
-  console.log("  - Memory leaks (response time degradation)");
-  console.log("  - Connection pool exhaustion");
-  console.log("  - Database connection issues");
-  console.log("  - Resource cleanup problems");
+  console.log("Soak test records HTTP latency and errors over sustained load.");
+  console.log("Use target-side diagnostics to establish causes of degradation.");
 
   // Check if target is reachable
   var healthResponse = http.get(apiUrl + "/health", { timeout: "10s" });
@@ -190,7 +179,7 @@ export default function (data) {
     errorRateTrend.add(result.success ? 0 : 1);
   }
 
-  // Moderate sleep - maintain ~50 RPS per VU across all operations
+  // Pace each virtual user's iterations; achieved request rate is measured by k6.
   sleep(0.2 + Math.random() * 0.3);
 }
 
@@ -335,8 +324,5 @@ export function teardown(data) {
   console.log("  - error_rate_over_time: Should remain low (<1%)");
   console.log("  - request_duration p95/p99: Check for gradual increase");
   console.log("");
-  console.log("Signs of issues:");
-  console.log("  - Increasing latency over time = memory leak");
-  console.log("  - Sudden error spikes = resource exhaustion");
-  console.log("  - Connection timeouts = pool exhaustion");
+  console.log("Latency, errors and timeouts alone do not identify a resource failure's cause.");
 }

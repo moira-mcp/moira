@@ -246,12 +246,22 @@ export async function createWorkspaceOwner({
       await retireRequestInput({ directory });
       return { requestId, ...recorded };
     }
-    const result =
+    const pendingLaunch = launches.get(requestId);
+    let status =
       accepted.kind === "exec"
         ? await engine.inspect({ version: 1, remoteMarker: marker(requestId) })
         : ((await optionalJson(join(directory, "result.json"))) ?? { state: "outcome_unknown" });
-    const status = result;
-    if (accepted.kind === "exec") await retire(requestId);
+    if (accepted.kind === "exec") {
+      await retire(requestId);
+      // The launch may publish terminal proof and finish while retirement yields.
+      // Re-read that proof before exposing a now-stale ambiguous observation.
+      if (
+        pendingLaunch &&
+        launches.get(requestId) !== pendingLaunch &&
+        ["absent", "outcome_unknown"].includes(status.state)
+      )
+        status = await engine.inspect({ version: 1, remoteMarker: marker(requestId) });
+    }
     return {
       requestId,
       ...status,

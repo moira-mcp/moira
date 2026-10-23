@@ -3,21 +3,17 @@
  *
  * Implements secure load testing authentication using special domain:
  * - Uses `load-testing-noverify.local` email domain
- * - Requires X-Load-Test header with secret from LOAD_TEST_SECRET env var
- * - Backend bypasses email verification for these requests
- *
- * This approach:
- * - ✅ No dev-login endpoint exposure
- * - ✅ Works in CI/automated contexts
- * - ✅ Requires secret for abuse prevention
- * - ✅ Auto-cleanup removes test users periodically
+ * - Requires the target backend's ENABLE_LOAD_TEST_AUTH=true and a matching
+ *   LOAD_TEST_SECRET (at least 16 characters) in the X-Load-Test header.
+ * - That narrow admission bypasses email verification, not unrelated account gates.
+ * Test users persist until explicitly cleaned up in the selected test installation.
  */
 
 import http from "k6/http";
 import { check } from "k6";
 import { getApiUrl, httpDefaults } from "./config.js";
 
-// Load testing domain - bypasses email verification when used with correct header
+// Reserved load-test domain; the selected backend must also enable load-test admission.
 const LOAD_TEST_DOMAIN = "load-testing-noverify.local";
 
 // Load test secret from environment
@@ -298,7 +294,9 @@ export function isLoadTestSecretConfigured() {
 export function validateLoadTestEnvironment() {
   if (!isLoadTestSecretConfigured()) {
     console.warn("⚠️  LOAD_TEST_SECRET not set - authentication will fail");
-    console.warn("   Set LOAD_TEST_SECRET environment variable to enable test user registration");
+    console.warn(
+      "   Configure matching client/server LOAD_TEST_SECRET and backend ENABLE_LOAD_TEST_AUTH=true",
+    );
     return false;
   }
 

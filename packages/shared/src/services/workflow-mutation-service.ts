@@ -1,8 +1,6 @@
 /**
  * Workflow Mutation Service - Centralized workflow mutation with validation caching
  *
- * Issue #463: Performance optimization for workflow list
- *
  * This service is the SINGLE entry point for all workflow mutations:
  * - Create new workflows
  * - Update existing workflows

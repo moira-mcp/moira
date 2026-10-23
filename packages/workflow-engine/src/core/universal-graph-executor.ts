@@ -1,5 +1,5 @@
 /**
- * Universal Graph Executor V2 - Message queue based execution
+ * Universal Graph Executor - Message queue based execution
  * Handles all node types through universal action-based approach
  */
 
@@ -385,7 +385,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
         execution.currentNodeId = executionResult.nextNodeId;
       }
 
-      // Issue #386: Preserve errors that were appended during executeGraph
+      // Preserve errors that were appended during executeGraph.
       // appendError modifies execution directly in repository, we need to fetch
       // updated errors before saveExecution overwrites them
       const currentExecution = await this.repository.getExecution(executionId);
@@ -423,9 +423,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
       }
 
       // Update execution status based on result
-      // Note: "error" case removed in Issue #386 - errors are logged to execution.errors
-      // and execution stays in "running" state for retry
-      // Issue #386: "waiting" status merged into "running" - both mean execution is active
+      // Errors are logged to execution.errors; a paused execution remains running for retry.
       switch (executionResult.action) {
         case "pause":
           execution.status = "running";
@@ -448,7 +446,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
       execution.updatedAt = Date.now();
 
       // Format response based on action
-      // Note: "error" case removed in Issue #386 - only "pause" and "complete" actions exist now
+      // The graph returns either a pause or completion action.
       let response: string;
       let nextAttempt: ReturnType<ExecutionMutationCoordinator["newPresentedAttempt"]> | undefined;
       switch (executionResult.action) {
@@ -672,7 +670,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
       finalText += formattedMessages.join("\n\n--- Next Task ---\n\n");
     }
 
-    // Issue #429: Add active child workflow info for agent awareness
+    // Include active child workflows so the agent can track their state.
     const activeChildInfo = await this.formatActiveChildWorkflows(executionId);
     if (activeChildInfo) {
       finalText += "\n\n" + activeChildInfo;
@@ -694,7 +692,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
 
   /**
    * Format active child workflows info for inclusion in step response.
-   * Issue #429: Helps agent track parent-child workflow relationships.
+   * Helps the agent track parent-child workflow relationships.
    */
   private async formatActiveChildWorkflows(executionId: string): Promise<string | null> {
     try {
@@ -813,8 +811,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
 
   async cancelExecution(executionId: string): Promise<void> {
     const execution = await this.repository.getExecution(executionId);
-    // Issue #386: "failed" status is deprecated, use "completed" for cancelled executions
-    // Check for "completed" only (legacy "failed" executions will remain in DB until migrated)
+    // Cancellation completes the execution, including records with a legacy failed status.
     if (execution && execution.status !== "completed") {
       const workflowId = execution.workflowId;
 

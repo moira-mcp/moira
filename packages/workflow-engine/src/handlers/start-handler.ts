@@ -1,5 +1,5 @@
 /**
- * Start Handler V2 - Simple auto-execution
+ * Start Handler - Simple auto-execution
  * Merges initial data and immediately continues - no agent interaction
  */
 

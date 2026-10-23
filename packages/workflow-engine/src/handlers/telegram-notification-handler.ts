@@ -1,5 +1,5 @@
 /**
- * Telegram Notification Handler V1 - Automated external notifications
+ * Telegram Notification Handler - Automated external notifications
  * Executes automatically without agent interaction, sends Telegram messages
  */
 

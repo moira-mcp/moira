@@ -2,7 +2,7 @@
  * Graph Validator for WorkflowGraph schemas
  *
  * Single source of truth for all workflow validation.
- * Produces UnifiedValidationResult (new) and GraphValidationResult (legacy).
+ * Produces UnifiedValidationResult and the compatibility GraphValidationResult format.
  */
 
 import * as AjvModule from "ajv";
@@ -368,7 +368,7 @@ export class GraphValidator {
   }
 
   /**
-   * Validate a workflow graph object — unified format (new API)
+   * Validate a workflow graph object — unified format
    * Returns UnifiedValidationResult with typed issues and severity.
    */
   async validateUnified(input: unknown): Promise<UnifiedValidationResult> {
@@ -2092,7 +2092,7 @@ export class GraphValidator {
       }
     }
 
-    // §10 Fix A — warn on declared-but-never-defined registry variables.
+    // Warn on declared-but-never-defined registry variables.
     issues.push(...this.validateNeverDefinedVars(workflow));
 
     return issues;
@@ -2315,7 +2315,7 @@ export class GraphValidator {
   }
 
   /**
-   * §10 Fix A — registry variables that can NEVER hold a value at runtime:
+   * Registry variables that can NEVER hold a value at runtime:
    * declared in the variableRegistry WITHOUT a `default`, AND not seeded by the start
    * node's initialData, AND not written by any node's inputSchema.globalInputs. Such a
    * variable always renders as the undefined placeholder. Conservative (no reachability
@@ -2375,7 +2375,7 @@ export class GraphValidator {
   }
 
   /**
-   * §10 Fix A — emit a warning for any template field that references a never-defined
+   * Emit a warning for any template field that references a never-defined
    * registry variable (declared without default, never written). Separate from the
    * undefined-variable ERROR path; warnings do not fail validation.
    */
@@ -2533,10 +2533,8 @@ export class GraphValidator {
    * Checks two reference forms:
    * 1. Simple substitutions: {{varName}} and {{varName.path}}.
    * 2. Block-helper arguments: the variable used by {{#if VAR}}, {{#unless VAR}},
-   *    {{#each VAR}}, {{#eq VAR '...'}}, {{#neq VAR '...'}}. These were previously
-   *    skipped wholesale (anything starting with '#'), which let undeclared variables
-   *    inside block helpers pass validation and render as the undefined placeholder
-   *    at runtime.
+   *    {{#each VAR}}, {{#eq VAR '...'}}, {{#neq VAR '...'}}. Undeclared helper
+   *    arguments are rejected rather than rendering as undefined placeholders.
    *
    * Control flow keywords ({{else}}, {{this}}) are excluded.
    * System variables (executionId, workflowId, userId) are excluded.

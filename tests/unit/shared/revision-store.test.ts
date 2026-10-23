@@ -1,5 +1,5 @@
 /**
- * Unit tests for the shared revision store and the two consumers unit 1 moves onto it.
+ * Unit tests for the shared revision store and its note and global-setting consumers.
  *
  * The store is what makes "one history for every versioned entity" true, so these tests protect
  * three things: that a revision, once written, is never rewritten; that a bounded history drops the

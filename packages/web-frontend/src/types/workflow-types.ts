@@ -62,16 +62,16 @@ export interface WorkflowExecution {
   workflowId: string;
   currentNodeId: string | null;
   globalContext: ExecutionContext;
-  // Issue #386: 2-status model - "running" (active) and "completed" (finished)
+  // "running" includes active work and input waits; "completed" is terminal.
   status: "running" | "completed";
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
   error?: string;
-  errors?: ExecutionError[]; // Issue #386: Error history
+  errors?: ExecutionError[]; // Error history
 }
 
-// Issue #386: Execution error entry
+// Execution error entry in this browser record
 export interface ExecutionError {
   timestamp: number;
   nodeId: string;

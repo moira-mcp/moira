@@ -4,7 +4,7 @@ import { loginAsAdmin } from "./helpers/auth-helper.js";
 
 const BASE_URL = getTestBaseUrl();
 
-test.describe("i18n Stage 1 Verification", () => {
+test.describe("Localized login and admitted navigation", () => {
   test.describe("English Translations", () => {
     test.use({ locale: "en-US" });
 

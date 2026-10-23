@@ -5,7 +5,7 @@ import { loginAsAdmin } from "./helpers/auth-helper.js";
 const BASE_URL = getTestBaseUrl();
 const ADMIN_CREDENTIALS = getAdminCredentials();
 
-test.describe("i18n Stage 5 - Language Switcher", () => {
+test.describe("Language switching and persistence", () => {
   test.describe("English Default", () => {
     test.use({ locale: "en-US" });
 

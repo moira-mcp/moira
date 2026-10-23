@@ -76,7 +76,7 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
     } = {},
   ) {
     this.repository = repository;
-    // Without a registry the engine behaves exactly as before: no custom types exist.
+    // Without a registry no custom node types can be resolved.
     this.extensionRegistry = options.extensionRegistry ?? null;
     this.extensionHandler = this.extensionRegistry
       ? // The client falls back to the process default for the same reason the registry does, and
@@ -321,7 +321,7 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
           ? inlineGlobalInputs(currentNode, graph.variableRegistry)
           : currentNode;
 
-      // §14: tell the template processor which registry variables are author-authored
+      // Tell the template processor which registry variables are author-authored
       // template fragments (their default carries live {{...}}) so it expands those while
       // neutralizing runtime data values (the injection vectors).
       updatedContext._templateFragmentVars = GraphTemplateProcessor.computeFragmentVars(
@@ -343,7 +343,7 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
         );
       } catch (handlerError) {
         // Handler threw exception - this is the boundary for handler errors
-        // Issue #386: Log errors to persistent errors array instead of failing execution
+        // Log errors to the persistent errors array and pause for retry.
         const errorMessage =
           handlerError instanceof Error ? handlerError.message : String(handlerError);
 
@@ -368,7 +368,7 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
         // Create execution error with sanitized input
         const { inputData: sanitizedInput } = sanitizeInput(nodeInput);
 
-        // Step 13: For validation errors with context, include detailed error list in message
+        // For validation errors with context, include the detailed error list in the message.
         // This ensures Error History in UI shows useful information instead of just "Input validation failed"
         let persistedMessage = errorMessage;
         if (
@@ -417,7 +417,7 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
         }
 
         // Add error message to queue so agent sees it and can retry
-        // Step 12: Use comprehensive format for validation errors
+        // Include schema and input context when formatting validation errors.
         let agentErrorMessage: string;
 
         if (
@@ -673,7 +673,7 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
 
       case "error": {
         // Handler returned error via result (not thrown)
-        // Issue #386: Log to errors array and return pause instead of failing
+        // Log to the errors array and return pause for retry.
 
         // Create execution error with sanitized input
         const { inputData: sanitizedInput } = sanitizeInput(nodeInput);

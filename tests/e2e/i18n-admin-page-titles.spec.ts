@@ -25,7 +25,7 @@ async function handleBetaDialog(page: import("@playwright/test").Page) {
   }
 }
 
-test.describe("i18n Stage 2 - Admin Pages Verification", () => {
+test.describe("Localized administrator page titles", () => {
   test.describe("English Admin Pages", () => {
     test.use({ locale: "en-US" });
 
@@ -50,7 +50,7 @@ test.describe("i18n Stage 2 - Admin Pages Verification", () => {
 
       // Check user management title
       await expect(page.locator('h1:has-text("User Management")')).toBeVisible();
-      // Check user cards are loaded (no table headers in card-based UI)
+      // Check user cards finish loading
       await expect(page.getByTestId("user-card").first()).toBeVisible({ timeout: 10000 });
     });
 
@@ -89,7 +89,7 @@ test.describe("i18n Stage 2 - Admin Pages Verification", () => {
 
       // Check user management title in Russian
       await expect(page.locator('h1:has-text("Управление пользователями")')).toBeVisible();
-      // Check user cards are loaded (no table headers in card-based UI)
+      // Check user cards finish loading
       await expect(page.getByTestId("user-card").first()).toBeVisible({ timeout: 10000 });
     });
 

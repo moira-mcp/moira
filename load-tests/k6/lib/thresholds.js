@@ -1,12 +1,12 @@
 /**
- * k6 SLA Thresholds Configuration
+ * k6 threshold configuration
  *
- * Based on BASELINES.md performance targets.
- * These thresholds determine test pass/fail status.
+ * Configured comparison budgets, not measured service guarantees.
+ * Each scenario's options.thresholds determines that run's pass/fail status.
  */
 
 /**
- * SLA Tier definitions from BASELINES.md
+ * Reusable threshold tiers. Values are milliseconds, not recorded performance.
  *
  * | Tier     | p50      | p95     | p99     | p100    |
  * |----------|----------|---------|---------|---------|
@@ -39,7 +39,7 @@ export const slaTiers = {
 };
 
 /**
- * Endpoint-specific thresholds based on BASELINES.md
+ * Reusable HTTP endpoint budgets; scenarios can select their own thresholds.
  */
 export const endpointThresholds = {
   // Health check - Critical tier
@@ -64,14 +64,6 @@ export const endpointThresholds = {
     p95: 200,
     p99: 400,
     errorRate: 0.001,
-  },
-
-  // MCP Tools - Standard tier
-  mcp: {
-    p50: 100,
-    p95: 300,
-    p99: 500,
-    errorRate: 0.005,
   },
 
   // Full system - Relaxed tier

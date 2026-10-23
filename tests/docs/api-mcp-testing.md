@@ -48,6 +48,26 @@ configured public Origin; the API setup and shared signin helpers supply that bo
 hard-code credentials or print environment values. Remote Node preparation can require
 `getTestFetchUrl()` rather than the browser URL; see the target resolver before adapting an example.
 
+## Test recipients and delivery
+
+Use unique test-owned accounts rather than the configured administrator or another person's email.
+Recipient naming suppresses real delivery only when the **selected backend deployment** sets
+`EMAIL_TEST_RECIPIENTS=true`. Setting that variable on a browser-test command does not reconfigure
+an already running server. With `EMAIL_PROVIDER=test`, every message is logged without sending;
+with a real SMTP/Brevo provider and explicit recipient suppression, only recognized test addresses
+are redirected to the log-only sink. Other recipients still use the real provider.
+
+The [email owner](../../packages/shared/src/email/index.ts) recognizes addresses at `example.com`,
+the retained fixture domain `test.com`, `test.local`, `moira.local`,
+`load-testing-noverify.local`, and subdomains ending in `.test`. Prefer unique addresses such as
+`e2e-reset-<unique-id>@example.com`, and inspect the current source before adding a recipient pattern.
+Reuse the maintained signup/session helpers above for account preparation.
+
+Assert the observed delivery result: `delivery: logged` and the corresponding durable email log
+establish log-only handling, not a sent message. A deployment can retain real-provider capability
+while a particular test recipient is suppressed. Do not run mail-producing tests against an
+uncontrolled deployment or infer suppression from the email address alone.
+
 ## Authenticated SDK client
 
 For a file directly under `tests/mcp-tools/`:

@@ -4,7 +4,7 @@ import { loginAsAdmin } from "./helpers/auth-helper.js";
 
 const BASE_URL = getTestBaseUrl();
 
-test.describe("i18n Stage 4 - Admin Section Pages Translations", () => {
+test.describe("Localized administrator content", () => {
   test.describe("English Admin Pages", () => {
     test.use({ locale: "en-US" });
 
@@ -30,7 +30,7 @@ test.describe("i18n Stage 4 - Admin Section Pages Translations", () => {
       // Check user management content
       await expect(page.locator('h1:has-text("User Management")')).toBeVisible({ timeout: 5000 });
 
-      // User cards loaded (no table headers in card-based UI)
+      // User cards finish loading
       await expect(page.getByTestId("user-card").first()).toBeVisible({ timeout: 10000 });
     });
 
@@ -72,7 +72,7 @@ test.describe("i18n Stage 4 - Admin Section Pages Translations", () => {
       await expect(page.locator('h1:has-text("Audit Log")')).toBeVisible({ timeout: 5000 });
       await expect(page.locator("text=System audit trail")).toBeVisible();
 
-      // Cards should load (no table headers anymore — sort is via Select)
+      // Audit cards finish loading; sorting uses the Select control
       await expect(page.locator('[data-testid="audit-log-card"]').first()).toBeVisible({
         timeout: 15000,
       });
@@ -125,7 +125,7 @@ test.describe("i18n Stage 4 - Admin Section Pages Translations", () => {
         timeout: 5000,
       });
 
-      // User cards loaded (no table headers in card-based UI)
+      // User cards finish loading
       await expect(page.getByTestId("user-card").first()).toBeVisible({ timeout: 10000 });
     });
 
@@ -169,7 +169,7 @@ test.describe("i18n Stage 4 - Admin Section Pages Translations", () => {
       await expect(page.locator('h1:has-text("Журнал аудита")')).toBeVisible({ timeout: 5000 });
       await expect(page.locator("text=системных событий")).toBeVisible();
 
-      // Cards should load (no table headers anymore — sort is via Select)
+      // Audit cards finish loading; sorting uses the Select control
       await expect(page.locator('[data-testid="audit-log-card"]').first()).toBeVisible({
         timeout: 15000,
       });

@@ -1,6 +1,6 @@
 /**
  * Execution Error Types
- * Persistent error log per execution (Issue #386)
+ * Persistent error log per execution
  */
 
 /**
@@ -62,7 +62,7 @@ export function latestRefusal<T extends { errorType?: string }>(
 }
 
 /**
- * Execution status stored in database (Issue #386)
+ * Execution status stored in database
  * - running: Execution is active (processing or waiting for input)
  * - completed: Execution finished (success or explicit end)
  */

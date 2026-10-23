@@ -89,7 +89,7 @@ export const ERRORS = {
   admin_only_setting: (key: string) => `Setting '${key}' is admin-only`,
 
   // Execution state errors
-  // Issue #386: "waiting" merged into "running"
+  // Active executions retain running status while waiting for input.
   cannot_edit_execution: (status: string) =>
     `Cannot edit execution in state '${status}'. Only 'running' executions can be edited.`,
 

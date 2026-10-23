@@ -169,7 +169,7 @@ export class SubgraphNodeHandler implements INodeHandler {
 
         return NodeResultBuilder.continue(subgraphNode.id, "success");
       } else {
-        // Issue #386: "error" action removed - errors are logged and execution pauses for retry
+        // Errors are logged and execution pauses for retry.
         // Still paused - main execution stays on subgraph node
         this.logger.debug("Subprocess still paused, main execution remains on subgraph node", {
           nodeId: subgraphNode.id,

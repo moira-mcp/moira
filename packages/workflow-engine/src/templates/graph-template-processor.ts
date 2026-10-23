@@ -137,7 +137,7 @@ export class GraphTemplateProcessor extends TemplateCore {
       });
     }
 
-    // §10 Fix B: runtime guard (async path)
+    // Report residual placeholders after asynchronous template resolution.
     this.warnOnResidualPlaceholder(processed, context);
 
     // Step final: Restore escaped sequences to literal {{
@@ -239,8 +239,8 @@ export class GraphTemplateProcessor extends TemplateCore {
 
         if (playbook) {
           // Another account's text is data, not authoring: it may not be re-read as template
-          // syntax, or a published playbook would run as a template inside somebody else's run
-          // (§14). Your own playbook is authoring and expands as the rest of your definition does.
+          // syntax, or a published playbook would run as a template inside somebody else's run.
+          // Your own playbook is authoring and expands as the rest of your definition does.
           replacement =
             ownerId === context.userId
               ? playbook.content

@@ -90,6 +90,16 @@ belongs to the [runner configs](docs/test-infrastructure.md#discovery-and-prepar
 
 ## Browser state, diagrams and language
 
+Localized browser journeys live in [login/navigation](e2e/i18n-login-navigation.spec.ts),
+[layout](e2e/i18n-layout-navigation.spec.ts), [application pages](e2e/i18n-application-pages.spec.ts),
+[admin page titles](e2e/i18n-admin-page-titles.spec.ts),
+[admin content](e2e/i18n-admin-content.spec.ts) and
+[language preference](e2e/i18n-language-preference.spec.ts).
+[Admin controls](e2e/admin-page-controls.spec.ts), [resource lists](e2e/resource-list-queries.spec.ts),
+[admin list APIs](e2e/admin-list-api.spec.ts) and [application shell](e2e/application-shell-cards.spec.ts)
+locate the broader page/read smoke cases. Their rendered-heading or response checks do not by
+themselves establish each named control's full behavior; use the boundary-specific suites below.
+
 | Level | Boundary and suite                                                                                                                                                                                                                                                                                                                                 |
 | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Unit  | Accepted resource data, request retirement, account/route lifetime and retained independent regions: [frontend](unit/web-frontend/), especially [use-resource](unit/web-frontend/use-resource.test.tsx), [conditional reads](unit/web-frontend/conditional-api-reads.test.ts), [admin regions](unit/web-frontend/admin-settings-regions.test.tsx). |

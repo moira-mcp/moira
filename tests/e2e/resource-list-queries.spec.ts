@@ -1,6 +1,6 @@
 /**
- * Step 23 verification: List Query Builder and endpoint refactoring.
- * Tests the 17 functions from the functionality list.
+ * Resource list rendering and HTTP pagination/filter requests.
+ * Browser presentation and direct API responses are separate observations.
  */
 import { test, expect } from "./fixtures.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";

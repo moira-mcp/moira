@@ -1,13 +1,12 @@
 /**
- * Step 24 Verification Tests
- * Navigation, Dashboard, Card Fixes
+ * Application navigation, execution cards and beta-banner presentation.
  */
 
 import { test, expect } from "./fixtures.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 
-test.describe("Step 24: Navigation, Dashboard, Card Fixes", () => {
+test.describe("Application shell and execution cards", () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
   });

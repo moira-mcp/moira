@@ -4,7 +4,7 @@ import { loginAsAdmin } from "./helpers/auth-helper.js";
 
 const BASE_URL = getTestBaseUrl();
 
-test.describe("Stage 4 Functionality Verification", () => {
+test.describe("Administrator pages and controls", () => {
   test.use({ locale: "en-US" });
 
   // 1. Admin Dashboard page rendering and translations
@@ -54,11 +54,11 @@ test.describe("Stage 4 Functionality Verification", () => {
   });
 
   // 6. Admin Executions card display
-  test("6. Admin Executions table", async ({ page }) => {
+  test("6. Admin Executions cards", async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${BASE_URL}/admin/executions`);
     await page.waitForLoadState("domcontentloaded");
-    // Cards load instead of table headers
+    // Execution cards or the empty state finish loading
     await expect(
       page
         .getByTestId("execution-card")
@@ -131,7 +131,7 @@ test.describe("Stage 4 Functionality Verification", () => {
   });
 
   // 12. Audit Log card display
-  test("12. Audit Log table", async ({ page }) => {
+  test("12. Audit Log cards", async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${BASE_URL}/admin/audit-log`);
     await page.waitForLoadState("networkidle");
@@ -208,11 +208,11 @@ test.describe("Stage 4 Functionality Verification", () => {
   });
 
   // 19. User Management card display
-  test("19. User Management table", async ({ page }) => {
+  test("19. User Management cards", async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${BASE_URL}/admin/users`);
     await page.waitForLoadState("domcontentloaded");
-    // User cards load instead of table headers
+    // User cards finish loading
     await expect(page.getByTestId("user-card").first()).toBeVisible({ timeout: 10000 });
   });
 
@@ -252,7 +252,7 @@ test.describe("Stage 4 Functionality Verification", () => {
   });
 
   // 23. Deleted Workflows card display
-  test("23. Deleted Workflows table", async ({ page }) => {
+  test("23. Deleted Workflows cards", async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${BASE_URL}/admin/deleted-workflows`);
     await page.waitForLoadState("domcontentloaded");

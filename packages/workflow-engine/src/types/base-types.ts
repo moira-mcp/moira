@@ -1,6 +1,6 @@
 /**
  * Base types for Node-Graph Workflow Architecture
- * Foundation types for the new graph-based execution engine
+ * Foundation types for graph-based execution
  */
 
 import type {
@@ -20,8 +20,8 @@ export interface ExecutionContext {
   // Names of registry variables whose author-authored `default` contains template syntax
   // (legitimate template fragments that may carry live {{...}} meant to expand, e.g.
   // a *_prompt/*_directive default referencing {{topic}}). Used by the template processor
-  // to decide which substituted values may be re-scanned vs. neutralized (§14 injection
-  // protection). When absent, the processor falls back to a name-convention heuristic.
+  // to decide which substituted values may be re-scanned vs. neutralized as untrusted data.
+  // When absent, the processor falls back to a name-convention heuristic.
   _templateFragmentVars?: ReadonlySet<string>;
 
   // Subgraph execution tracking
@@ -102,7 +102,7 @@ export interface WorkflowExecution {
   currentNodeId: string | null;
   waitingForInputNodeId?: string | null; // Which node is waiting for agent input
   globalContext: ExecutionContext;
-  status: LegacyExecutionStatus; // TODO(#386): Change to ExecutionStatus after migration
+  status: LegacyExecutionStatus; // The execution boundary admits the shared compatibility status union.
   note?: string | null; // Arbitrary execution note, independent of the task name (max 500 chars)
   /** Independently guarded runtime task name; unrelated to note or context. */
   taskIdentity?: ExecutionTaskIdentity | null;
@@ -136,7 +136,7 @@ export interface WorkflowExecution {
   updatedAt: number;
   completedAt?: number;
   error?: string; // DEPRECATED: kept for migration, use errors array instead
-  errors?: ExecutionError[]; // Persistent error log (Issue #386)
+  errors?: ExecutionError[]; // Persistent error log
 }
 
 /** An agent's open question to the person, raised with `session await-user`. */
@@ -196,4 +196,4 @@ export interface ReminderMutationResult {
   changed: boolean;
 }
 
-// WorkflowGraph moved to interfaces/core-interfaces.ts to avoid circular imports
+// WorkflowGraph is owned by interfaces/core-interfaces.ts to avoid circular imports.

@@ -692,6 +692,89 @@ test("rejected preflight remains a collectible no-start result and direct CLI in
   expect(await control(value, "GET", `/v1/operations/${missing}`)).toEqual(unavailable);
 });
 
+test("collection rechecks terminal proof when preflight finishes across its original read", async () => {
+  const value = fixture();
+  const requestId = createWorkspaceRequestId();
+  const resultPath = join(
+    value.stateRoot,
+    "engine",
+    `moira-op-${workspaceRequestUuid(requestId).replaceAll("-", "")}`,
+    "result.json",
+  );
+  const membership = join(value.stateRoot, "active-requests", `${requestId}.json`);
+  const publication = join(value.directory, "publication-held");
+  const release = join(value.directory, "release-publication");
+  const armed = join(value.directory, "read-armed");
+  const readHeld = join(value.directory, "read-held");
+  const collected = join(value.directory, "launch-collected");
+  const hook = join(value.directory, "preflight-read-race.cjs");
+  writeFileSync(
+    hook,
+    `const fs=require('node:fs');
+const promises=require('node:fs/promises');
+const paths=${JSON.stringify({ resultPath, membership, publication, release, armed, readHeld, collected, index: join(value.stateRoot, "active-requests"), directory: value.directory })};
+function reached(path){return new Promise(done=>{const check=()=>{if(fs.existsSync(path)){watcher.close();done()}};const watcher=fs.watch(paths.directory,check);check()})}
+const rename=promises.rename;
+promises.rename=async(from,to)=>{if(to===paths.resultPath){fs.writeFileSync(paths.publication,'ready');await reached(paths.release)}return rename(from,to)};
+const readFile=promises.readFile;
+let misses=0,resumeRead;
+promises.readFile=async(...args)=>{try{return await readFile(...args)}catch(error){if(args[0]===paths.resultPath&&error.code==='ENOENT'&&fs.existsSync(paths.armed)&&++misses===2){fs.writeFileSync(paths.readHeld,'two absent result observations');await new Promise(done=>{resumeRead=done})}throw error}};
+const open=promises.open;
+promises.open=async(...args)=>{const handle=await open(...args);if(args[0]===paths.index){const close=handle.close.bind(handle);handle.close=async()=>{await close();if(resumeRead&&fs.existsSync(paths.resultPath)&&!fs.existsSync(paths.membership)){const done=resumeRead;resumeRead=null;setImmediate(()=>{fs.writeFileSync(paths.collected,'terminal proof retired by original collector');done()})}}}return handle};
+require('node:module').syncBuiltinESMExports();`,
+  );
+  value.environment = { NODE_OPTIONS: `--require=${hook}` };
+  const reached = (path) =>
+    new Promise((done) => {
+      const check = () => {
+        if (existsSync(path)) {
+          watcher.close();
+          done();
+        }
+      };
+      const watcher = watch(value.directory, check);
+      check();
+    });
+  await start(value);
+  try {
+    expect(
+      await control(value, "POST", "/v1/exec", {
+        requestId,
+        session: "never-opened",
+        argv: ["true"],
+      }),
+    ).toMatchObject({ requestId, state: "starting" });
+    await reached(publication);
+    writeFileSync(armed, "armed");
+    const observation = control(value, "GET", `/v1/operations/${requestId}`);
+    await reached(readHeld);
+    writeFileSync(release, "release");
+    const result = await observation;
+    expect(readFileSync(collected, "utf8")).toBe("terminal proof retired by original collector");
+    expect(JSON.parse(readFileSync(resultPath, "utf8"))).toMatchObject({
+      state: "not_started",
+      reason: "SESSION_UNAVAILABLE",
+      inputSettled: true,
+    });
+    expect(existsSync(membership)).toBe(false);
+    expect(existsSync(join(resultPath, "..", "pid"))).toBe(false);
+    expect(existsSync(join(resultPath, "..", "runner-pid"))).toBe(false);
+    expect(result).toMatchObject({
+      requestId,
+      state: "not_started",
+      reason: "SESSION_UNAVAILABLE",
+    });
+    expect(await control(value, "GET", `/v1/operations/${requestId}`)).toEqual(result);
+    const retained = readFileSync(resultPath);
+    await stop(value);
+    await start(value);
+    expect(await control(value, "GET", `/v1/operations/${requestId}`)).toEqual(result);
+    expect(readFileSync(resultPath)).toEqual(retained);
+  } finally {
+    writeFileSync(release, "release");
+  }
+});
+
 test("observer waiting collects completion while cancellation confirms the real process group is gone", async () => {
   const value = fixture();
   await start(value);

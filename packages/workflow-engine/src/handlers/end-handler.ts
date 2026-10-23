@@ -1,5 +1,5 @@
 /**
- * End Handler V2 - Simple workflow completion
+ * End Handler - Simple workflow completion
  * Collects final data and signals completion - no agent interaction
  */
 

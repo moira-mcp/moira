@@ -76,7 +76,7 @@ export interface ValidationCache {
 /**
  * Workflow information for lists/API
  * Clean naming without file-based terminology
- * validation field added for cached validation status (Issue #463)
+ * Includes cached validation status.
  */
 export interface WorkflowInfo {
   id: string;
@@ -93,7 +93,7 @@ export interface WorkflowInfo {
   /** Definition revision; advanced by every stored write of the graph. */
   revision: number;
   workflow: WorkflowGraph;
-  // Cached validation info (Issue #463)
+  // Cached validation info
   validation: ValidationCache;
 }
 

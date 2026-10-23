@@ -1,6 +1,5 @@
 /**
- * Step 23b Verification: Registry Migration for Remaining Endpoints
- * Tests all 11 functions from functionality_list
+ * Administrator list/detail API responses and their browser entry points.
  */
 import { test, expect } from "./fixtures.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";

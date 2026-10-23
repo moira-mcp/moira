@@ -1,8 +1,8 @@
 /**
  * MCP Inspector OAuth Registration Flow E2E Test
  *
- * КРИТИЧНЫЙ ТЕСТ: Главный use case для первых пользователей системы.
- * Тестирует полный flow: Inspector -> OAuth -> Register -> Verify Email -> Consent -> Connected
+ * Covers registration, administrator-confirmed email verification and OAuth consent/connection.
+ * It does not exercise email delivery or following a verification link.
  *
  * REQUIRES: MCP Inspector running on localhost:6274
  * If Inspector not available, tests are automatically skipped.
@@ -109,23 +109,10 @@ test.describe("MCP Inspector OAuth Registration Flow", () => {
   });
 
   /**
-   * Test 2: Polling flow - page auto-detects email verification
-   *
-   * NOTE: Polling requires the verification link to be clicked in the same browser
-   * to get a new session with emailVerified=true. Admin API verification only updates
-   * the DB but doesn't create a new session - autoSignInAfterVerification only triggers
-   * when user actually clicks the verification link.
-   *
-   * TODO: To fully test polling:
-   * 1. Create admin endpoint that returns verification URL
-   * 2. Navigate to verification URL in same browser (new tab)
-   * 3. Return to registration-success page
-   * 4. Polling should detect new session with emailVerified=true
-   *
-   * For now, using page.reload() as workaround - not ideal but works for testing
-   * the UI flow after verification.
+   * Reload the success page after administrator-confirmed verification, then continue OAuth.
+   * The explicit reload means this case does not prove automatic polling or verification-link use.
    */
-  test("Polling flow: Inspector -> Register -> Auto-detect verification -> Consent -> Connected", async ({
+  test("Reload flow: Inspector -> Register -> Admin verification -> Reload -> Consent -> Connected", async ({
     page,
   }) => {
     const testEmail = `inspector-polling-${Date.now()}@example.com`;
@@ -162,19 +149,13 @@ test.describe("MCP Inspector OAuth Registration Flow", () => {
     );
 
     await expect(page.getByText("Registration Successful!")).toBeVisible();
-    console.log("✓ On registration success page with polling");
+    console.log("✓ On registration success page before administrator verification");
 
     // Step 7: Verify email via admin API
     await verifyUserEmail(FETCH_URL, testEmail);
     console.log("✓ Email verified via admin API");
 
-    // Step 8: Wait for polling to detect verification
-    // NOTE: This won't work because admin API doesn't create new session
-    // Polling checks get-session which returns the OLD session data
-    // Only clicking verification link creates new session with emailVerified=true
-
-    // Workaround: Reload page to get fresh session
-    // This is not the real polling flow, just testing the UI after verification
+    // Read the verified state through an explicit page reload; no polling assertion is made.
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
 
@@ -190,6 +171,6 @@ test.describe("MCP Inspector OAuth Registration Flow", () => {
     await page.waitForURL(/localhost:6274/, { timeout: 15000 });
     await expect(page.locator("text=Connected")).toBeVisible({ timeout: 10000 });
 
-    console.log("=== POLLING OAUTH REGISTRATION FLOW COMPLETED ===");
+    console.log("=== RELOADED OAUTH REGISTRATION FLOW COMPLETED ===");
   });
 });

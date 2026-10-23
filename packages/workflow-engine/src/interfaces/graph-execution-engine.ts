@@ -35,6 +35,5 @@ export interface GraphExecutionResult {
   nextNodeId?: string;
   visitedNodes?: string[]; // All nodes visited during this execution cycle
   visits?: EngineVisit[]; // Route log entries of this cycle, in order
-  // Note: "error" action removed in Issue #386 - errors are logged to execution.errors
-  // and execution stays in "running" state for retry
+  // Errors are logged to execution.errors; a refused step pauses in the active run for retry.
 }

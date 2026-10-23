@@ -1,5 +1,5 @@
 /**
- * MCP E2E Tests - New Features (Stage 2-3)
+ * MCP E2E Tests - Workflow variables, templates and execution notes
  * Tests for: variable functions, diff, execution_note, conditional templates, array access
  */
 
@@ -13,7 +13,7 @@ import {
 } from "../utils/mcp-auth.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
-describe("MCP New Features E2E", () => {
+describe("MCP Variables, Templates and Execution Notes E2E", () => {
   let client: Client;
   let cleanup: () => Promise<void>;
   const createdWorkflows: string[] = [];

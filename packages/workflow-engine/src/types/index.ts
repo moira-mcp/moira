@@ -13,7 +13,7 @@ export * from "./workflow.js";
 // Structured condition system
 export * from "./structured-condition.js";
 
-// All node types with architectural improvements
+// Authored node types
 export * from "./graph-nodes.js";
 
 // Telegram notification types
@@ -22,7 +22,7 @@ export * from "./telegram-types.js";
 // Validation and error handling types
 export * from "./validation-types.js";
 
-// Re-export for convenience - corrected imports
+// Explicit convenience re-exports
 export type {
   // Core execution types
   WorkflowExecution,
@@ -86,7 +86,7 @@ export {
 // Condition helpers re-export
 export { ConditionBuilder } from "./structured-condition.js";
 
-// Re-export ExecutionError types from shared (Issue #386)
+// Shared execution error and compatibility status contracts
 export type {
   ExecutionError,
   ExecutionErrorType,

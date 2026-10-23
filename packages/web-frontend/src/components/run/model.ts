@@ -1,5 +1,5 @@
 /**
- * View model of the run page: the unit 3 projection (`ExecutionProgress`) read as blocks with
+ * View model of the run page: `ExecutionProgress` read as blocks with
  * their run state, plus the definition facts a block's steps show (type, summary, expected
  * evidence). Nothing here derives run state: statuses, pass counts, the route and the variables
  * are the server's; this module only joins the process blocks with the per-block run facts and

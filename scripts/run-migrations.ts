@@ -156,7 +156,7 @@ if (auditLogColumns.length > 0 && !auditLogColumns.some((col) => col.name === "c
   console.log("  ⏭️  auditLog.changes column already exists");
 }
 
-// Add auditLog.source if not exists (observability-improvements Stage 2)
+// Add auditLog.source when an existing schema lacks the attribution column.
 if (auditLogColumns.length > 0 && !auditLogColumns.some((col) => col.name === "source")) {
   sqlite.prepare("ALTER TABLE auditLog ADD COLUMN source TEXT").run();
   console.log("  ✅ Added auditLog.source column");
@@ -226,7 +226,7 @@ if (telegramCategoryResult.changes > 0) {
   console.log("  ⏭️  Telegram settings already in 'notifications' category");
 }
 
-// Add validation cache columns if not exist (Issue #463 - workflow list performance)
+// Add validation cache columns when an existing workflow schema lacks them.
 const workflowColumns = sqlite.prepare("PRAGMA table_info(workflow)").all() as Array<{
   name: string;
 }>;
@@ -278,11 +278,11 @@ if (artifactColumns.length > 0) {
   }
 }
 
-// Issue #386: Execution Error Log - Data Migration
+// Normalize legacy execution states and preserve their error records.
 // Migrate status: waiting → running, failed → completed
 // Migrate error field to errors array
 console.log("");
-console.log("🔄 Issue #386: Execution status and error migration...");
+console.log("🔄 Execution status and error migration...");
 
 // 1. Migrate waiting → running
 const waitingResult = sqlite
@@ -461,8 +461,7 @@ console.log("  ✅ Setting definitions seeded");
 sqlite.close();
 
 // Run prompt migration with hash-based conflict detection
-// Replaces: seedMcpTexts(), systemReminder seeding, systemPrompt update
-// All prompts are now managed from config/prompts/ with SHA-256 hash protection
+// Prompt files under config/prompts/ use SHA-256 conflict protection.
 const { runPromptMigration } = await import("./prompt-migration.js");
 runPromptMigration(dbPath);
 
