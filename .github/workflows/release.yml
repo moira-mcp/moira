@@ -42,7 +42,7 @@ jobs:
 
       - name: semantic-release
         id: semantic
-        uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
+        uses: cycjimmy/semantic-release-action@03595b5eaf44910cf239ff20904cc52d410f97d4 # v8.1.2
         with:
           semantic_version: 24.2.9
           extra_plugins: |
