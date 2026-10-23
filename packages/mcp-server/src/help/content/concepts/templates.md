@@ -3,7 +3,7 @@ title: Templates
 description: Dynamic content with template variables in Moira workflows
 ---
 
-Templates allow dynamic content in workflow directives, conditions, and other fields. Use template variables to access execution context, step results, and workflow parameters.
+Templates allow dynamic text in directives, completion conditions and supported materialize/default fields. Routing predicates use structured operands such as `contextPath`, rather than interpolated condition strings.
 
 ## Basic Syntax
 
@@ -47,7 +47,7 @@ Subsequent path segments use standard identifiers:
 {{executionId}}     - Current execution ID
 {{workflowId}}      - Workflow being executed
 {{runUrl}}          - The run's page in the web app
-{{currentNodeId}}   - Current node ID
+{{userId}}          - Execution owner's user ID
 ```
 
 ### Global Variables
@@ -112,7 +112,7 @@ Use conditional blocks to include or exclude content based on context values:
 {{#if variable}}Content when truthy{{/if}}
 ```
 
-Falsy values: `null`, `undefined`, `false`, `0`, `""`, `"нет"`, `"no"`
+Falsy values: `null`, `undefined`, `false`, `0`, `""`, `"no"`, `"false"`, empty arrays and empty objects. Other strings, including `"нет"`, are truthy; use an explicit equality comparison for localized enums.
 
 ### Examples
 
@@ -309,12 +309,12 @@ Loop using an `expression` node to increment a counter and a `condition` node to
 ```
 
 :::caution
-Undefined variables resolve to `null`. Use `{{#if var}}` to check if a variable exists before using it.
+Null and undefined substitutions render `[[UNDEFINED_VARIABLE]]`. Guard optional text with `{{#if var}}`; this tests truthiness, so a legitimate false or zero value also takes the false branch. Declare the globals used by these fragments, including `iterationCount`, and define their connected target nodes in the containing graph.
 :::
 
 ## Template in Input Schema Description
 
-Help agents understand expected format:
+Input-schema descriptions are passed unchanged to the agent. Put dynamic instructions in `directive` or `completionCondition`; a description is static text:
 
 ```json
 {
@@ -323,7 +323,7 @@ Help agents understand expected format:
     "properties": {
       "implementation": {
         "type": "string",
-        "description": "Code for {{featureName}} in {{language}}"
+        "description": "Implementation source code"
       }
     }
   }
@@ -386,11 +386,13 @@ Write in this voice: {{playbook:@jane/tone-of-voice}}
 
 ## Escaping
 
-To output literal curly braces, use double escaping:
+In text, prefix the braces with one backslash:
 
 ```
-\\{{notAVariable}}   - Outputs: {{notAVariable}}
+\{{notAVariable}}   - Outputs: {{notAVariable}}
 ```
+
+Inside a JSON string, encode that one backslash as `\\`. Two actual backslashes in text retain a literal backslash as well.
 
 ## Best Practices
 

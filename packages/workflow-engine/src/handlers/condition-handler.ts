@@ -14,7 +14,8 @@ import { IDataRepository } from "../interfaces/data-repository.js";
 import { IGraphExecutionEngine } from "../interfaces/graph-execution-engine.js";
 import { AgentMessageQueue } from "../services/agent-message-queue.js";
 import { routeNode } from "../services/node-routing.js";
-import { createLogger, InternalError, ValidationError } from "@mcp-moira/shared";
+import { createLogger } from "@mcp-moira/shared/logging/logger";
+import { InternalError, ValidationError } from "@mcp-moira/shared/errors";
 
 export class ConditionHandler implements INodeHandler {
   private logger = createLogger({ component: "ConditionHandler" });

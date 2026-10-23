@@ -23,7 +23,7 @@ Ensure quality by verifying results and retrying if they don't meet criteria. Pr
 {
   "type": "agent-directive",
   "id": "do-work",
-  "directive": "Complete the task. Iteration: {{current_iteration}}",
+  "directive": "Complete the task against its actual acceptance criteria. Report unresolved findings honestly.",
   "completionCondition": "Task completed with quality standards met",
   "inputSchema": {
     "type": "object",
@@ -47,7 +47,7 @@ Ensure quality by verifying results and retrying if they don't meet criteria. Pr
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "quality_check_passed" },
+        "left": { "contextPath": "do-work.quality_check_passed" },
         "right": "yes"
       },
       "output": "passed"
@@ -66,27 +66,27 @@ Ensure quality by verifying results and retrying if they don't meet criteria. Pr
 {
   "type": "agent-directive",
   "id": "fix-issues",
-  "directive": "Fix issues found in iteration {{current_iteration}}. Previous result: {{result}}",
+  "directive": "Repair the confirmed findings in {{do-work.result}} at their source; preserve valid work and return to verification.",
+  "completionCondition": "Confirmed defects repaired, with relevant checks performed or their blocker reported",
   "connections": { "success": "increment-iteration" }
 }
 ```
 
 ### Iteration Counter
 
-Using expression node:
+Use a counter only for a real retry budget or evidence-directory consumer. This example assumes a numeric `current_iteration` registry entry with description and `default: 0`. Otherwise omit the counter and connect repair directly to verification:
 
 ```json
 {
   "type": "expression",
   "id": "increment-iteration",
   "expressions": ["current_iteration = current_iteration + 1"],
-  "connections": { "default": "do-work" }
+  "connections": { "default": "check-max-iterations" }
 }
 ```
 
 :::caution
-Always include iteration counters to prevent infinite loops. Consider adding a max iteration
-check.
+A counter without an enforced policy only counts repetitions. Retry after a diagnosed cause or changed work; stop at a real blocker or an applicable retry budget.
 :::
 
 ## With Max Iterations
@@ -116,11 +116,11 @@ Add check before retry:
 
 ## Bounded Re-Validation Loop
 
-A re-validation or re-review loop revisits the SAME validate node on each round. Without a cue in the loop-entry directive, the agent can misread seeing the same node twice as the flow being stuck and report a loop to the user. Two requirements prevent this.
+A re-validation loop revisits the same node. Explain which artifact changed and which findings must be rechecked. Include a numeric bound only when the domain or caller imposes one.
 
 ### Counter is an Expression Node
 
-The round counter MUST be incremented by an expression node (flow-automatic), declared in `variableRegistry` with a numeric `default`. An agent-incremented counter is the anti-pattern — the agent is not asked to do arithmetic, and a missing or non-numeric value breaks the bound check.
+When a counter has a real consumer, increment it in an expression node and declare it in `variableRegistry` with a numeric default. This registry fragment illustrates a chosen retry policy, not universal limits.
 
 ```json
 {
@@ -156,7 +156,7 @@ The loop-entry directive renders the round counter and states that the repetitio
 {
   "type": "agent-directive",
   "id": "re-validate",
-  "directive": "Re-validation pass {{validation_round}} of {{max_validation_rounds}} — a normal quality loop, expected to converge. This is NOT a bug and NOT a stuck flow; do not report a loop to the user.\n\nRe-check the work against the criteria and report whether all issues are resolved.",
+  "directive": "Re-validation pass {{validation_round}} of {{max_validation_rounds}}. Inspect the changed artifact against the criteria. Report unresolved findings, an unchanged failure or a real blocker honestly; do not blindly replay an uncertain external action.",
   "completionCondition": "Work re-checked against criteria",
   "inputSchema": {
     "type": "object",
@@ -170,8 +170,7 @@ The loop-entry directive renders the round counter and states that the repetitio
 ```
 
 :::caution
-The cue text is exact. Re-validation passing through the same node is expected, not a bug — the
-directive must say so, or the agent may stop and report a false loop.
+The wording is illustrative. Re-entering review after repair is expected; unchanged work, a real blocker or unsafe external replay must still be reported honestly. A loop cue never authorizes blind retry.
 :::
 
 ## Numeric Quality Check
@@ -194,7 +193,7 @@ findings, an exit status, a coverage gap:
 {
   "when": {
     "operator": "eq",
-    "left": { "contextPath": "issues_count" },
+    "left": { "contextPath": "validate-result.issues_count" },
     "right": 0
   },
   "output": "clean"
@@ -209,12 +208,15 @@ gate is the reviewer's reasoned verdict and the count of findings that verdict p
 
 ## Real Example
 
-From `development-flow.json`:
+This example assumes declared step metadata and existing target nodes in the containing workflow:
 
 ```json
 {
   "id": "verify-step-implementation",
-  "directive": "Verify step {{current_step_name}} implementation:\n- Expected: {{expected_outcome}}\n- Check actual matches expected",
+  "type": "agent-directive",
+  "completionCondition": "Actual step result assessed against its expected output and gaps reported",
+  "connections": { "success": "route-verification" },
+  "directive": "Verify step {{current_step_name}} implementation:\n- Expected: {{expected_output}}\n- Check actual matches expected",
   "inputSchema": {
     "properties": {
       "step_verified": { "type": "string", "enum": ["yes", "no"] },
@@ -235,7 +237,7 @@ A gate directive says what its answer records and where each answer leads, so th
 answering honestly is the only way the run proceeds correctly:
 
 ```
-`approval` records the user's own answer. Anything other than an unqualified yes is a no, and the
+`plan_approved` records the user's own answer. Anything other than an unqualified yes is a no, and the
 feedback belongs in `user_feedback` — the flow routes a no to the responsibility that owns the
 repair, so a correction made here instead is a change nobody reviewed.
 ```
@@ -253,7 +255,7 @@ consequence — where a no goes, what a yes closes — is what makes the honest 
 {
   "type": "agent-directive",
   "id": "approve-plan",
-  "directive": "Present the plan and ask whether it is approved.\n\nPlan: {{plan_summary}}\n\n`approval` records the user's own answer: anything other than an unqualified yes is a no, with the exact words in `user_feedback`. A no routes to the responsibility that owns the revision, so a correction made here instead is a change nobody reviewed.",
+  "directive": "Present the plan and ask whether it is approved.\n\nPlan: {{prepare-plan.summary}}\n\n`plan_approved` records the user's own answer: anything other than an unqualified yes is a no, with the exact words in `user_feedback`. A no routes to the responsibility that owns the revision, so a correction made here instead is a change nobody reviewed.",
   "completionCondition": "User confirmed or rejected plan",
   "inputSchema": {
     "type": "object",
@@ -261,7 +263,12 @@ consequence — where a no goes, what a yes closes — is what makes the honest 
       "plan_approved": { "type": "string", "enum": ["yes", "no"] },
       "user_feedback": { "type": "string" }
     },
-    "required": ["plan_approved"]
+    "required": ["plan_approved"],
+    "if": { "properties": { "plan_approved": { "const": "no" } }, "required": ["plan_approved"] },
+    "then": {
+      "required": ["user_feedback"],
+      "properties": { "user_feedback": { "type": "string", "minLength": 1 } }
+    }
   },
   "connections": { "success": "route-plan-approval" }
 }

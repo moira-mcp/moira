@@ -81,8 +81,6 @@ export {
   // Load Testing
   getLoadTestSecret,
   isLoadTestAuthEnabled,
-  // Paths
-  getDocsDir,
   // System Prompt
   getSystemPrompt,
   // Validation (deprecated - happens automatically)

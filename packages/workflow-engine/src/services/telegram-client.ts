@@ -11,7 +11,7 @@ import {
   TelegramErrorType,
   TELEGRAM_TEXT_MAX_LENGTH,
 } from "../types/telegram-types.js";
-import { createLogger, WorkflowLogger } from "@mcp-moira/shared";
+import { createLogger, type WorkflowLogger } from "@mcp-moira/shared/logging/logger";
 import { fetchWork } from "@mcp-moira/shared/http/work-fetch";
 
 /**

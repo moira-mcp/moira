@@ -1,226 +1,92 @@
-# Test Infrastructure
+# Test infrastructure
 
-## Architecture
+Start with the [testing guide](../TESTING-GUIDE.md) to choose a suite. Root npm scripts use
+[Testfold configuration](../../test-runner.config.mjs); package directories do not provide separate
+test runners.
 
-All test suites are managed by **testfold** — a unified test runner configured in `test-runner.config.mjs`.
+## How it works
 
-### How It Works
-
-1. `test-runner.config.mjs` defines the Jest and Playwright suite commands, environment variables, and environment routing
-2. `testfold` CLI orchestrates execution: runs suites (parallel or sequential), captures output, parses results
-3. Built-in parsers (Jest, Playwright) extract structured results from JSON output
-4. The configured `afterSuite` hook verifies apparent framework success before reporting
-5. Built-in reporters generate console output, JSON summary, failure reports, timing stats
-
-The unit suite's `beforeSuite` hook builds the common workspace programs through
-`scripts/build-workspace-service.js`, including filtered runs. Unit global setup compiles
-the host-native process custody and runtime-control helpers with
-`scripts/build-local-native.js`. Integration global setup builds the host Local programs
-with `scripts/build-local-programs.js`, those native helpers, and its owner programs with
-`scripts/build-workspace-service.js` before preparing its database. Controller rendering
-uses the installed npm dependencies. Neither setup downloads or packages guest archives, GitHub CLI toolchains,
-fonts or renderer dependencies. Full `npm run local:build` release packaging remains
-separate. A failed build stops preparation before test execution.
-
-The hosted integration job runs an exact-byte copy of its Node interpreter in a private
-temporary directory with mode `0700`. Hosted toolcache files are writable by other users;
-the process custody supervisor correctly refuses them. The job does not change the shared
-toolcache permissions or relax the shipped supervisor's executable checks.
-
-The workspace builder compiles each program in memory, writes and syncs an exclusively created
-sibling temporary file, closes it and atomically renames it to the final path. Held file
-descriptors retain their complete original generation. Compilation or rename failure
-preserves existing output and removes only the builder's own temporary file. Publication
-is per asset, not a whole-bundle transaction. Temporary files request mode `0644`, subject
-to the process umask.
-
-`scripts/test-runner-result-guard.mjs` requires a zero process exit from the executor-owned log
-header and at least one executed passing test. Playwright also requires a valid empty global
-`errors` array. Missing or malformed evidence, a nonzero exit, global setup/teardown errors,
-and empty or skipped-only reports become infrastructure failures even when parsed JSON appears
-successful. Already classified test failures keep their original diagnostics and category.
-
-### Why testfold
-
-- One declarative ESM configuration replaces imperative per-suite orchestration
-- Declarative suite configuration instead of imperative scripts
-- Built-in artifact cleanup, failure reports, timing stats
-- CLI features: `--grep`, `--file`, `--dry-run`, `--fail-fast`, environment routing
-
----
-
-## Running Tests
+Testfold selects the environment, invokes the configured Jest or Playwright command, captures its
+output and reports the outcome. Use `--file` after npm's argument separator for a focused run:
 
 ```bash
-# All suites (parallel, local env)
-npm test
+npm run test:unit -- --file tests/unit/web-frontend/mcp-prompts-editor.test.tsx
+npm run test:workflow -- --file tests/workflow/scenarios/coverage.test.ts
+npm run test:e2e -- --file tests/e2e/admin-panel.spec.ts
+```
 
-# All suites (remote env)
-npm run test:remote
+The [result guard](../../scripts/test-runner-result-guard.mjs) rejects apparent success without a
+valid executor-owned zero exit code and an executed passing test. Playwright additionally needs a
+valid report with no global errors. Empty or skipped-only reports and setup/teardown failures do
+not establish a pass. Existing test failures retain their original diagnostics.
 
-# Individual suites
-npm run test:unit
-npm run test:workflow
-npm run test:integration
+## Discovery and preparation
 
-# Environment-routed suites (local Docker by default)
-npm run test:api
-npm run test:mcp-tools
-npm run test:e2e
+| Suite       | Discovery owner                                                                                             | Preparation and isolation                                                                                                                                             |
+| ----------- | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unit        | [Jest unit config](../config/jest.unit.config.js): `tests/unit/**/*.test.ts`, `.tsx`, `.cjs`                | Testfold builds common workspace programs; global setup builds native process helpers. Tests own temporary files, subprocesses and sockets. JSX tests opt into jsdom. |
+| Workflow    | [Jest workflow config](../config/jest.workflow.config.js): `tests/workflow/**/*.test.ts`                    | Graph-engine contract tests and authored-flow scenarios; no deployed server required.                                                                                 |
+| Integration | [Jest integration config](../config/jest.integration.config.js): `tests/integration` and `tests/functional` | Global setup builds Local/native/owner programs and prepares `data/test-integration.db`. Files share that migrated database and run in one worker.                    |
+| API         | [Jest API config](../config/jest.api.config.js): `tests/api/**/*.test.ts`                                   | Real target HTTP/authentication; deployment-specific exclusions depend on `API_TEST_TARGET`.                                                                          |
+| MCP         | [Jest MCP config](../config/jest.mcp-tools.config.js): `tests/mcp-tools/**/*.test.ts`                       | Authenticated SDK transport to the target server.                                                                                                                     |
+| E2E         | [Playwright config](../config/playwright.config.ts): `tests/e2e/**/*.spec.ts`                               | Browser fixtures, global setup and ordered project dependencies.                                                                                                      |
 
-# Environment-routed suites against the configured remote host/tunnel
-npm run test:api:remote
-npm run test:mcp-tools:remote
+Jest uses SWC to transform TypeScript. The root [base config](../config/jest.base.config.js),
+[setup](../setup.ts), [jsdom polyfills](../setup-jsdom.ts) and SQLite error-realm setup have distinct
+consumers; keep them when changing a suite. Test types are checked by `npm run typecheck:tests`,
+including a separate frontend configuration with bundler resolution and the frontend alias.
+Worker limits and timeouts belong to the linked configs.
+
+Common workspace asset publication compiles each program before writing, syncing and renaming an
+exclusive sibling temporary file. Held readers retain the complete original program. This is
+per-file publication, not a transaction over the whole payload. Test preparation does not package
+guest archives, provider toolchains, fonts or a complete guest release.
+
+## Target selection
+
+```bash
+npm run test:api                 # local target
+npm run test:mcp-tools:remote    # configured remote target
 npm run test:e2e:remote
-
-# Direct testfold usage
-npx testfold unit             # single suite
-npx testfold unit workflow    # multiple suites
-npx testfold --dry-run        # preview commands
-npx testfold unit -- auth     # pass-through args (filter by file)
-npx testfold -g "auth"        # grep by test name
 ```
 
----
+The environment definitions in `test-runner.config.mjs` own local, remote and CI routing. Local
+server suites use `.env.local`; remote routing also uses `.env.remote`. CI SaaS and self-host runs
+use separate deployment contexts. `npm run verify:docker` owns the paired container checks; its
+`MOIRA_VERIFY_ENV_FILE` and `MOIRA_TEST_SELF_HOST_PORT` overrides support isolated worktrees.
+Keep local environment files untracked and consult the local port inventory before assigning ports.
 
-## Output Files
+Deployed-server requests use [test-config](../utils/test-config.ts).
+`getTestBaseUrl()` honors `TEST_BASE_URL`; otherwise it requires `DOCKER_PORT` and delegates to the
+[resolver](../utils/remote-url-resolver.ts). Browser navigation and direct Node HTTP may need
+different hosts: `getTestFetchUrl()` deliberately resolves separately. Setting `TEST_BASE_URL`
+alone does not redirect every transport. Component fixtures own their private listener or socket
+instead of borrowing a deployed target's URL.
 
-Each test suite creates:
+## E2E projects
 
-1. **JSON** - Raw framework output (e.g., `unit.json`)
-2. **Log** - Full console output (e.g., `unit.log`)
-3. **Timing** - Per-test timing statistics (e.g., `unit-timing.txt`)
-4. **Failures/** - Individual `.md` per failed test (ANSI codes removed)
+Playwright runs installation-wide settings writers in `global-settings` before the parallel
+`chromium` readers. Selecting a Chromium file also runs the complete dependency project; selecting
+a settings-writer file runs its matching cases. Failure of the dependency prevents Chromium from
+running and leaves the invocation failed. It does not make later settings cases a serial test group.
 
-The log begins with the executor's `Command`, `Exit Code` and `Duration` header before framework
-output. A line printed by the test process is not an authoritative exit code. Raw framework JSON
-and the aggregated runner result describe different boundaries; use the runner result for success.
+Inspector, self-host account-approval and platform snapshot specs require additional preparation.
+The config excludes its external-service set in CI and unless `PLAYWRIGHT_INCLUDE_EXTERNAL=true`.
+That flag enables discovery; it does not start those dependencies or authorize external effects.
+See [browser testing](e2e-testing.md).
 
-### Output Locations
+## Artifacts and concurrent runs
 
-```
-test-results/artifacts/
-├── unit.json              # Jest structured output
-├── unit.log               # Full console (errors from crashed tests here)
-├── unit-timing.txt        # Top 30 slowest tests + top 15 slow suites
-├── integration.json
-├── integration.log
-├── integration-timing.txt
-├── api.json
-├── api.log
-├── api-timing.txt
-├── mcp-tools.json
-├── mcp-tools.log
-├── mcp-tools-timing.txt
-├── e2e.json               # Playwright structured output
-├── e2e.log
-├── e2e-timing.txt         # Playwright timing report
-└── failures/
-    ├── unit/
-    │   └── 01-test-name.md
-    ├── integration/
-    ├── api/
-    ├── mcp-tools/
-    └── e2e/
-        └── 01-test-name.md
+Testfold writes per-suite JSON, executor logs, timing and Markdown failure reports under
+`test-results/artifacts/`. Inspect failure reports first and the executor log for crashes or
+preparation failures. Raw framework JSON is evidence for assertions, not a replacement for the
+aggregated runner outcome.
 
-summary.json               # Aggregated results (project root)
-test-summary.log            # ANSI-free summary log
-timing.json                 # Timing data for all suites
-```
+A whole-run lock serializes runner processes sharing the artifact directory. A focused run cleans
+its own suite's artifacts, so preserve evidence needed for diagnosis before another invocation of
+that suite. Summaries and timing describe the latest invocation.
 
----
-
-## Artifact Cleanup
-
-testfold cleans per-suite artifacts before each run. Running a single suite only cleans that suite's artifacts — previous runs of other suites are preserved. Independent runner processes sharing the artifacts directory are serialized by a whole-run lock. Preserve relevant JSON and logs before another run of the same suite; summaries and timing files describe the latest invocation.
-
----
-
-## Performance Optimizations
-
-### Compilation
-
-Tests use **@swc/jest** instead of ts-jest for faster TypeScript compilation.
-
-### Parallel Execution
-
-| Category    | Workers   | Notes                                           |
-| ----------- | --------- | ----------------------------------------------- |
-| Unit        | 2         | Memory-optimized for large test count           |
-| Integration | 1         | Sequential files share one SQLite DB            |
-| API         | 5         | Parallel HTTP requests                          |
-| MCP Tools   | 1         | Sequential (shared MCP state)                   |
-| E2E         | 1, then 4 | Global settings project, then parallel Chromium |
-
-### E2E Projects
-
-In `tests/config/playwright.config.ts`, `global-settings` runs the MCP prompt, settings import
-and global value-history specs with one worker and `fullyParallel: false`. These cases share
-installation-wide values, so the `chromium` project depends on their completion and excludes
-their files. Chromium runs the remaining specs with the global worker limit and parallel test
-execution. Both projects keep the same browser, server environment and common ignores.
-
-Selecting a Chromium file with `--file` also runs the complete `global-settings` dependency.
-Selecting a file belonging to `global-settings` runs its matching cases without the Chromium
-project. A failed global-settings test does not automatically skip its later cases as a serial
-suite would; an unsuccessful dependency prevents Chromium execution and leaves the run failed.
-
-### Database
-
-SQLite uses **WAL mode** with `synchronous=NORMAL`. Integration files run sequentially because they
-share one migrated database and write transactions; parallel workers would contend for the same
-SQLite writer lock. Tests inside a file still exercise WAL read/write behavior where required.
-
----
-
-## Configuration Files
-
-### Test Runner Config
-
-- `test-runner.config.mjs` — central testfold config for the Jest and Playwright suites, environment routing, and hooks. The `.mjs` format is directly loadable by the Node 24 process that runs testfold; no TypeScript loader flag is required.
-
-### Jest/Playwright Configs
-
-- `tests/config/jest.base.config.js` - shared config with @swc/jest transform
-- `tests/config/jest.unit.config.js`
-- `tests/config/jest.workflow.config.js`
-- `tests/config/jest.integration.config.js` - 1 worker + one shared globalSetup database
-- `tests/config/jest.api.config.js` - 5 workers
-- `tests/config/jest.mcp-tools.config.js`
-- `tests/config/playwright.config.ts`
-
----
-
-## Database Usage
-
-| Test Type   | Database                     | Notes                                                            |
-| ----------- | ---------------------------- | ---------------------------------------------------------------- |
-| Unit        | usually in-memory            | Owned temporary filesystem/component fixtures are also supported |
-| Integration | `./data/test-integration.db` | Direct code access                                               |
-| API         | `./data/moira.db`            | Docker container                                                 |
-| MCP         | `./data/moira.db`            | Docker container                                                 |
-| E2E         | `./data/moira.db`            | Docker container                                                 |
-
-**Important:** API, MCP, E2E tests run against Docker container using production DB. Integration tests use separate test DB with direct code access.
-
----
-
-## Environment Routing
-
-Suites that require a running server (api, mcp-tools, e2e) support environment routing:
-
-| Environment | Env files                    | API/MCP URL source                  | E2E URL source               |
-| ----------- | ---------------------------- | ----------------------------------- | ---------------------------- |
-| local       | `.env.local`                 | `DOCKER_PORT` → localhost           | `DOCKER_PORT` → localhost    |
-| remote      | `.env.remote` + `.env.local` | `REMOTE_HOST` + local `DOCKER_PORT` | local `DOCKER_PORT` (tunnel) |
-
-Usage: `npx testfold api -e local`, `npx testfold api -e remote`, `npm run test:api`, or `npm run test:api:remote`.
-
----
-
-## Adding New Test Category
-
-1. Create config in `tests/config/jest.{category}.config.js`
-2. Add suite entry to `test-runner.config.mjs`
-3. Add npm scripts to `package.json`
+The hosted integration job uses a byte-verified private Node executable to satisfy process-custody
+ownership checks without changing shared toolcache permissions. Native fixtures and the
+[packaged/native acceptance](../TESTING-GUIDE.md#native-and-provider-acceptance) have separate
+evidence boundaries.

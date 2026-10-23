@@ -1,4 +1,6 @@
-import { metadataRevision, type ExecutionError, type WorkflowToken } from "@mcp-moira/shared";
+import { metadataRevision } from "@mcp-moira/shared/metadata-revision";
+import type { ExecutionError } from "@mcp-moira/shared/execution-error";
+import type { WorkflowToken } from "@mcp-moira/shared/services/token-manager";
 import {
   isMaterializeNode,
   type MaterializeNode,

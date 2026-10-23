@@ -81,7 +81,7 @@ Include in session archives:
 
 ### session - executions
 
-Lists all active workflow executions for current user.
+Returns one page of active workflow executions for the current user. Use limit and offset to read further pages; an empty page or missing row does not prove that an execution expired.
 
 **Call:** `session({ action: "executions" })`
 
@@ -148,7 +148,7 @@ Gets full execution state including context variables.
 
 ### "Process not found or expired"
 
-**Cause:** Invalid or expired processId
+**Cause:** The supplied identity is unavailable to this caller. This alone does not establish expiry, deletion or the outcome of an earlier operation.
 
 **Solution:**
 
@@ -163,8 +163,8 @@ Gets full execution state including context variables.
 **Solution:**
 
 1. Check execution status with `session({ action: "execution_context", executionId: "..." })`
-2. Status must be `waiting` to accept input
-3. If `completed` or `failed`, start a new execution
+2. Inspect the actual waiting node and current presentation; a persisted `running` execution can be waiting for input. Do not infer readiness from a display status alone.
+3. A terminal execution cannot be advanced. Start another only for a deliberate new task, never to collect or retry an uncertain original effect.
 
 ### Validation Errors on step()
 
@@ -189,8 +189,9 @@ or alter the input.
 **Cause:** The attempt no longer matches the current execution presentation and was rejected before
 handler work.
 
-**Solution:** Automatically call `session({ action: "current_step", executionId: "..." })`, then
-retry the intended submission once with the returned Step attempt ID. Do not reuse the stale ID.
+**Solution:** Read `session({ action: "current_step", executionId: "..." })`, then reconcile its node,
+directive, schema and current intent before submitting with that attempt. Do not reuse the stale ID,
+carry old input into another step, or overwrite a newer user answer.
 
 ### `ATTEMPT_CONFLICT`
 
@@ -279,24 +280,24 @@ authored error route remains in force.
 **Solution:**
 
 1. Check for process-id.txt in workspace
-2. Use `session({ action: "current_step" })` to get context
+2. Use `session({ action: "current_step", executionId })` with the retained identity to get context
 3. Remind agent: "Continue workflow \{processId\}"
 
 ### Seeing `[[UNDEFINED_VARIABLE]]` in a directive at runtime
 
-**Cause:** A referenced variable was unresolved when the directive was rendered. Three causes:
+**Cause:** A referenced value was unresolved when the directive was rendered. Check:
 
 1. The variable is not declared in `variableRegistry`.
 2. The variable is declared but has no `default` and was not yet written by an upstream node before the directive used it.
-3. A bare `{{...}}` was placed into data the agent returned via `step()`, and that data was later interpolated into a directive (template-in-data). Returned data values are literal — they are not re-scanned as templates.
+3. A node-local output is absent or referenced by a bare name instead of `node-id.field`. Optional null values also render the placeholder when substituted directly.
 
 The engine logs a warning naming the residual placeholder and the `executionId`.
 
 **Solution:**
 
-1. Declare the variable in `variableRegistry` with a `default`.
-2. Ensure an upstream node writes the variable (via `globalInputs`) before its first use.
-3. Never echo `{{...}}` into data you return from `step()` — keep templates only in static node fields.
+1. Use a declared global or the actual node-local path; seed a meaningful default only when the contract has one.
+2. Ensure the producing node runs before use; guard optional text instead of manufacturing evidence.
+3. Returned step data is literal and is not re-scanned as templates. Braces inside returned source code or examples are valid data; authored dynamic behavior belongs in template-enabled static fields.
 
 ### Editing files while a command runs
 
@@ -667,7 +668,7 @@ Do not erase approval/journals, create replacement state or kill arbitrary guard
 can be interrupted; mixed-edition rolling upgrade is unsupported. Live append in a matched edition
 does not make the upgrade itself uninterrupted.
 
-Migration 0061 archives old cloud Local policy/control, relay, grants and operational rows;
+Archived cloud Local policy/control, relay, grants and operational rows remain diagnostic data;
 archives do not authorize dispatch. The owner imports only verified existing native bindings
 and retains unknown outcomes. An unsupported private owner format remains refused: preserve
 the cold backup, identity, journals and disks instead of editing cloud policy or deleting state.
@@ -717,7 +718,7 @@ User: What workflows am I running?
 
 Agent:
 1. session({ action: "executions" })
-   → Lists all active executions with notes
+   → Returns a page of active executions with notes
 
 2. session({ action: "execution_context", executionId: "abc-123" })
    → Shows full context including variables
@@ -736,5 +737,5 @@ Agent:
 
 ## Related Documentation
 
-- [MCP Agent Guide](/docs/docs/integration/agent-guide) - Tool usage basics
-- [MCP Tools Reference](/docs/docs/reference/tools) - Full tool documentation
+- [MCP Agent Guide](/docs/integration/agent-guide/) - Tool usage basics
+- [MCP Tools Reference](/docs/reference/tools/) - Full tool documentation

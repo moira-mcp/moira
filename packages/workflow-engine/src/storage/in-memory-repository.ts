@@ -23,27 +23,32 @@ import {
   ValidationError,
   NotFoundError,
   AuthorizationError,
-  applyExecutionReminderMutation,
-  canonicalJson,
-  createLogger,
-  mapLegacyStatusArray,
-  metadataRevision,
+} from "@mcp-moira/shared/errors";
+import { applyExecutionReminderMutation } from "@mcp-moira/shared/services/execution-reminder-domain";
+import { canonicalJson } from "@mcp-moira/shared/canonical-json";
+import { createLogger } from "@mcp-moira/shared/logging/logger";
+import { mapLegacyStatusArray, type ExecutionError } from "@mcp-moira/shared/execution-error";
+import { metadataRevision } from "@mcp-moira/shared/metadata-revision";
+import {
   stepAttemptBindingMatches,
   stepAttemptContinuationMatches,
+} from "@mcp-moira/shared/step-attempt-binding";
+import {
   normalizeExecutionTaskTitle,
   type ExecutionTaskTitleMutationResult,
-} from "@mcp-moira/shared";
+} from "@mcp-moira/shared/execution-task-identity";
 import { executionStopCapability } from "@mcp-moira/shared/execution-management";
-import { encryptValue, decryptValue } from "../utils/encryption.js";
+import { encryptValue, decryptValue } from "@mcp-moira/shared/settings-encryption";
 import { humanGateChanged, humanGateWaiting } from "../utils/human-gate.js";
 import { awaitingUserAfterMove } from "../utils/awaiting-user.js";
 import type {
   ExecutionFilter,
   ExecutionListResult,
+} from "@mcp-moira/shared/database/repositories/execution-repository";
+import type {
   WorkflowFilter,
   WorkflowListResult,
-  ExecutionError,
-} from "@mcp-moira/shared";
+} from "@mcp-moira/shared/database/repositories/workflow-repository";
 import type {
   CompleteExecutionAttemptInput,
   RecoverExecutionToNodeInput,

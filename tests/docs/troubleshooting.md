@@ -1,168 +1,61 @@
-# Test Troubleshooting
+# Test troubleshooting
 
-## Docker Issues
+Start with the [testing guide](../TESTING-GUIDE.md#analyzing-failures). Preserve the current
+artifacts before another invocation replaces them. Rerun to test a diagnosis, not to erase a failure.
 
-```bash
-# Check running containers
-docker ps | grep moira
+## No tests or apparent success after a crash
 
-# Restart Docker
-npm run docker:restart
+Check the selected path against the [discovery config](test-infrastructure.md#discovery-and-preparation).
+Read the executor log for compilation, global setup, teardown and process-exit failures. An empty
+or skipped-only report is not an executed pass. The
+[result guard](test-infrastructure.md#how-it-works) treats these as infrastructure failures even
+when a framework JSON file appears successful.
 
-# Test health endpoint
-curl http://localhost:${DOCKER_PORT}/health
-```
+## Target unavailable or wrong deployment behavior
 
----
+Confirm which Testfold environment the command selected and whether the expected target is
+running. Check health at that configured target. Do not assume a default port or restart an
+unrelated installation. Local Docker and remote browser/Node transports have separate routing;
+see [target selection](test-infrastructure.md#target-selection).
 
-## Database Issues
+API SaaS exclusions and self-host checks protect different deployment contracts. A pass against
+one mode does not establish the other. For paired CI-equivalent container preparation use
+`npm run verify:docker` with the intended isolated environment.
 
-```bash
-# Check file exists
-ls -la ./data/moira.db
+Inspect whether required variables are configured without printing their values. Never dump ADMIN
+credentials, tokens, private environment files or full OAuth traces into a report.
 
-# Analyze tables
-sqlite3 ./data/moira.db ".tables"
+## Database locked
 
-# Query data
-sqlite3 ./data/moira.db "SELECT * FROM user;"
-sqlite3 ./data/test-integration.db "SELECT * FROM workflow;"
-```
+Identify the database owner first. Integration suites use their migrated test database and run
+files sequentially; API/MCP/browser suites use the selected server's storage; component fixtures
+may own a temporary database. Check leaked connections, concurrent writers and cleanup at that
+boundary. Restarting Docker cannot repair an unrelated local test database or missing disposal.
+Retain WAL and transaction semantics when fixing contention.
 
----
+## Authentication or MCP refusal
 
-## Environment Issues
+Use the existing [browser helpers](e2e-testing.md#fixtures-and-authentication) or
+[HTTP/SDK helpers](api-mcp-testing.md). Email verification and deployment account approval are
+separate. Confirm whether the caller needs a cookie value, Cookie header or SDK bearer transport.
+Dedicated credential-mutation accounts must not alter the shared administrator.
 
-```bash
-# Check Docker port config
-cat .env.local | grep DOCKER_PORT
+For an unknown tool or rejected field, inspect the current typed tool catalog and actual SDK
+response. Refresh/reconnect a stale client when appropriate; do not bypass admission or invent an
+old tool name. A stale Step attempt needs the public current-step/recovery contract, not replay of
+an obsolete input. Preserve unknown external outcomes and collect the original operation instead
+of submitting it again.
 
-# Check admin credentials
-cat .env.local | grep ADMIN
-```
+## Timeout or unstable browser state
 
----
+Read the failed action and observable state before changing selectors or timeouts. Separate slow
+setup, a blocked request, shared-state leakage and a true deadline. Use controlled clocks for timer
+behavior and CPU time for synchronous work. A larger timeout does not establish correctness.
 
-## Common Errors
+Browser fixtures support `E2E_CPU_THROTTLE` for slower rendering. Wait for the actual request,
+dialog, focus or settled diagram state. Keep related geometry facts in one browser sample when
+motion can change them. See [browser testing](e2e-testing.md#run-and-inspect).
 
-### Tests fail to run (0 tests)
-
-- Read `.log` file for syntax/compilation errors
-- Check if test file path is correct
-
-### Docker not running
-
-```
-Error: connect ECONNREFUSED 127.0.0.1:${DOCKER_PORT}
-```
-
-**Solution:** `npm run docker:restart`
-
-### Database locked
-
-```
-Error: SQLITE_BUSY: database is locked
-```
-
-**Solution:** Close other connections, restart Docker
-
-### Auth failures in E2E
-
-```
-[Browser Console Error] [Login Error] Email not verified
-```
-
-**Solution:** Use `createVerifiedTestUser()` helper instead of manual registration
-
-### Timeout errors
-
-```
-Timeout - Async callback was not invoked within 5000ms
-```
-
-**Solutions:**
-
-- Check if Docker is running
-- Check network connectivity
-- Profile slow operations (don't just increase timeout)
-
-### MCP tool not found
-
-```
-Error: Unknown tool: new_tool_name
-```
-
-**Possible causes:**
-
-1. Tool not registered in `server.ts`
-2. Tool registered but Claude Code needs MCP reconnection (cached tools list)
-
----
-
-## Debugging Steps
-
-### 1. Read failure reports first
-
-```bash
-cat test-results/artifacts/failures/e2e/01-test-name.md
-cat test-results/artifacts/failures/unit/01-test-name.md
-```
-
-Individual Markdown files contain:
-
-- Error messages (clean, no color codes)
-- Stack traces
-- Test output
-- Browser console (E2E)
-- Network logs (E2E)
-- Screenshots/videos (E2E)
-
-### 2. Check log files if tests crash
-
-```bash
-cat test-results/artifacts/unit.log
-cat test-results/artifacts/e2e.log
-```
-
-**CRITICAL:** If tests fail to start or crash, error is ONLY in `.log` file.
-
-### 3. Analyze database state
-
-```bash
-# For integration tests
-sqlite3 ./data/test-integration.db "SELECT * FROM workflow;"
-
-# For API/E2E tests
-sqlite3 ./data/moira.db "SELECT * FROM user;"
-```
-
-### 4. Run specific test
-
-```bash
-npm run test:unit -- --file tests/unit/scripts/prompt-migration.test.ts
-npm run test:e2e -- --file tests/e2e/admin-panel.spec.ts
-```
-
----
-
-## Performance Targets
-
-- Unit: < 100ms
-- Integration: < 5s
-- API: < 10s
-- MCP: < 10s
-- E2E: < 30s
-
-**If slow:** Profile and optimize (don't increase timeout).
-
----
-
-## DO NOT Re-run Immediately
-
-All logs already saved. Read files first:
-
-1. `.md` failure reports - clean error messages
-2. `.log` files - full output including crashes
-3. Database - check data state
-
-Only re-run after understanding the failure cause.
+For scenario loops, inspect schema-valid inputs, node-local/global scope, visits and cycle
+diagnostics using the [scenario guide](workflow-scenarios.md). Its coverage report has explicit
+measurement limits and does not replace scenario assertions.

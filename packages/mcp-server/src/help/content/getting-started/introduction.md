@@ -3,8 +3,8 @@ title: Introduction to Moira
 description: What Moira does for you and your agent, and how to start without learning to build flows
 ---
 
-Moira keeps an AI agent on track with one clear step at a time, checking each result before it
-moves on so multi-step tasks finish completely and in order. A **flow** (workflow) defines the
+Moira guides an AI agent one step at a time and validates submitted answers before advancing.
+The agent remains responsible for inspecting evidence and completing the real work. A **flow** (workflow) defines the
 process once for repeatable execution.
 
 ## You do not have to build flows
@@ -12,9 +12,9 @@ process once for repeatable execution.
 Moira is an agent-first tool. You work with your agent the way you always do: describe the task in
 plain words. The agent does the rest:
 
-1. **It picks a ready flow** when one fits — for example Quick Task, Robust Task or Todo List for a
-   clear task without special logic, or Software Development Flow for a change to a code
-   repository.
+1. **It picks a ready flow** when one fits — for example Quick Task or Robust Task for general
+   non-development work, Todo List for a clear checklist, or the matching software-development
+   workflow from the current catalog for repository implementation requiring a complete development lifecycle.
 2. **Or it builds a new flow for your task** through the Workflow Management Flow, Moira's own flow
    for creating and editing flows. A flow can be as simple as a few steps in a row or as complex as
    a process with reviews and repair loops. The agent first agrees with you how thorough the flow
@@ -160,6 +160,7 @@ A workflow is a directed graph of nodes. Each node represents a step in the proc
       "id": "task-1",
       "type": "agent-directive",
       "directive": "...",
+      "completionCondition": "The requested result is produced and verified",
       "connections": { "success": "end" }
     },
     { "id": "end", "type": "end" }
@@ -184,7 +185,8 @@ Common node types are shown below. This table is representative, not exhaustive;
 
 ### Templates
 
-Templates allow dynamic content in directives and conditions using `{{variable}}` syntax:
+Templates allow dynamic text in directives and completion conditions using `{{variable}}` syntax.
+This field fragment assumes projectName and reportType are declared globals:
 
 ```json
 {
@@ -194,9 +196,9 @@ Templates allow dynamic content in directives and conditions using `{{variable}}
 
 Variables can reference:
 
-- Initial data from start node
-- Results from previous steps
-- Workflow parameters
+- Declared globals seeded by the start node or written through globalInputs
+- Local results addressed as `node-id.field`
+- Supported system values such as executionId
 
 ### Executions
 

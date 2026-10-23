@@ -5,7 +5,7 @@
  */
 
 import { ExecutionContext } from "../types/base-types.js";
-import { createLogger } from "@mcp-moira/shared";
+import { createLogger } from "@mcp-moira/shared/logging/logger";
 import { PathResolver } from "./path-resolver.js";
 
 export class ContextMapper {

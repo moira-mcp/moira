@@ -4,7 +4,7 @@ description: One declared global that lets a workflow run unattended without rem
 ---
 
 A workflow that a caller may want to run unattended declares an operating mode: `interactive`, where
-every approval gate stays, or `autonomous`, where the workflow routes around waits for a human and
+every approval gate stays, or `autonomous`, where the workflow routes around explicitly waivable human waits and
 delivers a final report instead. The mode is one declared global and a condition before each gate —
 not a second version of the workflow, and not a flag inside every node.
 
@@ -65,8 +65,7 @@ the gate — from a repair loop, for example — will still stop an autonomous r
 
 ## What autonomy removes and what it never removes
 
-Autonomous mode removes only waits for a human: approvals, acceptances, feedback prompts, and
-decisions the agent can derive from evidence it already has.
+Autonomous mode removes only waits the caller's contract permits the workflow to waive: routine approvals, acceptances, feedback prompts and decisions within existing authority. It does not create new authority or waive an independently required human decision.
 
 It never removes independent agent reviews, validation, replan or recovery routes. It never removes
 an authority gate either: publication, destructive operations, and external mutations stay

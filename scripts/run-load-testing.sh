@@ -6,11 +6,11 @@
 # Usage: ./scripts/run-load-testing.sh <target> <scenario> [options]
 #
 # Targets: local, staging, prod
-# Scenarios: health, auth, workflows, executions, settings, full, stress, soak, mcp
+# Scenarios: health, auth, workflows, executions, settings, full, stress, soak, rate-limit
 #
 # Options:
-#   --vus <n>        Override VUs count
-#   --duration <d>   Override duration (e.g., 30s, 5m)
+#   --vus <n>        Forward k6 VUs option (authored scenario executors still apply)
+#   --duration <d>   Forward k6 duration option (e.g., 30s, 5m)
 #   --no-dashboard   Don't open Grafana dashboard
 #   --help           Show this help
 #
@@ -58,25 +58,24 @@ print_usage() {
     echo -e "${CYAN}Usage:${NC} $0 <target> <scenario> [options]"
     echo ""
     echo -e "${CYAN}Targets:${NC}"
-    echo "  local     - Local development (localhost:3032)"
+    echo "  local     - TARGET_BASE_URL or http://host.docker.internal:3032"
     echo "  staging   - Staging environment (requires STAGING_BASE_URL)"
     echo "  prod      - Production environment (requires PROD_BASE_URL)"
     echo ""
     echo -e "${CYAN}Scenarios:${NC}"
     echo "  health     - Health endpoint validation"
     echo "  auth       - Authentication flow testing"
-    echo "  workflows  - Workflow CRUD operations"
-    echo "  executions - Execution management"
+    echo "  workflows  - Workflow lists, supported filters and detail reads"
+    echo "  executions - Execution lists and supported status filters"
     echo "  settings   - User settings operations"
-    echo "  full       - Mixed workload (all endpoints)"
+    echo "  full       - Mixed HTTP read workload"
     echo "  stress     - High-load stress test (200 VUs peak)"
     echo "  soak       - Long-running stability (30 min, 50 VUs)"
-    echo "  mcp        - MCP tool patterns"
-    echo "  rate-limit - Rate limiting verification (restarts Docker with rate limiting enabled)"
+    echo "  rate-limit - API limiter observation (local target rebuilds/restarts Docker)"
     echo ""
     echo -e "${CYAN}Options:${NC}"
-    echo "  --vus <n>        Override VUs count"
-    echo "  --duration <d>   Override duration (e.g., 30s, 5m, 1h)"
+    echo "  --vus <n>        Forward k6 VUs option; authored scenario executors still apply"
+    echo "  --duration <d>   Forward k6 duration option (e.g., 30s, 5m, 1h)"
     echo "  --no-dashboard   Don't open Grafana dashboard"
     echo "  --help           Show this help"
     echo ""
@@ -114,7 +113,6 @@ get_scenario_file() {
         full)       echo "full-api.js" ;;
         stress)     echo "stress.js" ;;
         soak)       echo "soak.js" ;;
-        mcp)        echo "mcp-tools.js" ;;
         rate-limit) echo "rate-limit-test.js" ;;
         *)          echo "" ;;
     esac
@@ -138,7 +136,7 @@ validate_target() {
     
     case "$target" in
         local)
-            TARGET_URL="http://host.docker.internal:3032"
+            TARGET_URL="${TARGET_BASE_URL:-http://host.docker.internal:3032}"
             ;;
         staging)
             if [[ -z "$STAGING_BASE_URL" ]]; then
@@ -175,7 +173,7 @@ validate_scenario() {
     
     if [[ -z "$SCENARIO_FILE" ]]; then
         log_error "Invalid scenario: $scenario"
-        echo "Valid scenarios: health, auth, workflows, executions, settings, full, stress, soak, mcp, rate-limit"
+        echo "Valid scenarios: health, auth, workflows, executions, settings, full, stress, soak, rate-limit"
         exit 1
     fi
     

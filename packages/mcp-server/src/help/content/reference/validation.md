@@ -82,7 +82,7 @@ Authors never have to migrate by hand. To rewrite a file on disk into the curren
 moira-workflow <file> migrate
 ```
 
-Like every write, it creates a backup first. Run a second time it reports
+When it rewrites an existing file, it creates a backup first. Run a second time it reports
 «Already at schema version 1; nothing to migrate».
 
 ## Routing Diagnostics
@@ -131,13 +131,11 @@ Validation returns structured results:
 
 ### Warning Types
 
-| Type          | Description                          | Threshold                                                                          |
-| ------------- | ------------------------------------ | ---------------------------------------------------------------------------------- |
-| `performance` | Large workflow                       | >20 agent-directive nodes                                                          |
-| `complexity`  | Complex conditions                   | Deeply nested conditions                                                           |
-| `context`     | Large context                        | >100KB context size                                                                |
-| `node`        | Notification shows an internal value | A path, a bare counter or a raw step output in `message`                           |
-| `node`        | Two messages about one wait          | A notification node leading straight into a `humanGate` step with `notify: "auto"` |
+| Type        | Description                          | Threshold                                                                          |
+| ----------- | ------------------------------------ | ---------------------------------------------------------------------------------- |
+| `structure` | Many agent-directive nodes           | More than 20; advisory, not an execution limit                                     |
+| `node`      | Notification shows an internal value | A path, a bare counter or a raw step output in `message`                           |
+| `node`      | Two messages about one wait          | A notification node leading straight into a `humanGate` step with `notify: "auto"` |
 
 ## Validation Examples
 
@@ -207,9 +205,9 @@ Large workflow triggers performance warning:
   "errors": [],
   "warnings": [
     {
-      "type": "performance",
-      "message": "Workflow has 25 agent-directive nodes. Consider breaking into subgraphs.",
-      "count": 25
+      "type": "structure",
+      "severity": "warning",
+      "message": "High number of agent-directive nodes (25). Consider using subgraphs for better organization."
     }
   ]
 }
@@ -225,7 +223,7 @@ Nodes without `inputSchema` require empty input from agent. Non-empty responses 
 
 ```json
 // Node without inputSchema
-{ "id": "task", "type": "agent-directive", "directive": "..." }
+{ "id": "task", "type": "agent-directive", "directive": "Perform the task", "completionCondition": "Result verified", "connections": { "success": "end" } }
 
 // Valid: empty response
 {}
@@ -235,6 +233,8 @@ Nodes without `inputSchema` require empty input from agent. Non-empty responses 
 ```
 
 ### Schema Definition
+
+The following is a field fragment for a complete agent node; retain its id, directive, completionCondition and connections.
 
 ```json
 {
@@ -365,8 +365,8 @@ processed like the rest of your definition; a playbook belonging to another acco
 before substitution, so published text cannot execute templates inside your run.
 
 :::danger
-Do not echo untrusted input containing `{{...}}` into a directive. Declare the variables you need
-and reference them explicitly. Prefer explicit named variables over `{{context.variables}}`
+Do not concatenate untrusted text into authored template source. Return it as declared literal data
+and reference it explicitly. Prefer explicit named variables over `{{context.variables}}`
 full-dumps, which can expose the entire variable bag.
 :::
 
@@ -391,7 +391,7 @@ further bound: a set over 256 KiB in total is refused rather than truncated.
 
 ## Best Practices
 
-1. **Always include inputSchema** - Validate agent responses for consistent data
-2. **Keep workflows focused** - Split large workflows into subgraphs
+1. **Declare needed inputs** - Use inputSchema for values the next responsibility actually consumes; omit it when empty completion is sufficient
+2. **Keep responsibilities clear** - Use subgraphs for a real reusable responsibility, not a node-count target
 3. **Test validation** - Use `manage` with `includeValidation: true`
-4. **Handle errors gracefully** - Define error connections for validation failures
+4. **Handle errors by contract** - Invalid agent input waits for correction; a node's supported error connection handles only its documented failures

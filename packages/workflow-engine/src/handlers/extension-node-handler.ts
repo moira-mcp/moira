@@ -18,11 +18,13 @@ import { IDataRepository } from "../interfaces/data-repository.js";
 import { IGraphExecutionEngine } from "../interfaces/graph-execution-engine.js";
 import { AgentMessageQueue } from "../services/agent-message-queue.js";
 import { GraphTemplateProcessor } from "../templates/graph-template-processor.js";
-import { createLogger, WorkflowLogger, InternalError } from "@mcp-moira/shared";
+import { createLogger, type WorkflowLogger } from "@mcp-moira/shared/logging/logger";
+import { InternalError } from "@mcp-moira/shared/errors";
+import { canonicalJson } from "@mcp-moira/shared/canonical-json";
 import { ExtensionRegistry } from "../extensions/extension-registry.js";
 import { ExtensionPermissions } from "../extensions/extension-contract.js";
 import { extensionSettingDefinition } from "../extensions/extension-settings.js";
-import { canonicalJson, DECLARED_SCHEMA_AJV_OPTIONS } from "../extensions/declared-schema.js";
+import { DECLARED_SCHEMA_AJV_OPTIONS } from "../extensions/declared-schema.js";
 import {
   ExtensionFailureKind,
   ExtensionInvocationError,

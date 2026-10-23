@@ -53,6 +53,40 @@ const branchingWorkflow: WorkflowGraph = {
 };
 
 describe("Coverage Calculator", () => {
+  test("converging outputs credit only the selected answer despite identical visited nodes", async () => {
+    const workflow: WorkflowGraph = {
+      ...branchingWorkflow,
+      nodes: branchingWorkflow.nodes
+        .filter((node) => node.id !== "no-end")
+        .map((node) =>
+          node.type === "condition"
+            ? { ...node, connections: { true: "yes-end", default: "yes-end" } }
+            : node,
+        ),
+    };
+    const yes = await runScenario(workflow, {
+      name: "converging-yes",
+      mockInputs: { input: { value: "yes" } },
+      expect: { status: "completed" },
+    });
+    const no = await runScenario(workflow, {
+      name: "converging-no",
+      mockInputs: { input: { value: "no" } },
+      expect: { status: "completed" },
+    });
+
+    expect(yes.passed).toBe(true);
+    expect(no.passed).toBe(true);
+    expect(yes.visitedNodes).toEqual(no.visitedNodes);
+    expect(calculateCoverage(workflow, [yes]).uncoveredBranches).toEqual([
+      { nodeId: "check", branch: "default" },
+    ]);
+    expect(calculateCoverage(workflow, [no]).uncoveredBranches).toEqual([
+      { nodeId: "check", branch: "true" },
+    ]);
+    expect(calculateCoverage(workflow, [yes, no]).branchCoverage).toBe(100);
+  });
+
   test("calculates 100% coverage when all paths covered", async () => {
     const results: ScenarioResult[] = [];
 
@@ -78,6 +112,144 @@ describe("Coverage Calculator", () => {
     expect(coverage.branchCoverage).toBe(100);
     expect(coverage.unvisitedNodes).toHaveLength(0);
     expect(coverage.uncoveredBranches).toHaveLength(0);
+  });
+
+  test("an open wait covers the node but not its outgoing branch until an answer resumes it", async () => {
+    const waiting = await runScenario(branchingWorkflow, {
+      name: "open-wait",
+      mockInputs: {},
+      expect: { maxSteps: 1 },
+    });
+    expect(waiting.visitedNodes).toEqual(["start", "input"]);
+    expect(waiting.visits.map(({ nodeId, exitKey }) => ({ nodeId, exitKey }))).toEqual([
+      { nodeId: "start", exitKey: "default" },
+      { nodeId: "input", exitKey: null },
+    ]);
+    expect(calculateCoverage(branchingWorkflow, [waiting]).coveredBranches).toEqual([
+      { nodeId: "start", branch: "default" },
+    ]);
+
+    const resumed = await runScenario(branchingWorkflow, {
+      name: "answered-wait",
+      mockInputs: { input: { value: "yes" } },
+      expect: { status: "completed" },
+    });
+    expect(resumed.passed).toBe(true);
+    expect(resumed.visits.filter(({ nodeId }) => nodeId === "input").map((v) => v.exitKey)).toEqual(
+      [null, "success"],
+    );
+  });
+
+  test("rejected input records an open retry without inventing a self-loop exit", async () => {
+    const workflow: WorkflowGraph = {
+      ...branchingWorkflow,
+      nodes: branchingWorkflow.nodes.map((node) =>
+        node.type === "agent-directive" && node.id === "input"
+          ? { ...node, connections: { success: "input" } }
+          : node,
+      ),
+    };
+    const result = await runScenario(workflow, {
+      name: "rejected-self-loop",
+      mockInputs: { input: { value: 42 } },
+      allowValidationErrorsAt: ["input"],
+      expect: { maxSteps: 3 },
+    });
+    expect(result.visits.filter((v) => v.nodeId === "input").map((v) => v.exitKey)).toEqual([
+      null,
+      null,
+      null,
+    ]);
+    expect(calculateCoverage(workflow, [result]).coveredBranches).toEqual([
+      { nodeId: "start", branch: "default" },
+    ]);
+
+    const accepted = await runScenario(branchingWorkflow, {
+      name: "retry-then-accept",
+      mockInputs: { input: [{ value: 42 }, { value: "yes" }] },
+      allowValidationErrorsAt: ["input"],
+      expect: { status: "completed" },
+    });
+    expect(accepted.passed).toBe(true);
+    expect(accepted.visits.filter((v) => v.nodeId === "input").map((v) => v.exitKey)).toEqual([
+      null,
+      null,
+      "success",
+    ]);
+  });
+
+  test("a real loop retains repeated selected outputs before taking its terminating branch", async () => {
+    const workflow: WorkflowGraph = {
+      ...branchingWorkflow,
+      nodes: branchingWorkflow.nodes.map((node) =>
+        node.type === "condition"
+          ? { ...node, connections: { true: "yes-end", default: "input" } }
+          : node,
+      ),
+    };
+    const result = await runScenario(workflow, {
+      name: "loop-then-finish",
+      mockInputs: { input: [{ value: "no" }, { value: "yes" }] },
+      expect: { status: "completed" },
+    });
+    expect(result.passed).toBe(true);
+    expect(result.visits.filter((v) => v.nodeId === "check").map((v) => v.exitKey)).toEqual([
+      "default",
+      "true",
+    ]);
+    expect(calculateCoverage(workflow, [result]).uncoveredBranches).toEqual([]);
+  });
+
+  test("teleport redirection does not credit the paused source connection to the same target", async () => {
+    const workflow: WorkflowGraph = {
+      ...branchingWorkflow,
+      nodes: [
+        { type: "start", id: "start", connections: { default: "input" } },
+        {
+          type: "agent-directive",
+          id: "input",
+          directive: "Wait here",
+          completionCondition: "Answer received",
+          connections: { success: "jump" },
+        },
+        {
+          type: "teleport",
+          id: "jump",
+          directive: "Continue here",
+          completionCondition: "Acknowledged",
+          hint: "Explicit jump",
+          connections: { success: "end" },
+        },
+        { type: "end", id: "end" },
+      ],
+    };
+    const result = await runScenario(workflow, {
+      name: "jump-past-wait",
+      mockInputs: {},
+      teleportAfter: { afterNode: "input", teleportTo: "jump" },
+      expect: { status: "completed" },
+    });
+    expect(result.passed).toBe(true);
+    expect(result.visitedNodes).toEqual(["start", "input", "jump", "end"]);
+    expect(result.visits.map((v) => v.exitKey)).toEqual(["default", null, "success", null]);
+    expect(calculateCoverage(workflow, [result]).uncoveredBranches).toEqual([
+      { nodeId: "input", branch: "success" },
+    ]);
+  });
+
+  test("runner validation failure retains the returned engine cycle's open visit and earlier exits", async () => {
+    const result = await runScenario(branchingWorkflow, {
+      name: "diagnostic-failure",
+      mockInputs: { input: { value: 42 } },
+      expect: { status: "completed" },
+    });
+    expect(result.passed).toBe(false);
+    expect(result.error).toContain("Input validation failed");
+    expect(result.visitedNodes).toEqual(["start", "input", "input"]);
+    expect(result.visits.map((v) => v.exitKey)).toEqual(["default", null, null]);
+    expect(calculateCoverage(branchingWorkflow, [result]).coveredBranches).toEqual([
+      { nodeId: "start", branch: "default" },
+    ]);
   });
 
   test("calculates partial coverage correctly", async () => {

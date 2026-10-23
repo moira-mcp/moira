@@ -26,6 +26,9 @@ import {
   UpsertNoteNode,
   MaterializeNode,
   UserNotificationNode,
+  type LockNode,
+  type TeleportNode,
+  type ExtensionNode,
 } from "../types";
 
 import {
@@ -322,23 +325,19 @@ export class WorkflowTransformer {
       } as MaterializeNodeData;
     }
 
-    // Handle telegram-notification nodes (not in WorkflowNode union, runtime-only check)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    if ((node as any).type === "telegram-notification") {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const telegramNode = node as any;
+    if (node.type === "telegram-notification") {
       return {
-        nodeId: telegramNode.id,
+        nodeId: node.id,
         nodeType: "telegram-notification",
         label: "Telegram Notification",
-        description: telegramNode.message?.substring(0, 80) + "..." || "Telegram notification",
+        description: node.message?.substring(0, 80) + "..." || "Telegram notification",
         validationStatus: "valid" as const,
         validationErrors: [],
         validationWarnings: [],
         originalNode: node,
-        message: telegramNode.message,
-        chatId: telegramNode.chatId,
-        parseMode: telegramNode.parseMode,
+        message: node.message,
+        chatId: node.chatId,
+        parseMode: node.parseMode,
       };
     }
 
@@ -359,18 +358,15 @@ export class WorkflowTransformer {
       } as UserNotificationNodeData;
     }
 
-    // Exhaustive check: TypeScript verifies all WorkflowNode types are handled above.
-    // If a new type is added to WorkflowNode without a handler, this line will produce a compile error.
-    const _exhaustive: never = node;
-    // Runtime fallback for untyped data (e.g. telegram-notification) - graceful degradation instead of crash
-    const unknownNode = _exhaustive as unknown as WorkflowNode;
+    // These canonical variants deliberately use the server catalog rather than a dedicated card.
+    // A new authored variant must choose a renderer here or above. Runtime JSON from a newer
+    // server can still reach the same tolerant catalog/fallback path without being an authored type.
+    const unknownNode: LockNode | TeleportNode | ExtensionNode = node;
 
     // What this bundle has no branch for is not automatically unknown: Moira publishes the types it
     // knows, and a node whose type is in that catalog is drawn from the server's description of it.
     const described = nodeTypes[unknownNode.type];
     if (described) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const body = unknownNode as any;
       return {
         ...baseData,
         nodeType: "catalog",
@@ -385,8 +381,8 @@ export class WorkflowTransformer {
         schemaScope: described.schemaScope,
         config:
           described.schemaScope === "node"
-            ? (body as Record<string, unknown>)
-            : ((body.config as Record<string, unknown>) ?? {}),
+            ? (unknownNode as unknown as Record<string, unknown>)
+            : (("config" in unknownNode ? unknownNode.config : {}) ?? {}),
         connections: unknownNode.connections,
         color: DEFAULT_NODE_STYLES.catalog.colors.primary,
         icon: DEFAULT_NODE_STYLES.catalog.icon,

@@ -10,7 +10,7 @@ const { describe, expect, test } = require("@jest/globals");
 const entryPoints = {
   daemon: "packages/workspace-service/src/daemon.mjs",
   cli: "packages/workspace-service/src/cli.mjs",
-  "local-bootstrap": "packages/workspace-service/src/local-bootstrap.mjs",
+  "local-bootstrap": "packages/local/src/guest-bootstrap-entry.mjs",
   "guest-proxy": "packages/local/src/guest-proxy.ts",
   "owner-renderer": "packages/workspace-service/src/owner-renderer.mjs",
   "extension-handler-host": "packages/extension-runner/src/binary-handler-host.mjs",

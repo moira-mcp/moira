@@ -26,7 +26,7 @@ Start the management workflow:
 ```typescript
 mcp__moira__start({
   action: "prepare",
-  workflowId: "workflow-management-flow",
+  workflowId: "moira/workflow-management-flow",
   parentExecutionId: "none",
 });
 mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" });
@@ -68,13 +68,15 @@ them (an empty array `[]` removes them), and connections are edited by key:
 
 ```bash
 moira-workflow ./workflow.json update review \
-  --cases '[{"when":{"operator":"eq","left":{"contextPath":"verdict"},"right":"blocked"},"output":"blocked"}]'
+  --cases '[{"when":{"operator":"eq","left":{"contextPath":"review.verdict"},"right":"blocked"},"output":"blocked"}]'
 moira-workflow ./workflow.json update review --expressions '["attempts = attempts + 1"]'
 moira-workflow ./workflow.json update review --add-connection blocked fix-issues
 ```
 
 All three target the directive node that produced the verdict: its cases, the counter it keeps, and
-the connection a case names.
+the connection a case names. Here `verdict` is a field in `review`'s declared response schema;
+`attempts` must already be a declared numeric global with an initial value in `variableRegistry`.
+Node-local answers use `node-id.field`; bare template and condition names require declared globals.
 
 The read-only commands show the result: `schema` prints one `CASE <output> WHEN <condition>` line
 per case plus an `EDGE` line per connection, `structure --detailed` lists each case as
@@ -94,13 +96,17 @@ moira-workflow ./workflow.json rename review independent-review
 moira-workflow ./workflow.json delete legacy-check --retarget review.success=deliver
 ```
 
-To bring a file up to the current definition schema, run `migrate`. It rewrites the file in place,
-creating a backup first like every write, and reports «Already at schema version 1; nothing to
-migrate» when there is nothing to do:
+To bring a file up to the current definition schema, run `migrate`. When a migration is needed,
+it backs up the existing file before rewriting it. Otherwise it reports «Already at schema
+version 1; nothing to migrate» without rewriting:
 
 ```bash
 moira-workflow ./workflow.json migrate
 ```
+
+Existing-file mutations keep a unique pre-write copy under `workflow-backups/` in the caller's
+working directory. This is not a backup of every output: `create` and `copy` create new workflow
+files, while `export-node` writes its selected output without automatically backing that output up.
 
 The process view uses the same file-backed authoring surface. Set the complete block list from
 JSON with `set-progress` (or grow it with `add-block` / `edit-block`), then give every node its
@@ -291,14 +297,22 @@ CLI's `delete` does this with you: it refuses until every incoming edge is retar
 
 ## Safe Editing Process
 
-1. **Get current structure**
+1. **Load the complete baseline**
 
    ```typescript
    mcp__moira__manage({
-     action: "get-structure",
+     action: "get",
      workflowId: "my-workflow",
+     includeNodes: true,
+     includeValidation: true,
    });
    ```
+
+   Keep the returned revision and read all node definitions, connections, variable declarations,
+   runtime policy and progress bindings before choosing the affected dependency set. Omit node
+   pagination here; if you deliberately paginate, collect every page. `get-structure` is a summary,
+   not an editing baseline. Inspect referenced subgraphs or playbooks when the change depends on
+   them, within the authorized scope.
 
 2. **Find nodes to edit**
 
@@ -322,10 +336,14 @@ CLI's `delete` does this with you: it refuses until every incoming edge is retar
 
 4. **Apply changes**
 
+   Pass the baseline's returned revision as `expectedRevision`. On conflict, reload the current
+   definition and reconcile the intended change; do not overwrite a newer graph blindly.
+
    ```typescript
    mcp__moira__manage({
      action: "edit",
      workflowId: "my-workflow",
+     expectedRevision: baselineRevision,
      changes: {/* ... */},
    });
    ```
@@ -401,7 +419,7 @@ both accept `expressions` that run before them. A node's outcomes are its `cases
       changes: {
         cases: [
           {
-            when: { operator: "eq", left: { contextPath: "status" }, right: "success" },
+            when: { operator: "eq", left: { contextPath: "inspection.status" }, right: "success" },
             output: "passed",
           },
         ],
@@ -415,7 +433,8 @@ both accept `expressions` that run before them. A node's outcomes are its `cases
 }
 ```
 
-On an agent-directive node the same three fields are edited the same way. Its default output is
+Here `inspection.status` is a field produced by an existing inspection node. On an agent-directive
+node the same three fields are edited the same way. Its default output is
 `success` rather than `default`, its cases read the context after the node's own validated answer
 has been merged, and `error`/`timeout` stay reserved for control flow — no case may name them:
 
@@ -428,7 +447,7 @@ has been merged, and `error`/`timeout` stay reserved for control flow — no cas
         expressions: ["review_round = review_round + 1"],
         cases: [
           {
-            when: { operator: "eq", left: { contextPath: "review_verdict" }, right: "blocked" },
+            when: { operator: "eq", left: { contextPath: "review.verdict" }, right: "blocked" },
             output: "blocked",
           },
         ],
@@ -441,6 +460,9 @@ has been merged, and `error`/`timeout` stay reserved for control flow — no cas
   ];
 }
 ```
+
+The review node must declare `verdict` in its response schema, and `review_round` must be a declared,
+initialized numeric global before this expression increments it.
 
 **Decide on the node that has the evidence.** When a step's own answer decides where the run goes,
 move the cases onto that step and let `success` carry the remaining outcome; a single-purpose
@@ -534,6 +556,7 @@ mcp__moira__manage({
       type: "agent-directive",
       id: "inserted-node",
       directive: "New step",
+      completionCondition: "The new step's stated result is verified",
       connections: { success: "original-target" }
     }
   ],

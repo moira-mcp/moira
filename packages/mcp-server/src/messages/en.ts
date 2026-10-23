@@ -89,13 +89,13 @@ export const ERRORS = {
   admin_only_setting: (key: string) => `Setting '${key}' is admin-only`,
 
   // Execution state errors
-  // Issue #386: "waiting" merged into "running"
+  // Active executions retain running status while waiting for input.
   cannot_edit_execution: (status: string) =>
     `Cannot edit execution in state '${status}'. Only 'running' executions can be edited.`,
 
   // Help/Documentation errors
-  documentation_file_not_found: (file: string, docsDir: string) =>
-    `Documentation file not found: ${file}\n\nMake sure DOCS_DIR is configured correctly. Current: ${docsDir}`,
+  documentation_file_not_found: (file: string, helpDirectory: string) =>
+    `Documentation file not found: ${file}\n\nCheck that the MCP package includes its portable help content. Current directory: ${helpDirectory}`,
   unknown_help_topic: (topic: string) => `Unknown topic: ${topic}`,
 
   // File/Token errors

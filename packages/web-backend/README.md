@@ -1,206 +1,39 @@
-# MCP Moira Backend API Server
+# @mcp-moira/web-backend
 
-Express.js API server for MCP Moira workflow visualization system.
+Express HTTP backend for workflow authoring, execution views, account/settings administration and
+authenticated workspace/controller transport. It composes the shared application services and the
+workflow engine; persisted workflow and execution state belongs to SQLite.
 
-## 🚀 Quick Start
+## Develop and verify
 
-All development happens through Docker containers.
-
-```bash
-# From project root
-npm run docker:restart  # Build and run Docker
-```
-
-## 📡 API Endpoints
-
-### Health & Configuration
-
-- `GET /api/health` - System health check
-- `GET /api/config` - Server configuration
-- `GET /api/status` - Detailed system status
-
-### Workflow Management
-
-- `GET /api/workflows` - List all workflows grouped by folder
-- `GET /api/workflows/:folder` - Get workflows from specific folder
-- `GET /api/workflows/:folder/:id` - Get specific workflow for visualization
-- `GET /api/workflows/:folder/:id/raw` - Get raw workflow JSON
-- `POST /api/workflows/:folder/:id/validate` - Validate workflow
-
-### Folder Management
-
-- `GET /api/folders` - Get available workflow folders
-
-## 🔧 Configuration
-
-### Environment Variables
+Use the root workspace and [contributor setup](../../docs/development/getting-started.md).
+The existing contributor container helper builds and runs the application:
 
 ```bash
-# Server
-NODE_ENV=development
-WEB_BACKEND_PORT=4201
-BACKEND_HOST=localhost
-
-# Workflow directories
-WORKFLOW_DIRS=workflows/production,workflows/tests
+npm run docker:restart
+npm run docker:stop
 ```
 
-### Default Configuration
+Select the target environment and unused public port before starting it. The
+[testing guide](../../tests/TESTING-GUIDE.md) owns focused API/integration commands and fixture
+boundaries; [configuration](../../docs/operator/configuration.md) owns origins and environment settings.
 
-- **Port:** 4201 (internal, accessed via nginx proxy on DOCKER_PORT)
-- **Workflow Directories:** `workflows/production`, `workflows/tests`
-- **CORS:** Configured dynamically via `getBaseUrl()` + `EXTRA_TRUSTED_ORIGINS` env var
-- **Caching:** Disabled (always reads fresh from disk)
-- **File Watching:** Disabled (manual updates only)
+## HTTP and domain boundaries
 
-## 🏗️ Architecture
+Routes are mounted in [`src/server.ts`](src/server.ts). `/api` provides discovery; the
+[HTTP reference](../../docs/reference/http-api.md) owns current paths, request fields, admission,
+pagination and response exceptions. Public health is `/api/health`, with configuration and detailed
+status at `/api/health/config` and `/api/health/status`. Definitions are identified by server ID or
+authorized slug/reference, not filesystem folder routes.
 
-### Directory Structure
+Apply authorization at the owning route/domain boundary. Public health/discovery, browser sessions,
+one-purpose download grants and private controller credentials have different admission contracts;
+do not wrap them in a blanket session requirement. Private binary transport authenticates before
+reading its body and bypasses ordinary JSON logging.
 
-```
-backend/src/
-├── routes/              # API route handlers
-│   ├── health.ts       # Health and configuration endpoints
-│   └── workflows.ts    # Workflow management endpoints
-├── services/           # Business logic services
-│   ├── file-service.ts # No-cache file operations
-│   └── validation-service.ts # MCP validation integration
-├── middleware/         # Express middleware
-│   ├── cors-middleware.ts # CORS configuration
-│   └── error-middleware.ts # Error handling
-├── utils/              # Utility functions
-└── server.ts           # Main server application
-```
-
-### Integration Strategy
-
-- **No Existing Code Changes:** Import-only approach with MCP engine
-- **Shared Types:** Uses `@shared` package for type safety
-- **MCP Validation:** Integrates existing validation system
-- **Fresh Data:** No caching, always reads from disk
-
-## 🔒 Security & Authentication
-
-### Authentication
-
-- **Better Auth:** OAuth 2.1 authentication framework
-- **Session Middleware:** requireAuth protects all /api/_ routes (except /api/auth/_)
-- **Better Auth Routes:** /api/auth/\* handled by toNodeHandler(auth)
-- **OAuth Endpoints:** /.well-known/oauth-protected-resource, /.well-known/oauth-authorization-server
-
-### Protected Routes
-
-All API routes require authentication:
-
-```typescript
-// Middleware automatically adds userId to req.userId
-app.use("/api/health", requireAuth, healthRoutes);
-app.use("/api/workflows", requireAuth, workflowRoutes);
-```
-
-### CORS
-
-- **Development:** origin: true, allowedHeaders: '\*' (MCP Inspector cross-origin)
-- **Production:** CORS whitelist based on MOIRA_HOST environment variable
-- **Production:** Strict origin whitelisting
-- **Credentials:** enabled for cookie-based sessions
-
-### Security Headers
-
-- **Helmet.js:** CSP, XSS protection, HSTS
-- **Input Validation:** Path traversal and injection prevention
-- **Error Handling:** No sensitive data in error responses
-
-## 🧪 Testing
-
-```bash
-# Health check
-curl http://localhost:${DOCKER_PORT}/api/health
-
-# Get workflows
-curl http://localhost:${DOCKER_PORT}/api/workflows
-
-# Get specific workflow
-curl http://localhost:${DOCKER_PORT}/api/workflows/production/example-conditional
-```
-
-## 📊 Monitoring
-
-### Health Check Response
-
-```json
-{
-  "success": true,
-  "data": {
-    "status": "ok",
-    "services": {
-      "fileSystem": true,
-      "validation": true,
-      "mcpEngine": true
-    },
-    "uptime": 3600,
-    "timestamp": "2025-09-03T02:00:00.000Z",
-    "version": "0.1.0"
-  }
-}
-```
-
-### Error Response Format
-
-```json
-{
-  "success": false,
-  "error": {
-    "code": "WORKFLOW_NOT_FOUND",
-    "message": "Workflow not found: example in folder production",
-    "timestamp": "2025-09-03T02:00:00.000Z"
-  }
-}
-```
-
-## 🔄 Development Workflow
-
-All development happens through Docker containers:
-
-```bash
-# From project root
-npm run docker:restart  # Build and run all services
-# Access: http://localhost:${DOCKER_PORT}
-```
-
-## 🚀 Production Deployment
-
-```bash
-# Deploy to production (${MOIRA_HOST})
-npm run deploy:prod
-
-# Deploy to staging
-npm run deploy:staging
-```
-
-## 📋 API Documentation
-
-Full API documentation available at: `http://localhost:${DOCKER_PORT}/api`
-
-## 🔗 Integration
-
-### With Frontend
-
-```typescript
-// Frontend API client usage
-import { ApiClient } from "@shared";
-
-const client = new ApiClient("http://localhost:${DOCKER_PORT}");
-const workflows = await client.getWorkflows();
-```
-
-### With MCP Engine
-
-```typescript
-// Backend MCP integration
-import { GraphValidator } from "@mcp-core/graph/validation/graph-validator.js";
-import { WorkflowGraph } from "@shared";
-
-const validator = new GraphValidator();
-const result = await validator.validate(workflow);
-```
+Use the single owners for [architecture](../../docs/development/architecture.md),
+[execution and replay](../../docs/reference/execution.md),
+[authentication](../../docs/reference/authentication.md),
+[workspaces](../../docs/reference/workspaces.md) and
+[observability](../../docs/development/observability.md). A route status alone does not prove that
+no state or external effect was committed.

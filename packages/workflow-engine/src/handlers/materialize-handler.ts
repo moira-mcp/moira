@@ -1,12 +1,12 @@
 import {
   ConfigurationError,
   DatabaseError,
-  getBaseUrl,
   InternalError,
-  TokenManager,
   ValidationError,
-  metadataRevision,
-} from "@mcp-moira/shared";
+} from "@mcp-moira/shared/errors";
+import { getBaseUrl } from "@mcp-moira/shared/urls";
+import { TokenManager } from "@mcp-moira/shared/services/token-manager";
+import { metadataRevision } from "@mcp-moira/shared/metadata-revision";
 import type { INodeHandler } from "../interfaces/core-interfaces.js";
 import type { IDataRepository } from "../interfaces/data-repository.js";
 import type { IGraphExecutionEngine } from "../interfaces/graph-execution-engine.js";

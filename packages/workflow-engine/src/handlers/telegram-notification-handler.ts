@@ -1,5 +1,5 @@
 /**
- * Telegram Notification Handler V1 - Automated external notifications
+ * Telegram Notification Handler - Automated external notifications
  * Executes automatically without agent interaction, sends Telegram messages
  */
 
@@ -24,13 +24,10 @@ import {
   getActionableTelegramErrorMessage,
 } from "../types/telegram-types.js";
 import { GraphTemplateProcessor } from "../templates/graph-template-processor.js";
-import {
-  createLogger,
-  WorkflowLogger,
-  InternalError,
-  communicationOwnerReceiptSchema,
-  metadataRevision,
-} from "@mcp-moira/shared";
+import { createLogger, type WorkflowLogger } from "@mcp-moira/shared/logging/logger";
+import { InternalError } from "@mcp-moira/shared/errors";
+import { communicationOwnerReceiptSchema } from "@mcp-moira/shared/communication-owner-protocol";
+import { metadataRevision } from "@mcp-moira/shared/metadata-revision";
 import {
   getActiveCommunicationFileOwner,
   type CommunicationFileOwner,

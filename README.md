@@ -1,90 +1,71 @@
 # MCP Moira
 
-Agent Workflow Engine for AI agents.
+Moira is a workflow engine for AI agents. An agent connects through the Model Context Protocol
+(MCP), receives the current instruction and completion criteria, performs the work, and submits a
+schema-checked response. Moira persists execution state so another agent session can continue the
+same run. The Web UI provides workflow editing, run inspection and account administration.
+Schema validation checks a response's structure; it does not prove that the work happened.
 
-**Primary users:** AI agents via MCP protocol. Web UI is supplementary for workflow management.
+Run the open-source application on your own infrastructure, or use the managed service at
+[moira-mcp.com](https://moira-mcp.com). This repository contains the engine, MCP server, Web API/UI,
+documentation and self-host deployment. See [the documentation index](docs/README.md) and
+[project structure](PROJECT-STRUCTURE.md) for source ownership.
 
-See [docs/VISION.md](docs/VISION.md) for product vision and design principles.
+## Self-host
 
-## Two ways to run Moira
-
-- **Self-host (this repository, Apache-2.0)** — run the full engine + Web UI + MCP
-  server and its ingress through Docker Compose on your own infrastructure. Free and open
-  source; your data stays with you. Start in the [Quick Start](#self-host-recommended)
-  below.
-- **Moira Cloud (managed)** — a hosted instance with nothing to operate, at
-  [moira-mcp.com](https://moira-mcp.com).
-
-Both run the **same engine and MCP tools**. Self-host is a single-tenant
-private-team deployment with administrator-approved accounts. Cloud adds managed
-hosting and SaaS-only policy and administration, including social login, legal
-consent, email verification, and the broader multi-user administration surface.
-
-## Architecture
-
-**Monorepo**: Clean separation of concerns with npm workspaces
-**Workflow Engine**: Node-graph execution over a set of node types (@mcp-moira/workflow-engine)
-**MCP Server**: HTTP protocol server exposing the MCP tools (@mcp-moira/mcp-server)
-**Web Backend**: Express API server (@mcp-moira/web-backend)
-**Web Frontend**: React UI with webpack (@mcp-moira/web-frontend)
-**Docs**: Astro 5 + Starlight documentation site, EN+RU (@mcp-moira/docs)
-**Shared**: Database layer + Better Auth + logging (@mcp-moira/shared)
-**Database**: Modular repository pattern with Drizzle ORM
-**Settings System**: Universal settings with encryption and dynamic UI generation
-**Docker Deployment**: Multi-stage container with TypeScript validation
-**Validation**: JSON Schema with AJV
-
-### Package Structure
-
-- **packages/workflow-engine/** - Core node-graph execution engine
-- **packages/extension-sdk/** - Typed authoring contract for custom nodes and communication channels
-- **packages/extension-runner/** - Isolated companion service for installed extension bundles
-- **packages/local/** - Paired controller for workspace provisioning and optional Docker Sandboxes microVMs
-- **packages/workspace-service/** - Common guest command, file and session service with its Unix-socket CLI
-- **packages/mcp-server/** - MCP protocol HTTP server with tools
-- **packages/web-backend/** - Express API for workflow management
-- **packages/web-frontend/** - React UI for workflow visualization
-- **packages/docs/** - Astro 5 + Starlight documentation site (EN+RU), built into the image and served at `/docs`
-- **packages/shared/** - Database layer (schema, connection, repositories) + Better Auth + logging
-  - `database/` - Modular repositories (Workflow, Execution, Settings)
-  - `auth/` - Better Auth configuration
-  - `logging/` - Structured logging
-- **Docker Config** (`config/`) - Unified container deployment configuration
-
-## Quick Start
-
-### Self-Host (recommended)
-
-Run a complete Moira instance locally with Docker — no source build required:
+Install Docker with the Compose plugin. Use this checkout, or download the three deployment files
+following the [Self-Hosting guide](packages/mcp-server/src/help/content/getting-started/self-hosting.md#quick-start):
+`docker-compose.yml`, `.env.example` and `config/traefik-self-host.yml`. Keep the ingress configuration
+beside the Compose file.
 
 ```bash
-cp .env.example .env       # defaults work locally; review host, port, and artifact domain for another host
+cp .env.example .env
 docker compose up -d
 ```
 
-Then open:
+The localhost defaults pull the public image without a source build. Open:
 
-- **Web UI**: http://localhost:8080
-- **Documentation**: http://localhost:8080/docs/
-- **MCP endpoint**: http://localhost:8080/mcp
+- Web UI: <http://localhost:8080>
+- Documentation: <http://localhost:8080/docs/> (English) or <http://localhost:8080/ru/docs/> (Russian)
+- MCP endpoint: <http://localhost:8080/mcp>
 
-Compose starts the application and static Traefik ingress on the same public port. Keep
-`config/traefik-self-host.yml` with the Compose file; the [Self-Hosting guide](packages/mcp-server/src/help/content/getting-started/self-hosting.md)
-includes the three-file download procedure. The ingress forwards `/api/workspaces/` HTTP/1.1 Upgrade
-directly to backend port 3001 and ordinary traffic to nginx 80, without Docker socket access.
-Its application `TRUST_PROXY` default is 2; configure explicit trusted proxy addresses for another
-ingress topology. A standalone frontend-port mapping is not the supported workspace stream route.
+For another host, set `MOIRA_HOST`, `MOIRA_PORT` and `STATIC_ARTIFACTS_DOMAIN` together in `.env`.
+Published HTML artifacts use individual subdomains of the artifact domain; public deployments need
+the matching DNS and wildcard TLS. Preserve the supplied workspace Upgrade route through ingress;
+an ordinary frontend-port mapping is not equivalent. Configure proxy trust for your actual topology.
+See [deployment configuration](docs/operator/configuration.md) for origins, secrets, email and network admission.
 
-The image is pulled from the public registry by default. Cloud account, workflow and execution
-data persists in `./data`. Workspace files, operation results and immutable file publications stay
-in the workspace service or paired controller's private storage. Back up those owner stores with
-their VM disks; a cloud database backup does not contain their file bytes.
-See [Self-Hosting](#self-host-recommended) or the in-app docs
-at `/docs/` for the full reference.
+Self-host registration requires administrator approval. On first start the image generates missing
+secrets and prints the generated administrator password once; the default administrator email is
+`admin@moira.local`. Preserve `data/.secrets.env` with the database. Sign in, then approve new
+accounts through **Admin Panel → Users**. Self-host uses email/password; social login and broader
+cross-user administration/analytics follow the separate SaaS policy. See
+[account administration](docs/operator/accounts.md) for approval, blocking, password recovery and
+administrator access recovery, including installations without real email delivery.
 
-### Updating / Upgrading
+## Connect an agent and use workflows
 
-Update a normal self-host installation with the standard Compose commands:
+Connect your MCP client to your instance's `/mcp` endpoint and complete its authenticated
+authorization flow. Use the [MCP Clients guide](packages/docs/src/content/docs/docs/integration/mcp-clients.mdx)
+for the configuration generated for each supported client. The connection name `moira-local` is a
+client label, independent of the optional Local companion executable.
+
+Ask the agent to discover available workflows and choose the current exact `owner/slug` for the
+task. The [workflow catalog](packages/docs/src/content/docs/docs/reference/workflows/index.mdx)
+explains the choices; the [Agent Guide](packages/mcp-server/src/help/content/integration/agent-guide.md)
+owns prepare/execute, step attempts, continuation and guarded cancellation. Runtime `help` discovers
+English topics; `help({ topic: "tools" })` renders the current typed tool catalog. The website also
+provides Russian translations.
+
+Use [workflow authoring](packages/mcp-server/src/help/content/guides/workflow-creation.md) and the
+[workflow CLI](docs/reference/workflow-cli.md) to create or edit definitions. Node syntax, templates,
+tool schemas and examples stay in their canonical references rather than a second README catalog.
+For public HTML results, see [artifacts](packages/mcp-server/src/help/content/concepts/artifacts.md)
+for upload, ownership, quotas, expiry and browser isolation.
+
+## Update and recover
+
+Use the image selection in your installation's `.env`, then:
 
 ```bash
 docker compose pull
@@ -92,70 +73,28 @@ docker compose up -d
 docker compose ps
 ```
 
-Older `.env` files may still override Compose with the removed `0.3.5` tag; change that line once to
-`MOIRA_IMAGE=ghcr.io/moira-mcp/moira:latest` before updating.
+Before startup migrations of an existing self-host database, the image verifies a coherent SQLite
+snapshot and the prompt-manifest state. It retains rotating recovery states and an interruption
+marker; failure attempts restoration and keeps services unavailable. A first start has a separate
+cleanup path because no previous database exists. These safeguards do not replace operator backups.
+If initialization fails, inspect `docker compose logs moira` and follow
+[Updating and Recovery](packages/mcp-server/src/help/content/getting-started/self-hosting.md#updating-and-recovery);
+do not bypass the guard or repeatedly restart an unchanged failure. A confirmed bundled-workflow
+conflict uses the [catalog reconciliation procedure](docs/reference/bundled-catalog.md#self-host-conflict-recovery).
 
-The image protects existing self-host data before its startup migrations: it creates and verifies a
-coherent SQLite backup, includes the prompt manifest, and keeps three rotating recovery states under
-`data/.moira-startup-backups/`. If initialization fails, it restores the database and manifest before
-refusing to start the services. A persistent pending marker also restores the verified state before the
-next attempt if the container or host was interrupted mid-initialization. A fresh installation skips
-the nonexistent-database backup and uses only a temporary persistent marker so an interrupted first
-start is removed before retry.
+Application accounts, workflows and executions persist in `./data`. Workspace files, full command
+output, operation receipts and immutable publications remain with their workspace service or paired
+controller. Back up those private owner stores and disks separately; a database backup does not
+contain their file bytes. Preserve encryption keys, and collect original operations after uncertain
+outcomes before considering another mutation. See [workspace recovery](docs/reference/workspaces.md#recovery-and-collection)
+and [GitHub Releases](https://github.com/moira-mcp/moira/releases).
 
-The complete automatic recovery behavior and optional pinned-image preflight are documented in
-[Self-hosting: Updating and Recovery](packages/docs/src/content/docs/docs/getting-started/self-hosting.mdx#updating-and-recovery), with a matching [Russian version](packages/docs/src/content/docs/ru/docs/getting-started/self-hosting.mdx#обновление-и-восстановление). Release notes are on the [GitHub Releases](https://github.com/moira-mcp/moira/releases) page.
+## Optional workspace and extension support
 
-### Local Development (from source)
-
-For contributors who want to build and run from the source tree, switch
-`docker-compose.yml` to **Option B** first — comment out the `image:` line and
-uncomment the `build:` block (the file documents both options inline). Then:
-
-```bash
-nvm use
-npm install
-docker compose up -d --build   # builds the image locally from config/Dockerfile
-# Web UI: http://localhost:8080  |  MCP: http://localhost:8080/mcp
-```
-
-(The default `docker-compose.yml` uses the prebuilt public image — `docker compose
-up -d` without `--build` — which is the recommended self-host path.)
-
-### Extensions (optional)
-
-Custom node and ordinary text-channel handlers run in the separate extension runner and are disabled by default. File-capable channels additionally declare a fixed `binaryTransport` and run their streaming `binaryHandler` beside the source at its workspace or paired controller. Enabling extensions
-requires this source checkout because the runner image is built locally; the published Moira image
-does not import or package bundle code.
-
-```bash
-mkdir -p extensions
-cp -R examples/extensions/webhook-notify extensions/
-printf '\nMOIRA_EXTENSION_RUNNER_URL=http://moira-extension-runner:9110\n' >> .env
-docker compose --profile extensions up -d --build
-```
-
-Before starting the example, replace both placeholder network permissions and fill its per-user
-settings. The example contributes both a workflow action node and an ordinary notification channel.
-See [Self-hosting: Enable
-extensions](packages/docs/src/content/docs/docs/getting-started/self-hosting.mdx#enable-extensions)
-and [Writing an
-Extension](packages/docs/src/content/docs/docs/guides/writing-extensions.mdx) for the complete
-installation, SDK, permission and failure contracts. `npm run test:docker-extensions` verifies the
-default-off profile and read-only bundle mount.
-
-### Local codespaces on your computer
-
-Moira Local connects a paired controller to your Moira account through outbound HTTPS. The controller
-can provision the common service in GitHub Codespaces and can run locally approved repositories in
-persistent, mountless Docker Sandboxes microVMs. Enrollment and controller startup require no Local
-VM initialization or Docker sign-in. Public read-only Local work needs no GitHub App connection;
-private Git and write operations use repository-scoped credentials derived from the account's
-server-held GitHub authorization.
-
-The controller requires Node.js 24. Its optional physical Local VM capability requires macOS on
-Apple silicon and the pinned Docker Sandboxes `sbx` 0.46.0 runtime; Linux Local VM execution is
-refused. From this source checkout:
+The paired Local controller can provision the common workspace service in GitHub Codespaces and
+run approved repositories in Local microVMs. Controller enrollment does not require initializing
+a physical Local VM. Local VM execution requires the supported macOS Apple-silicon runtime and
+explicit owner grants; repository Git authority is separate from social login. From the checkout:
 
 ```bash
 npm ci
@@ -163,638 +102,41 @@ npm run local:build
 npm run local -- --help
 ```
 
-The package is private and is not a published global npm installer. Pair the controller through
-**Settings → Development → Local computers**; the pairing token reaches the companion through stdin.
-For Local VM work, initialize the physical capability, approve repository rights and enable
-work on that computer. Permission remains enabled until you explicitly disable it. Review
-effective owner grants in the browser before remote work.
-`npm run local -- run` starts or connects to the persistent login-started host owner and returns;
-closing the client does not stop its VMs. `install` stages a complete immutable release without
-replacing that running owner. Inspect `service-status` before an explicit interrupting
-`maintenance --confirm` update. Maintenance preserves disks and original receipts, requires exact
-old-owner settlement and reports each VM's recovery separately; it never replays commands.
-See [Codespaces: Moira Local](docs/CODESPACES.md#moira-local-companion)
-for setup, run, stop, recovery and the limits of isolation evidence. Codespace contents are visible
-to Moira; review returned code before executing it on your computer. The `moira-local` MCP connection
-name in the examples below is independent of the companion executable.
+Follow [workspace setup and custody](docs/reference/workspaces.md) for pairing, physical capability,
+permissions, installation and explicit maintenance. Staging a release does not replace the running
+owner; client exit does not stop its VMs. The common `moira-workspace` guest CLI owns commands, files,
+sessions and original results in both Local and GitHub guests. Lost replies require collecting the
+original operation, not replaying the command or creating a replacement environment.
 
-The same workspace service owns commands, files, sessions and output in Local and GitHub guests.
-The Local owner prepares its guest; the paired controller saves GitHub machine and idle/retention
-choices and performs fixed provisioning or explicit in-place adoption. Cloud Moira brokers fixed
-provider calls with current authorization and billing checks. The service includes its own Node.js 24.21.0 and ripgrep 15.2.0, independent of
-project Node/PATH. Inside a prepared workspace, `~/.local/bin/moira-workspace --help` exposes the
-direct Unix-socket CLI. Purpose-specific tools return workspace, operation and process references;
-copy them unchanged instead of choosing request IDs or generations. After a lost reply, collect
-the returned operation, or discover original candidates with `operation_find` and select explicitly.
-No match does not prove that the effect never happened. Command output and file bytes stream without Moira byte/concurrency/runtime
-quotas; explicit observation/deadline options, real storage capacity and repository/owner guards
-remain. A ready published attachment can be sent through
-the separately requested `communication_deliver_publication` tool. See
-[File operations and native transfer](docs/CODESPACES.md#file-operations-and-native-transfer)
-for current authority, link expiry and guarded target replacement. The common OCI image is
-`ghcr.io/moira-mcp/moira-workspace-service`; a project keeping its own Linux Dev Container can use
-the optional `ghcr.io/moira-mcp/features/workspace-service` Feature with a published release tag.
-Host lifecycle commands use returned references to call the running owner controller;
-`collect OPERATION_REF` inspects an original controller operation without repeating work.
-Creation also needs cloud route registration and initial Git authority. Existing owner-admitted
-Local work and its guest CLI remain subject to current local grants and enabled permission during a temporary
-cloud outage. A confirmed authority refusal does not grant offline access. Raw host `request` and
-credential-export commands are unsupported; `recover` remains an explicit custody action.
-After repairing a preparation prerequisite, `resume-setup` continues the same proved incomplete
-VM and disk without changing the original create result or replacing user files. Unknown creation
-remains collection of its original operation.
+Extensions are disabled by default. The optional Compose profile builds a separate runner from this
+checkout; binary channels execute beside their source owner. Follow
+[Enable extensions](packages/mcp-server/src/help/content/getting-started/self-hosting.md#enable-extensions)
+and [Writing an Extension](packages/mcp-server/src/help/content/guides/writing-extensions.md) for bundle
+installation, permissions, user settings and failure boundaries.
 
-For GitHub, a repository without the workspace Feature needs an online assigned controller for
-fixed installation. An existing environment uses explicit adoption without replacement; a checked-in
-Feature is an opt-in startup path. A working guest Unix API is ready independently of cloud
-reachability; remote work requires authenticated outbound registration. Temporary registration or
-network failure reconnects observation, while confirmed refusal retires that remote authority.
-Neither condition replays commands or lifecycle operations.
-GitHub setup continuation requires the original measured root, guest life and release; it does
-not reinstall the service or start the provider. An enrolled guest can renew its remote authority
-after a cold start while its Unix API is already usable. A never-enrolled guest cannot replace
-its original setup proof after its life changes.
+## Contribute
 
-Workflow materialization resolves authorized text in Moira and creates its UTF-8 tar at a selected
-paired controller. The download grant pins that controller and original publication request; repeated
-reads collect the same immutable archive without rendering again or choosing another owner. If the
-first publication is unconfirmed, collect that grant or request a fresh current-step presentation for
-an explicit retry. The in-context `session materialize` fallback requires no file owner and retains
-its separate response-size budget.
-
-### Testing
-
-The integration/API/E2E suites run against a local Docker container, configured by
-`.env.local`. Copy the template once before running them (or before
-`npm run docker:restart`):
+Read [CONTRIBUTING](CONTRIBUTING.md) for issue coordination, pull requests, DCO and release policy.
+Use Node.js 24 and the root npm workspace:
 
 ```bash
-cp .env.local.example .env.local   # then set BETTER_AUTH_SECRET
-npm test              # All tests
-npm run test:unit     # Unit tests only (no container needed)
-npm run test:e2e      # E2E tests
+nvm use
+npm ci
 ```
 
-### Code Quality
-
-```bash
-npm run fix                   # ESLint + Prettier fix all files
-```
-
-**Configuration in `.env`** (copy from `.env.example`):
-
-- MOIRA_PORT: External access port (default 8080)
-- MOIRA_HOST: Public host:port the instance is served on (default localhost:8080)
-- STATIC_ARTIFACTS_DOMAIN: Wildcard subdomain base for published artifacts
-- BETTER_AUTH_SECRET: generated and persisted on first start when empty; set it
-  explicitly only when you want to manage the auth signing secret yourself
-- Database: SQLite at `./data/moira.db` (bind-mounted, persists across restarts)
-- Admin: ADMIN_EMAIL, ADMIN_PASSWORD (auto-generated on first start if unset)
-
-## Authentication
-
-MCP Moira uses Better Auth with OAuth 2.1 for centralized authentication.
-
-**Browser Access:**
-
-- Email/password login at http://localhost:8080/login
-- GitHub/Google OAuth (saas mode only; disabled in self-host)
-- Better Auth UI components (Tailwind + shadcn/ui)
-
-**MCP Clients:**
-
-- OAuth 2.1 authorization code flow
-- HTTP 401 triggers OAuth discovery
-- Dynamic Client Registration (DCR) supported
-- Access token required for all MCP tool calls
-
-**Protected:**
-
-- All MCP tools require authentication
-- Account API routes require authenticated access; public capability routes enforce their own
-  narrower grants
-- The guest workspace's outbound connection receives authority for that resource and measured
-  environment only; it receives no full MCP, GitHub or communication credential
-- Shared middleware and service guards enforce the required account and resource authority
-
-**Testing:**
-
-```bash
-docker compose up -d
-# Access:        http://localhost:8080/login
-# MCP Inspector: http://localhost:8080/mcp
-```
-
-See [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) for complete setup and OAuth flow details.
-
-### MCP Configuration
-
-Point your MCP client (e.g. Claude Code) at your running instance:
-
-| Server        | URL                       | Purpose                       |
-| ------------- | ------------------------- | ----------------------------- |
-| `moira-local` | http://localhost:8080/mcp | Your local self-host instance |
-
-```json
-{
-  "mcpServers": {
-    "moira-local": { "url": "http://localhost:8080/mcp" }
-  }
-}
-```
-
-> Replace `localhost:8080` with your own host/port (`MOIRA_HOST`) if you serve Moira
-> on a different address.
-
-## Representative Node Examples
-
-The examples below show common graph patterns; they are not the complete node-type inventory. See
-the [Nodes reference](packages/docs/src/content/docs/docs/concepts/nodes.mdx) for every supported
-type and its current contract, including automatic note operations and file materialization.
-
-### Start Node
-
-```json
-{
-  "type": "start",
-  "id": "start",
-  "connections": { "default": "next-node-id" }
-}
-```
-
-### Agent Directive Node
-
-```json
-{
-  "type": "agent-directive",
-  "id": "task",
-  "directive": "Task instruction",
-  "completionCondition": "Success criteria",
-  "inputSchema": {/* JSON Schema */},
-  "connections": { "success": "next-node-id" }
-}
-```
-
-### Condition Node
-
-```json
-{
-  "type": "condition",
-  "id": "check",
-  "cases": [
-    {
-      "when": { "operator": "gte", "left": { "contextPath": "score" }, "right": 8 },
-      "output": "passed"
-    }
-  ],
-  "connections": {
-    "passed": "success-path",
-    "default": "failure-path"
-  }
-}
-```
-
-`cases` are evaluated in authored order; the first case whose `when` holds selects its `output`,
-and `default` is taken when none holds.
-
-### User Notification Node
-
-```json
-{
-  "type": "user-notification",
-  "id": "notify",
-  "message": "Task completed: {{result}}",
-  "format": "plain",
-  "connections": { "default": "next-node-id" }
-}
-```
-
-The node fans out to the current user's enabled communication channels and never accepts provider,
-recipient, or credential fields. The deprecated `telegram-notification` node remains available for
-existing Telegram-specific workflows, including exact explicit `chatId` semantics.
-
-### End Node
-
-```json
-{
-  "type": "end",
-  "id": "end",
-  "finalOutput": ["result", "score"]
-}
-```
-
-### Expression Node
-
-```json
-{
-  "type": "expression",
-  "id": "increment-counter",
-  "expressions": ["counter = counter + 1"],
-  "connections": { "default": "next-step" }
-}
-```
-
-### Teleport Node
-
-```json
-{
-  "type": "teleport",
-  "id": "teleport-replan",
-  "directive": "Rewrite the development plan",
-  "completionCondition": "New plan created",
-  "hint": "Use when plan needs restructuring",
-  "connections": { "success": "plan-node" }
-}
-```
-
-### Subgraph Node
-
-```json
-{
-  "type": "subgraph",
-  "id": "run-subtask",
-  "graphId": "subtask-workflow",
-  "inputMapping": { "parentVar": "subVar" },
-  "outputMapping": { "subResult": "parentResult" },
-  "connections": { "success": "next-step" }
-}
-```
-
-### Lock Node
-
-```json
-{
-  "type": "lock",
-  "id": "approval-gate",
-  "reason": "Waiting for user approval before deployment",
-  "connections": { "unlocked": "next-step" }
-}
-```
-
-Pauses execution until explicitly unlocked. Sends PIN via Telegram with inline approve button. Unlockable via MCP tool, web UI, or Telegram callback.
-
-## Workflow Format
-
-```json
-{
-  "id": "workflow-id",
-  "metadata": {
-    "name": "Workflow Name",
-    "version": "1.0.0",
-    "description": "What this workflow does"
-  },
-  "nodes": [/* Node definitions */]
-}
-```
-
-## Templates
-
-Variables processed in `directive`, `completionCondition`, and `message` fields:
-
-- `{{variable}}` - Context variable
-- `{{nested.path}}` - Object property access
-- `{{executionId}}` - System: current process ID
-- `{{workflowId}}` - System: current workflow ID
-- `{{runUrl}}` - System: the run's page in the web app
-
-## MCP Tools
-
-```bash
-# Workflow Management
-list
-start {"workflowId": "workflow-id"}
-step {"processId": "process-id", "input": "data"}
-manage {"action": "create", "workflow": {...}}
-manage {"action": "edit", "workflowId": "workflow-id", "changes": {...}}
-manage {"action": "get", "workflowId": "workflow-id"}
-
-# Session Information
-session {"action": "user"}
-session {"action": "executions"}
-session {"action": "execution_context", "executionId": "execution-id"}
-session {"action": "current_step", "executionId": "execution-id"}
-
-# Execution Locking
-lock {"action": "lock", "executionId": "execution-id", "reason": "Awaiting approval"}
-lock {"action": "unlock", "executionId": "execution-id", "pin": "123456"}
-lock {"action": "status", "executionId": "execution-id"}
-lock {"action": "list"}
-
-# User Settings
-settings {"action": "get"}
-settings {"action": "get", "category": "codespaces"}
-settings {"action": "set", "key": "codespaces.idle_timeout_minutes", "value": 60}
-settings {"action": "list"}
-
-# Workflow Tokens
-token {"action": "upload", "ttlMinutes": 60}
-token {"action": "download", "workflowId": "workflow-id", "ttlMinutes": 60}
-
-# User Communication
-communication_send {"message": "The report is ready."}
-communication_deliver_publication {"publication": "<returned publication reference>", "message": "Report", "kind": "document"}
-operation_get {"reference": "<returned operation reference>"}
-
-# Documentation
-help
-help {"topic": "tools"}
-help {"topic": "step"}
-```
-
-File delivery requires its source owner. Keep the returned operation reference and collect it
-after uncertainty. If the first reply was lost, discover receipts at the selected owner and
-choose the original explicitly; never automatically send again. Collection never sends again.
-Owner publications contain immutable bytes and support repeated reads until expiry under
-current authority. Ordinary text, waiting reminders and trusted lock PIN delivery need no
-file owner. Optional workflow progress images can be omitted while text sends independently;
-an explicit file delivery cannot silently succeed as text. Progress-image mint/read reports
-`COMMUNICATION_OWNER_UNAVAILABLE` with HTTP 503 when its paired controller is unavailable.
-
-## File Structure
-
-```
-packages/workflow-engine/  # Core execution engine
-packages/mcp-server/       # MCP HTTP server (internal port, behind nginx)
-packages/web-backend/      # Express API (internal port, behind nginx)
-packages/web-frontend/     # React UI (static build served by nginx)
-data/                      # SQLite database (moira.db)
-workflows/                 # Bundled public workflow catalog
-docs/                      # Technical documentation
-```
-
-## Development
-
-All development happens through Docker containers.
-
-```bash
-docker compose up -d --build  # Build and run the container
-npm test                      # Run all tests
-npm run fix                   # ESLint + Prettier fix
-```
-
-**Database**: SQLite at DB_PATH (default: ./data/moira.db)
-**Migrations**: Drizzle ORM (`npx tsx scripts/run-migrations.ts`)
-**Storage**: Workflows and executions in database with user isolation
-
-## Documentation
-
-**User Documentation**: Served by your running instance at `/docs/` (EN) and `/ru/docs/` (RU), built from `packages/docs` (Starlight).
-
-**Technical Documentation**: `/docs` directory - system reference, API specs, development guides.
-
-**[Project Checklist](docs/PROJECT_CHECKLIST.md)** - mandatory pre-commit checks executed by development workflows.
-
-## Claude Code Commands
-
-Custom slash commands in `/commands` directory. See [commands/README.md](commands/README.md) for installation and usage.
-
-## HTTP Transport
-
-### Architecture
-
-- **Stateless Mode**: Each HTTP request creates new transport, no session storage
-- **JSON-RPC 2.0**: MCP protocol over HTTP with proper error handling
-- **Direct Tools**: MCP tools integrated in single process
-- **Environment Inheritance**: HTTP server environment variables passed to tools
-
-### Endpoints
-
-```http
-POST /mcp     # JSON-RPC requests (tools calls)
-GET  /health  # Server health check
-```
-
-### Environment Variables
-
-```bash
-# Required for Telegram integration
-TELEGRAM_BOT_TOKEN=your_bot_token
-TELEGRAM_DEFAULT_CHAT_ID=your_chat_id
-
-# Optional
-MCP_PORT=4202  # Internal MCP server port (accessed via nginx proxy)
-LOG_LEVEL=info
-DEBUG_CONSOLE=true  # Console logging for development
-WORKFLOWS_DIR=./packages/web-backend/workflows/production
-```
-
-## Configuration
-
-MCP server configuration (see [MCP Configuration](#mcp-configuration) for details):
-
-```json
-{
-  "mcpServers": {
-    "moira-local": {
-      "url": "http://localhost:8080/mcp",
-      "type": "http"
-    }
-  }
-}
-```
-
-Environment variables passed via HTTP headers (recommended for HTTP transport).
-
-Alternative: Set environment variables in your `.env` file.
-
-## Code Quality
-
-### ESLint + Prettier
-
-Project uses ESLint with TypeScript support and Prettier for code formatting.
-
-```bash
-npm run fix   # Auto-fix lint errors and format code
-```
-
-**Pre-commit Hook:**
-Husky pre-commit hook automatically runs ESLint and Prettier on staged files.
-
-**Configuration:**
-
-- `.eslintrc.json` - ESLint rules (strict for production code, relaxed for tests)
-- `.prettierrc` - Prettier formatting rules
-- Production code: `any` types are errors, must be properly typed
-- Test code: `any` types allowed for flexibility
-
-## Security
-
-### Rate Limiting
-
-Protection against spam and DoS attacks with tiered limits:
-
-- **Ordinary API routes**: 100 requests/minute
-- **Auth routes** (`/api/auth/*`): 1000 requests/minute
-- **MCP endpoint** (`/mcp`): 1000 requests/minute
-- **Workspace channel**: resource-scoped authorization is checked separately; binary streams do not
-  pass through the ordinary JSON API body parser or its rate-limit queue
-
-Exceeded limits return HTTP 429 Too Many Requests.
-
-### Data Size Limits
-
-Protection against oversized payloads:
-
-- **Workflow JSON**: max 5MB
-- **Execution context**: max 10MB
-
-Exceeded limits return HTTP 413 Payload Too Large.
-
-### GeoIP Logging
-
-Request logging includes country detection via geoip-lite:
-
-```json
-{
-  "method": "POST",
-  "path": "/api/workflows",
-  "ip": "203.0.113.1",
-  "country": "US",
-  "duration": 45,
-  "status": 200
-}
-```
-
-## Admin Features
-
-### Administrator Overview
-
-The `/admin` page shows deployment-neutral system health and managed-workflow reconciliation.
-The Cloud `adminAnalytics` capability also enables recently active people, registrations,
-executions needing attention, popular flows and execution analytics. Each card has its own period.
-Activity means a recorded action or refreshed unexpired session, not continuous online presence.
-
-Analytics excludes current administrators by default. Individual exclusions and an explicit
-include-everyone choice are saved separately for each account in the current browser. Management
-lists and system health remain outside these exclusions; default self-host does not expose these
-installation-wide analytics.
-
-### User Management
-
-Admin panel at `/admin/users` provides:
-
-- **User list** with approval, email verification, and blocked status
-- **Work context** with recorded activity, accepted-step time, run count and most-used flows;
-  unknown activity or step time is identified explicitly
-- **User details** page with sessions, OAuth connections, email history
-- **Approve** pending self-host registrations
-- **Session management** - revoke individual sessions or all sessions
-- **OAuth management** - revoke tokens by provider or all OAuth connections
-- **Block/Unblock** users with reason
-- **Send verification email** manually
-- **Send password reset email** manually
-- **Set a temporary password** for an ordinary user when email delivery is unavailable
-
-### Execution Monitoring
-
-The Cloud `multiUserAdmin` capability enables the cross-user panel at `/admin/executions`. It is
-server-denied and hidden by the default self-host policy:
-
-- View all user executions
-- Filter by user, status
-- Search by execution ID, workflow ID or note
-- Read owner, note, lock/refusal badges, known start time and the last accepted step separately;
-  a record edit does not change step time, and missing timestamps are not fabricated
-- Open permitted run details, including recorded progress, locks and errors
-
-### Email History
-
-Track every email attempt:
-
-- Verification emails
-- Password reset emails
-- Notifications
-- Status (`sent`, `failed`, or log-only `logged`) with error messages
-
-## Email Features
-
-### Email Verification (SaaS)
-
-- Verification email sent on SaaS signup; self-host registration uses
-  administrator approval instead
-- Link expires in 24 hours
-- Admin can resend manually
-
-### Password Reset
-
-- With a real SMTP or Brevo provider, the user requests via `/forgot-password`
-  and receives a reset link
-- Link expires in 1 hour
-- Without real delivery, the reset form and email-send actions report the
-  capability as unavailable; an administrator can set a temporary password for
-  an ordinary user and require replacement at the next login
-
-### Email Provider
-
-Configured via environment variables:
-
-```bash
-EMAIL_PROVIDER=smtp          # smtp, brevo, auto, none, or explicit test sink
-EMAIL_FROM=noreply@domain    # Required for real delivery
-SMTP_HOST=smtp.example.com
-SMTP_PORT=587
-SMTP_REQUIRE_TLS=true
-# SMTP_USER and SMTP_PASSWORD are optional, but must be supplied together
-```
-
-Real delivery supports generic SMTP and Brevo. With `EMAIL_PROVIDER=auto` (or
-unset), a complete SMTP configuration takes precedence and a legacy
-`BREVO_API_KEY` plus `EMAIL_FROM` configuration remains supported. The explicit
-`test` provider logs messages and is never advertised as real delivery.
-
-## Documentation Map
-
-Where things are documented. After changing code, find the area below and update
-the matching file in the same change.
-
-### Public docs — MDX shells plus MCP-owned portable help
-
-Rendered pages live under `packages/docs/src/content/docs/docs/` (EN) and
-`packages/docs/src/content/docs/ru/docs/` (RU). Runtime-visible topics keep their semantic Markdown
-under `packages/mcp-server/src/help/content/`, with Russian counterparts under `…/content/ru/`.
-Each localized MDX shell imports its matching source through the MCP package. The `help` tool
-discovers and reads the English sources directly; pages with an interactive insertion compose the
-same authored before/after sections in runtime and public presentation. The special `tools` topic is
-listed alongside those file-backed topics and renders directly from the typed MCP contract.
-
-| Area            | Covers                                                                                                        | Path               |
-| --------------- | ------------------------------------------------------------------------------------------------------------- | ------------------ |
-| Getting started | Introduction (agent-first), quickstart, tutorial on the learning flows, which ready flow to use, self-hosting | `getting-started/` |
-| Concepts        | Workflows, nodes, templates, notes, playbooks, artifacts                                                      | `concepts/`        |
-| Guides          | Writing directives, creating & editing workflows, reading a flow and a run, the overview of runs, extensions  | `guides/`          |
-| Reference       | Tools, input schema, magic variables, condition operators, validation, workflow catalog                       | `reference/`       |
-| Integration     | MCP clients, Claude Code, agent guide, Telegram setup, troubleshooting                                        | `integration/`     |
-| Patterns        | Branching, validation loop, escalation, subagent review, workspace, and more                                  | `patterns/`        |
-
-### Internal docs — `docs/`
-
-For contributors working on the codebase (implementation detail, not end-user docs).
-
-| File                   | Covers                                                                                                                  | Path                                                              |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| Development setup      | Build, Docker, local dev, project structure                                                                             | `docs/DEVELOPMENT.md`                                             |
-| Testing                | Test types, runner, fixtures, antipatterns                                                                              | `docs/TESTING.md` + `docs/testing/`                               |
-| API                    | Backend & admin HTTP API reference                                                                                      | `docs/API.md`                                                     |
-| System architecture    | Engine, storage, MCP transport, handlers, validation                                                                    | `docs/SYSTEM.md`                                                  |
-| Authentication         | Better Auth, OAuth 2.1, API tokens                                                                                      | `docs/AUTHENTICATION.md`                                          |
-| Web UI                 | Frontend architecture, components                                                                                       | `docs/WEB-UI.md`                                                  |
-| Audit system           | Audit logging design                                                                                                    | `docs/AUDIT-SYSTEM.md`                                            |
-| Workflows              | Workflow authoring, tools, catalog                                                                                      | `docs/WORKFLOW.md`, `docs/WORKFLOWS.md`, `docs/WORKFLOW-TOOLS.md` |
-| Design system          | UI design tokens and components                                                                                         | `docs/DESIGN-SYSTEM.md`                                           |
-| Documentation style    | How to write internal **and** public docs                                                                               | `docs/DOCUMENTATION-STYLE-GUIDE.md`                               |
-| Logging                | Structured logging conventions                                                                                          | `docs/LOGGING.md`                                                 |
-| Codespaces             | GitHub and local providers, companion setup/recovery, persistent lifecycle, MCP tools, website management and isolation | `docs/CODESPACES.md`                                              |
-| Issue management       | GitHub issue conventions                                                                                                | `docs/ISSUE-MANAGEMENT.md`                                        |
-| Architecture decisions | ADRs (licensing, OSS model, …)                                                                                          | `docs/adr/`                                                       |
-| Deployment             | Environment variables, restart procedures                                                                               | `docs/deployment/`                                                |
-| Legal                  | License/legal notes                                                                                                     | `docs/legal/`                                                     |
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, the PR flow, DCO sign-off, and how
-releases are automated (Conventional Commits → semantic-release → versioned GHCR
-image). For upgrading a self-host instance, see [Updating / Upgrading](#updating--upgrading).
-
-## License
-
-[Apache License 2.0](LICENSE)
+[Contributor setup](docs/development/getting-started.md) explains the isolated development container,
+environment selection and native build commands. The [testing guide](tests/TESTING-GUIDE.md) owns
+suite selection and root npm entrypoints; [the coverage map](tests/COVERAGE-MAP.md) locates maintained
+fixtures. Do not use the disposable contributor container for persistent installation data.
+
+Start at [docs/README.md](docs/README.md) for architecture, execution, HTTP/authentication,
+workspaces, UI patterns, documentation ownership, observability and operator procedures. Custom
+Claude Code commands are documented in [commands/README.md](commands/README.md). Current work is
+tracked in [GitHub Issues](https://github.com/moira-mcp/moira/issues).
+
+## License, security and branding
+
+Source code is licensed under [Apache-2.0](LICENSE). See [third-party notices](THIRD_PARTY_LICENSES),
+[the trademark policy](TRADEMARK.md) for name/logo use, [the code of conduct](CODE_OF_CONDUCT.md),
+and [SECURITY.md](SECURITY.md) for vulnerability reporting. Private deployment branding, secrets and
+operational material belong outside this public repository.

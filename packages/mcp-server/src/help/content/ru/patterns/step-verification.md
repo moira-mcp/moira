@@ -41,6 +41,7 @@ description: Проверка завершённости шага перед п�
 {
   "type": "agent-directive",
   "id": "verify-step",
+  "completionCondition": "The real artifact checked against the expected result and the evidence or remaining gap reported",
   "directive": "Verify step {{current_step_name}} completed:\n- Expected: {{expected_output}}\n- Check actual result matches expected\n- Provide evidence",
   "inputSchema": {
     "type": "object",
@@ -55,7 +56,7 @@ description: Проверка завершённости шага перед п�
 ```
 
 :::caution
-Требуйте `verification_evidence`, чтобы агенты не заявляли о завершении без доказательств.
+Поле verification_evidence записывает обоснование, но строка сама по себе ничего не доказывает. Читатель проверяет относящийся к утверждению артефакт или результат действия.
 :::
 
 ### Нода проверки
@@ -68,7 +69,7 @@ description: Проверка завершённости шага перед п�
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "step_verified" },
+        "left": { "contextPath": "verify-step.step_verified" },
         "right": "yes"
       },
       "output": "verified"
@@ -87,7 +88,7 @@ description: Проверка завершённости шага перед п�
 
 ```json
 {
-  "directive": "Verify implementation. Evidence must include:\n- Test command output (npm test results)\n- API response (curl output)\n- File diff (git diff)\n- Screenshot (for UI changes)"
+  "directive": "Select evidence for the property actually changed: observed focused test/API results for behavior, the stored artifact for representation, viewed screenshots for appearance, and reasoned primary-source review for meaning and architecture. Report unavailable checks and limitations honestly; do not run unrelated checks to fill a list."
 }
 ```
 
@@ -145,18 +146,22 @@ description: Проверка завершённости шага перед п�
 {
   "type": "expression",
   "id": "increment-step",
-  "expressions": ["current_step_index = current_step_index + 1"]
+  "expressions": ["current_step_index = current_step_index + 1"],
+  "connections": { "default": "load-next-step" }
 }
 ```
 
 ## Реальный пример
 
-Из `development-flow.json`:
+Пример предполагает объявленные метаданные шага и существующие целевые ноды в содержащем workflow:
 
 ```json
 {
   "id": "verify-step-implementation",
-  "directive": "Verify step {{current_step_index}} ({{current_step_name}}) implementation.\n\nExpected outcome: {{expected_outcome}}\n\nVerification checklist:\n- Functionality works as expected\n- Tests pass (if applicable)\n- No regressions introduced\n\nProvide concrete evidence for each claim.",
+  "type": "agent-directive",
+  "completionCondition": "Actual step artifact checked against the expected outcome and remaining gaps recorded",
+  "connections": { "success": "check-verification" },
+  "directive": "Verify step {{current_step_index}} ({{current_step_name}}) implementation.\n\nExpected outcome: {{expected_output}}\n\nVerification checklist:\n- Functionality works as expected\n- Tests pass (if applicable)\n- No regressions introduced\n\nProvide concrete evidence for each claim.",
   "inputSchema": {
     "properties": {
       "step_verified": { "type": "string", "enum": ["yes", "no"] },

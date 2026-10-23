@@ -9,7 +9,6 @@
 
 import { describe, expect, test } from "@jest/globals";
 import { act, renderHook } from "@testing-library/react";
-import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import { AuthoringError } from "@mcp-moira/workflow-engine/authoring";
 import { deriveProcess } from "@mcp-moira/workflow-engine/process";
 import {
@@ -31,11 +30,15 @@ import type {
 } from "../../../packages/web-frontend/src/types/workflow-types.js";
 import { catalogGraph } from "../../helpers/catalog-graphs.js";
 
-const quickTask = (): WorkflowGraph =>
-  JSON.parse(JSON.stringify(findCatalogEntryBySlug("quick-task")!.graph)) as WorkflowGraph;
+function loadedCatalog(slug: string): WorkflowGraph {
+  const graph = catalogGraph(slug);
+  if (!graph.id) throw new Error(`Catalog graph '${slug}' has no stored identity`);
+  return { ...graph, id: graph.id };
+}
 
-const derive = (graph: WorkflowGraph) =>
-  deriveProcess(graph as unknown as Parameters<typeof deriveProcess>[0])!;
+const quickTask = (): WorkflowGraph => loadedCatalog("quick-task");
+
+const derive = (graph: WorkflowGraph) => deriveProcess(graph)!;
 
 const node = (graph: WorkflowGraph, id: string) =>
   graph.nodes.find((n) => n.id === id) as (WorkflowNode & Record<string, unknown>) | undefined;
@@ -45,13 +48,13 @@ const targets = (graph: WorkflowGraph, id: string) =>
   (node(graph, id)?.connections ?? {}) as Record<string, string>;
 
 /** A fresh agent step for the structural operations. */
-const step = (id: string): WorkflowNode =>
-  ({
-    id,
-    type: "agent-directive",
-    directive: `Do ${id}.`,
-    completionCondition: "Done.",
-  }) as WorkflowNode;
+const step = (id: string): WorkflowNode => ({
+  id,
+  type: "agent-directive",
+  directive: `Do ${id}.`,
+  completionCondition: "Done.",
+  connections: { success: "end" },
+});
 
 /** Operations as the page appends them: one at a time onto the draft the log folds into. */
 function logOf(saved: WorkflowGraph, ops: Operation[]): Operation[] {
@@ -62,6 +65,123 @@ function logOf(saved: WorkflowGraph, ops: Operation[]): Operation[] {
 }
 
 describe("flow edit log", () => {
+  test("a structural edit and serialization preserve the complete authored contract and undo restores it", () => {
+    const saved: WorkflowGraph = {
+      id: "stored-definition",
+      metadata: {
+        name: "Full definition",
+        version: "1.0.0",
+        description: "Preservation",
+        schemaVersion: 1,
+      },
+      variableRegistry: {
+        count: { type: "integer", description: "Completed items", minimum: 0, default: 0 },
+        items: {
+          type: "array",
+          description: "Work items",
+          items: { type: "string" },
+          default: ["First"],
+        },
+        source: { type: "string", description: "File contents", default: "Source text" },
+      },
+      runtimePolicy: { externalVariableWrites: { count: { allowedNodeIds: ["approve"] } } },
+      systemReminder: "Preserve the complete definition.",
+      progress: {
+        goal: "Deliver every item",
+        facts: [{ label: "Mode", value: "Review", tone: "neutral" }],
+        nodes: [
+          {
+            id: "work",
+            label: "Work",
+            list: { items: "items", current: "count", indexBase: 0 },
+            content: { summary: "Current work" },
+          },
+        ],
+      },
+      nodes: [
+        {
+          id: "start",
+          type: "start",
+          initialData: { variables: { topic: { description: "Topic", value: "Example" } } },
+          connections: { default: "lock" },
+        },
+        { id: "lock", type: "lock", reason: "Confirm access", connections: { unlocked: "files" } },
+        {
+          id: "files",
+          type: "materialize",
+          basePath: "./workspace",
+          files: [{ path: "brief.md", from: "source" }],
+          connections: { success: "approve" },
+        },
+        {
+          id: "approve",
+          type: "agent-directive",
+          directive: "Review the result.",
+          completionCondition: "Approved.",
+          progressNodeId: "work",
+          progressActiveLabel: "Review item {{count}}",
+          progressActiveContent: {
+            summary: "Review",
+            details: ["Inspect the file"],
+            outcome: "Decision",
+            next: "Deliver",
+          },
+          humanGate: { label: "Approve", notify: "off", remindAfter: "1h" },
+          inputSchema: {
+            type: "object",
+            properties: { approved: { type: "boolean" } },
+            required: ["approved"],
+          },
+          connections: { success: "deliver" },
+        },
+        {
+          id: "deliver",
+          type: "example.publish",
+          config: { channel: "review" },
+          input: { item: "{{count}}" },
+          timeout: 1000,
+          connections: { success: "end" },
+        },
+        {
+          id: "retry",
+          type: "teleport",
+          hint: "Review again",
+          directive: "Inspect the correction.",
+          completionCondition: "Inspected.",
+          connections: { success: "approve" },
+        },
+        { id: "end", type: "end", finalOutput: ["count"] },
+      ],
+    };
+    const original = JSON.stringify(saved);
+    const { result } = renderHook(() => useEditLog(saved));
+
+    act(() =>
+      result.current.apply({
+        kind: "set-connection",
+        source: "files",
+        key: "error",
+        target: "end",
+      }),
+    );
+
+    const serialized = JSON.parse(JSON.stringify(result.current.draft));
+    expect(serialized).toEqual({
+      ...saved,
+      nodes: saved.nodes.map((entry) =>
+        entry.id === "files"
+          ? { ...entry, connections: { ...entry.connections, error: "end" } }
+          : entry,
+      ),
+    });
+    expect(result.current.draft?.id).toBe(saved.id);
+    expect(JSON.stringify(saved)).toBe(original);
+
+    act(() => result.current.undo());
+    expect(result.current.draft).toEqual(saved);
+    expect(result.current.ops).toEqual([]);
+  });
+
   test("content and structural operations fold into a draft and never mutate the saved definition", () => {
     const saved = quickTask();
     const before = JSON.stringify(saved);
@@ -306,7 +426,7 @@ describe("the run-less projection", () => {
     expect(progress.taskTitle).toBe(graph.metadata.name);
     expect(progress.title).toBeNull();
     // SDF's authored run title is a template ("plan r{{plan_revision}}") rendered only by a run.
-    const sdf = catalogGraph("software-development-flow") as unknown as WorkflowGraph;
+    const sdf = loadedCatalog("software-development-flow");
     expect(sdf.progress!.title).toContain("{{");
     expect(definitionProgress(sdf, derive(sdf)).title).toBeNull();
     expect(progress.goal).toBe(graph.metadata.description);
@@ -326,7 +446,7 @@ describe("the run-less projection", () => {
 describe("a step's choice in the edit log", () => {
   /** Example 2 with `check-result`'s choice taken out, as a person would start from. */
   const bare = (): WorkflowGraph => {
-    const graph = catalogGraph("example-one-choice") as unknown as WorkflowGraph;
+    const graph = loadedCatalog("example-one-choice");
     const check = node(graph, "check-result") as unknown as {
       inputSchema: { properties: Record<string, unknown>; required: string[] };
       cases?: unknown;
@@ -380,7 +500,7 @@ describe("a step's choice in the edit log", () => {
   });
 
   test("editing an option through the log keeps one case per non-default option", () => {
-    const saved = catalogGraph("example-one-choice") as unknown as WorkflowGraph;
+    const saved = loadedCatalog("example-one-choice");
     const draft = foldOperations(
       saved,
       logOf(saved, [

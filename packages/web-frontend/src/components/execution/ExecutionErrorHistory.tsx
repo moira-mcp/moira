@@ -1,7 +1,6 @@
 /**
  * ExecutionErrorHistory Component
  * Displays execution error log with timestamps and error details
- * Issue #386: Execution Error Log System
  *
  * The journal holds two different kinds of fact. A refusal means a step did not happen: its answer
  * was rejected. A degradation means the step happened without behaviour text it names — a playbook

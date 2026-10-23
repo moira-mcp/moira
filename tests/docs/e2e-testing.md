@@ -1,249 +1,129 @@
-# E2E Testing Guide
+# Browser testing
 
-## Authentication in E2E Tests
+Use the [testing guide](../TESTING-GUIDE.md) for suite selection and the
+[infrastructure guide](test-infrastructure.md#e2e-projects) for project dependencies and target routing.
 
-**ALWAYS use authentication helpers. NEVER write manual login/registration logic.**
+## Fixtures and authentication
 
-**Why:**
-
-- Email verification is required for login
-- Tests must use unique users to avoid pollution
-- Admin operations need proper authentication
-- Manual auth code forgets critical steps
-
-### Available Helpers
+Specs under `tests/e2e/` import the shared fixture:
 
 ```typescript
-import { createVerifiedTestUser, loginAsAdmin, loginAsUser } from "../utils/auth-helpers.js";
-
-// Create new test user with email verified
-const { email, password, userId } = await createVerifiedTestUser(page);
-
-// Login as admin
-await loginAsAdmin(page);
-
-// Login as specific user
-await loginAsUser(page, email, password);
-```
-
-### Registration Form Helper
-
-```typescript
-import { fillConsentCheckboxes } from "./helpers/consent-helper.js";
-
-// Fill GDPR consent checkboxes in registration form
-// Must be called AFTER filling email/password and BEFORE clicking submit
-await page.getByRole("textbox", { name: "Email" }).fill(testEmail);
-await page.getByRole("textbox", { name: "Password" }).fill(testPassword);
-await fillConsentCheckboxes(page); // Terms + Residency checkboxes
-await page.getByRole("button", { name: "Create an account" }).click();
-```
-
----
-
-## Console Error Monitoring
-
-All E2E tests automatically monitor browser console for authentication errors.
-
-**Monitored patterns:**
-
-- `[Login Error]`
-- `[Register Error]`
-- `[Forgot Password Error]`
-- `[Reset Password Error]`
-- `[OAuth Login Error]`
-
-**When errors detected:**
-
-- Written to stderr immediately
-- Shown in test output with timestamp
-- Helps diagnose forgotten authentication steps
-
-**Example output when auth fails:**
-
-```
-[Browser Console Error] [Login Error] Email not verified
-[Browser Console Error] [Login Error] Invalid credentials
-```
-
-**If you see these in test logs, check:**
-
-1. Did you use `createVerifiedTestUser()` helper?
-2. Did you verify email before login attempt?
-3. Are credentials correct?
-
-### Enable console monitoring
-
-```typescript
-// Import from console-monitor fixture instead of @playwright/test
-import { test, expect } from "./fixtures/console-monitor.js";
-
-test("my test", async ({ page }) => {
-  // Console errors will be automatically captured and reported
-});
-```
-
-**How it works:**
-
-- The fixture uses `auto: true` which runs automatically for every test
-- No need to explicitly use the fixture in test code
-- Just import `test` from the fixture file instead of `@playwright/test`
-
----
-
-## E2E Test Architecture: Setup vs Test
-
-### The Problem
-
-E2E test often requires data preparation before testing UI:
-
-- Create user before login test
-- Block user before "blocked user can't login" test
-- Verify email before login test
-
-**Bad approach:** doing setup through browser automation (Playwright/Chromium).
-
-**Why it's bad:**
-
-1. **Slow** - each chromium.launch() = seconds
-2. **Unreliable** - race conditions between browser instances
-3. **Hard to debug** - is it setup failing or the actual test?
-4. **Fragile** - UI changed → setup breaks → test fails for wrong reason
-
-### Solution: Separate Setup and Test
-
-**Key question: WHAT exactly are we testing?**
-
-#### Scenario 1: Testing UI functionality
-
-Example: "admin can block user via UI"
-
-```typescript
-test("admin can block user via UI", async ({ page }) => {
-  // Tested functionality = block UI
-  // So EVERYTHING through browser:
-  await loginAsAdmin(page);
-  await page.goto("/admin/users");
-  await page.click(`text=${testUserEmail}`);
-  await page.click('button:has-text("Block User")');
-  await page.fill("textarea", "Test block reason");
-  await page.click('button:has-text("Confirm")');
-
-  // Verify UI result
-  await expect(page.locator("text=User blocked")).toBeVisible();
-});
-```
-
-#### Scenario 2: Blocking = prerequisite, testing something else
-
-Example: "blocked user cannot login"
-
-```typescript
-test("blocked user cannot login", async ({ page }) => {
-  // Setup via API - fast and reliable
-  const { userId } = await createTestUser(email, password, name, true);
-  await blockUserViaApi(userId, "Test reason"); // ← API, not browser!
-
-  // Tested functionality = login UI for blocked user
-  await page.goto("/login");
-  await page.fill('input[type="email"]', email);
-  await page.fill('input[type="password"]', password);
-  await page.click('button[type="submit"]');
-
-  // Verify login rejected
-  await expect(page.locator("text=/blocked/i")).toBeVisible();
-});
-```
-
-### HTTP Helpers for Setup
-
-Use `tests/utils/mcp-auth.ts` for API operations:
-
-```typescript
-import { verifyUserEmail, DEFAULT_ADMIN_CREDENTIALS } from "../../utils/mcp-auth.js";
-
-// Create user
-const signUpResponse = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ email, password, name }),
-});
-
-// Verify email (through admin session)
-await verifyUserEmail(BASE_URL, email);
-
-// Block user
-await blockUserViaApi(BASE_URL, userId, adminSessionCookie);
-```
-
-### When to Use What
-
-| Situation                           | Setup                           | Test    |
-| ----------------------------------- | ------------------------------- | ------- |
-| Testing block UI                    | Browser (it's the test subject) | Browser |
-| Testing login for blocked user      | API (prerequisite)              | Browser |
-| Testing registration                | -                               | Browser |
-| Testing "blocked user redirected"   | API (prerequisite)              | Browser |
-| Testing admin UI shows "blocked by" | API (create blocked user)       | Browser |
-
-### Rule
-
-**E2E test verifies UI interaction.**
-
-- If action is test subject → Browser
-- If action is data preparation → API
-
----
-
-## Fixtures Import Rule
-
-```typescript
-// ✅ CORRECT
 import { test, expect } from "./fixtures.js";
+import { loginAsAdmin } from "./helpers/auth-helper.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
 
-// ❌ WRONG
-import { test, expect } from "@playwright/test";
-```
-
-**Why:** Fixtures enable automatic browser console/network logging.
-
----
-
-## User Credentials
-
-**CRITICAL RULE**: Tests that modify user credentials (password, email) MUST use dedicated test users, NOT shared credentials.
-
-**Why**: Tests run in parallel. Modifying shared credentials causes race conditions.
-
-**Do's**:
-
-```typescript
-// ✅ CORRECT: Dedicated test user for password change tests
-const PASSWORD_TEST_USER = {
-  email: "password-test@example.com",
-  password: "InitialPass123!",
-};
-
-test("change password workflow", async () => {
-  // This user is ONLY for password change tests
-  const newPassword = "NewPass456!";
-  await changePassword(PASSWORD_TEST_USER.email, PASSWORD_TEST_USER.password, newPassword);
-  // ... restore password for this user only
+test("administrator opens the dashboard", async ({ page }) => {
+  await loginAsAdmin(page);
+  await page.goto(`${getTestBaseUrl()}/admin`);
+  await expect(page.getByTestId("admin-system-health")).toBeVisible();
 });
 ```
 
-**Don'ts**:
+Choose a stable control from the page under test rather than copying a selector for another route.
+[fixtures.ts](../e2e/fixtures.ts) captures browser console and network facts, redacts request bodies
+and emits failure diagnostics. It also applies optional CPU throttling. Importing Playwright's
+`test` directly bypasses those fixtures.
 
-```typescript
-// ❌ WRONG: Using admin credentials that other tests depend on
-test("change password workflow", async () => {
-  await changePassword("admin@moira.local", "AdminTest123", "NewPass!");
-  // Other tests running in parallel will fail with 401!
-});
+The fast [auth helper](../e2e/helpers/auth-helper.ts) signs in over HTTP, installs the session
+cookie, sets beta acceptance by default and navigates into the app. Use its `login` or
+`loginAsAdmin` when authentication is a prerequisite. When the login form itself is the subject,
+use [auth-helper.browser.ts](../e2e/helpers/auth-helper.browser.ts), which fills and submits it.
+Do not replace the subject action with an API call.
+
+For fixture accounts, `createTestUser(email, password, name, verifyEmail)` performs HTTP signup and
+optionally email verification and deployment-specific approval. Check its success result before
+using the account. [approve-test-user.ts](../e2e/helpers/approve-test-user.ts) keeps self-host
+approval distinct from email verification. Tests of registration itself act on the actual form
+and use [consent-helper.ts](../e2e/helpers/consent-helper.ts) for its consent controls.
+
+Credential changes and destructive account cases use dedicated unique users. Shared admin
+credentials are for admission and setup; never change their password or email. Clean up only
+records and resources owned by the case. A cookie value is not a complete Cookie header:
+`getSessionCookieHeader` returns a ready header for Node-side requests, while the
+[API/MCP helper](api-mcp-testing.md#http-preparation) exposes value/header primitives separately.
+
+## Prerequisite versus observed action
+
+If the case proves blocking a user through the UI, perform that action in the browser and assert
+its visible result. If it proves the login error for an already blocked user, create/block that
+user through the existing HTTP helpers, then exercise the browser login form. This keeps setup
+independent without bypassing the behavior being tested.
+
+Use the configured browser base URL and the resolver's fetch URL for Node preparation. Remote
+browsers can see a different host from the local Node process; do not hard-code a localhost port
+or assume `TEST_BASE_URL` redirects both. See [target selection](test-infrastructure.md#target-selection).
+
+## Account and session acceptance
+
+Choose cases for the changed boundary rather than treating every account check as manual-only.
+[cross-tab-authority.spec.ts](../e2e/cross-tab-authority.spec.ts) already exercises real shared
+cookies with controlled delayed observations. [ProtectedRoute](../../packages/web-frontend/src/components/ProtectedRoute.tsx),
+[session coordination](../../packages/web-frontend/src/auth/better-auth-client.ts) and
+[return URL validation](../../packages/web-frontend/src/utils/return-url.ts) own the behavior:
+
+| Case                                         | Observation that distinguishes correct behavior                                                                                                                                                              |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Login from a protected deep link             | Successful admission returns to the safe requested relative path; external/protocol-relative/traversal targets and prefix-aware login loops are refused.                                                     |
+| Logout or account replacement in another tab | Previously admitted private content is hidden while identity is unknown; the replacement account never sees the previous account's holdings.                                                                 |
+| Recheck confirms the same account            | Existing mounted content and drafts survive confirmation; an ordinary resource-level 403 does not sign the account out.                                                                                      |
+| A previous account's request finishes late   | Its success, failure, targeted revoke and redirect cannot overwrite new content or expire the replacement shared cookie.                                                                                     |
+| Session loss                                 | After authoritative session refusal, protected content stays hidden and sign-in remains usable. Removing a cookie tests missing credentials; server-side expiry or revocation needs its own controlled case. |
+| Ordinary user opens an administrator route   | No administrator content becomes visible; separately verify server refusal, since a browser redirect alone does not prove API authorization.                                                                 |
+| Administrator blocks a dedicated user        | Observe the actual UI action when that is the subject, then verify denied sign-in and existing access through the [API/MCP boundary](api-mcp-testing.md#account-admission-and-retirement).                   |
+
+Keep self-host approval, SaaS verification, administrator role and capabilities separate. Signup
+can issue a session while product access remains pending; feature hiding is not server enforcement.
+For forced reset, consent and invite completion, retain the initiating account and await settled
+session facts before asserting a redirect. Use owned users and avoid waiting days for expiry:
+controlled session state verifies that transition, while real elapsed/provider behavior is a
+separate acceptance claim. Contracts are in [authentication](../../docs/reference/authentication.md).
+
+## Browser and external acceptance
+
+A mocked provider or SDK OAuth fixture does not verify real Google/GitHub sign-in. When explicitly
+authorized, use a configured test installation with social login enabled and an owned provider
+account: exercise the actual button, provider consent, return, resulting account identity and
+admitted application session. Also inspect cancellation/refusal without assuming every refusal
+returns a successful login. Existing-email linking must follow the configured authentication
+policy; do not assume that matching email alone authorizes linking. The built-in self-host policy
+does not offer social login. [Better Auth configuration](../../packages/shared/src/auth/better-auth-config.ts)
+owns provider enablement; this is distinct from workspace GitHub App pairing.
+
+For changed email flows, verify the mode's expected action and actual received link with an owned
+mailbox when real delivery is authorized. Check verification/reset completion and rejection of the
+old password after reset; a test-log URL, provider acceptance or public `real` capability alone
+does not prove inbox arrival. Without real delivery, verify unavailable controls and the supported
+ordinary-user recovery path. Do not invent a fixed delivery time or exact subject as a release
+guarantee; use [account/configuration contracts](../../docs/operator/accounts.md).
+
+Inspect changed navigation, forms, tables and diagrams at relevant mobile/desktop widths,
+keyboard focus, theme and locale. Record the actual browser/device used; a Chromium pass does
+not establish Safari/Firefox/Edge compatibility. Landing/deployment presentation belongs to its
+source owner. For performance changes, select a representative owned dataset and observe the
+specific pagination, rendering or concurrent-request behavior; arbitrary historic item/time
+thresholds are not current product guarantees. Native/provider effects remain separately scoped
+below and in the [acceptance guide](../TESTING-GUIDE.md#native-and-provider-acceptance).
+
+## Run and inspect
+
+```bash
+npm run test:e2e -- --file tests/e2e/admin-panel.spec.ts
+E2E_CPU_THROTTLE=8 npm run test:e2e -- --file tests/e2e/flow-page.spec.ts -- --retries=0
 ```
 
-**Helper Usage**:
+Installation-wide settings specs run before Chromium readers even for a selected reader file.
+Inspector and other external-service specs require their actual supporting services and
+`PLAYWRIGHT_INCLUDE_EXTERNAL=true`; that opt-in does not prepare the services. For Inspector,
+use the repository's [Compose definition](../../docker-compose.inspector.yml) and the selected
+environment, then run the desired existing spec. Do not create a listener before checking the
+local port inventory.
 
-- `DEFAULT_ADMIN_CREDENTIALS` - Read-only. Use for verification, listing, admin actions. NEVER modify.
-- `verifyUserEmail(email)` - Uses admin login internally. Safe for any user EXCEPT admin.
-- Create dedicated test users with unique emails for destructive operations.
+Assert observable behavior with ordinary actionable clicks, keyboard focus and persisted reads
+where relevant. Wait for the state the action produces rather than a delay or forced click.
+For diagrams use the settled-camera helper. For a guide's dock/rectangle, sample both facts in
+one evaluation so an animation cannot split the observation.
+
+Screenshots establish rendered presentation at the inspected viewport/theme/locale. Mocked owner
+responses do not prove native settings effects, external delivery or VM recovery. Real native and
+provider acceptance is [separate](../TESTING-GUIDE.md#native-and-provider-acceptance). Failure
+artifacts may contain sensitive URLs or OAuth diagnostics; inspect locally and redact before sharing.

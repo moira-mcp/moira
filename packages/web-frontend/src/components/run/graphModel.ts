@@ -47,7 +47,7 @@ export interface GraphModel {
 
 /** The run-less blocks of a definition, derived in the browser when a caller passes none. */
 export function definitionBlocks(workflow: WorkflowGraph): RunBlock[] {
-  const process = deriveProcess(workflow as unknown as Parameters<typeof deriveProcess>[0]);
+  const process = deriveProcess(workflow);
   if (!process) return [];
   return process.blocks.map((block, index) => ({
     id: block.id,

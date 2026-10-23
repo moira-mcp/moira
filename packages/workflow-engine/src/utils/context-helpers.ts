@@ -4,7 +4,7 @@
  */
 
 import { ExecutionContext } from "../types/base-types.js";
-import { createLogger } from "@mcp-moira/shared";
+import { createLogger } from "@mcp-moira/shared/logging/logger";
 
 export class ContextHelpers {
   private static logger = createLogger({ component: "ContextHelpers" });

@@ -1,0 +1,254 @@
+import { afterEach, beforeEach, describe, expect, test } from "@jest/globals";
+import fs from "node:fs";
+import { randomUUID } from "node:crypto";
+import { createWorkflowCliFixture } from "../../helpers/workflow-cli-fixture.js";
+
+let cli: ReturnType<typeof createWorkflowCliFixture>;
+
+function run(args: string[]): string {
+  return cli.run(args);
+}
+
+function read(file: string) {
+  return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+/** A two-block process with one unlabelled boundary edge and one unowned routing node. */
+function fixture(): string {
+  const file = cli.path(`workflow-process-${randomUUID()}.json`);
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      metadata: { name: "Process", version: "1.2.3", description: "Process fixture" },
+      variableRegistry: {
+        progress_work_outcome: { type: "string", description: "Work outcome" },
+      },
+      progress: {
+        nodes: [
+          {
+            id: "work",
+            label: "Work",
+            content: { summary: "Do the work", outcome: "{{progress_work_outcome}}" },
+          },
+          { id: "check", label: "Check", content: { summary: "Check the work" } },
+        ],
+      },
+      nodes: [
+        { id: "start", type: "start", progressNodeId: "work", connections: { default: "do" } },
+        {
+          id: "do",
+          type: "agent-directive",
+          progressNodeId: "work",
+          directive: "Do",
+          completionCondition: "Done",
+          inputSchema: { type: "object", properties: {}, globalInputs: ["progress_work_outcome"] },
+          connections: { success: "verify" },
+        },
+        {
+          id: "verify",
+          type: "condition",
+          cases: [
+            {
+              when: { operator: "eq", left: { contextPath: "do.ok" }, right: true },
+              output: "true",
+            },
+          ],
+          connections: { true: "end", default: "do" },
+        },
+        { id: "end", type: "end", progressNodeId: "check" },
+      ],
+    }),
+  );
+  return file;
+}
+
+describe("workflow-tool process block authoring", () => {
+  let file: string;
+
+  beforeEach(() => {
+    cli = createWorkflowCliFixture("workflow-process-");
+    file = fixture();
+  });
+
+  afterEach(() => {
+    cli.cleanup();
+  });
+
+  test("labels a forward edge and an explained return, moves a node, and the contract becomes satisfied", () => {
+    run([file, "set-label", "do", "success", "work done", "--no-version-bump"]);
+    expect(read(file).nodes[1].connectionLabels).toEqual({ success: "work done" });
+    expect(read(file).metadata.version).toBe("1.2.3");
+
+    run([file, "set-block", "verify", "check", "--no-version-bump"]);
+    expect(read(file).nodes[2].progressNodeId).toBe("check");
+
+    const output = run([
+      file,
+      "set-label",
+      "verify",
+      "default",
+      "check failed",
+      "--cause",
+      "The check found a problem",
+      "--exit",
+      "The check passes",
+      "--no-version-bump",
+    ]);
+    expect(read(file).nodes[2].connectionLabels).toEqual({
+      default: {
+        label: "check failed",
+        cycle: { cause: "The check found a problem", exit: "The check passes" },
+      },
+    });
+    expect(output).toContain("Process block contract satisfied");
+    expect(run([file, "derive"])).toContain("DIAGNOSTICS: none");
+  });
+
+  test("reports remaining diagnostics after a partial annotation without refusing the write", () => {
+    const output = run([file, "set-label", "do", "success", "work done", "--no-version-bump"]);
+    // The unowned node and, because it was the block's only step, the block it left unconnected.
+    expect(output).toMatch(/2 block-contract diagnostics remain/);
+    const derived = run([file, "derive"]);
+    expect(derived).toContain("unowned-node node=verify");
+    expect(derived).toContain("unconnected-block");
+  });
+
+  test("bumps the patch version unless --no-version-bump or --force is given", () => {
+    run([file, "set-label", "do", "success", "work done"]);
+    expect(read(file).metadata.version).toBe("1.2.4");
+    run([file, "clear-label", "do", "success", "--force"]);
+    expect(read(file).metadata.version).toBe("1.2.4");
+    expect(read(file).nodes[1]).not.toHaveProperty("connectionLabels");
+  });
+
+  test("sets a node's expressions and removes the field with an empty list", () => {
+    run([file, "update", "verify", "--expressions", '["attempts = attempts + 1"]']);
+    expect(read(file).nodes[2].expressions).toEqual(["attempts = attempts + 1"]);
+    expect(run([file, "update", "verify", "--expressions", "[]"])).toContain("Cleared expressions");
+    expect(read(file).nodes[2]).not.toHaveProperty("expressions");
+  });
+
+  test("binds a block to a list, rejects a malformed binding, and removes it with none", () => {
+    run([
+      file,
+      "edit-block",
+      "work",
+      "--list",
+      '{"current":"progress_work_outcome","total":"progress_work_outcome"}',
+      "--no-version-bump",
+    ]);
+    expect(read(file).progress.nodes[0].list).toEqual({
+      current: "progress_work_outcome",
+      total: "progress_work_outcome",
+    });
+    expect(() =>
+      run([file, "edit-block", "work", "--list", '{"title":"name"}', "--no-version-bump"]),
+    ).toThrow(/at least one of items, current or total/u);
+    expect(read(file).progress.nodes[0].list).toBeDefined();
+    run([
+      file,
+      "add-block",
+      "deliver",
+      "Deliver",
+      "Hand over",
+      "--list",
+      '{"items":"progress_work_outcome","indexBase":0}',
+      "--no-version-bump",
+    ]);
+    expect(read(file).progress.nodes[2].list).toEqual({
+      items: "progress_work_outcome",
+      indexBase: 0,
+    });
+    // The deterministic schema names the binding on its block.
+    expect(run([file, "schema"])).toMatch(
+      /PROGRESS_NODE deliver[^\n]*\n(?:[^\n]*\n)*? {4}LIST \{"indexBase":0,"items":"progress_work_outcome"\}/u,
+    );
+    run([file, "edit-block", "work", "--list", "none", "--no-version-bump"]);
+    expect(read(file).progress.nodes[0].list).toBeUndefined();
+  });
+
+  test("adds a block after another and edits its description and outcome", () => {
+    run([
+      file,
+      "add-block",
+      "deliver",
+      "Deliver",
+      "Hand the result over",
+      "--after",
+      "work",
+      "--next",
+      "Check",
+      "--no-version-bump",
+    ]);
+    expect(read(file).progress.nodes.map((b: { id: string }) => b.id)).toEqual([
+      "work",
+      "deliver",
+      "check",
+    ]);
+    expect(read(file).progress.nodes[1].content).toEqual({
+      summary: "Hand the result over",
+      next: "Check",
+    });
+
+    run([
+      file,
+      "edit-block",
+      "deliver",
+      "--label",
+      "Deliver result",
+      "--summary",
+      "Present the result",
+      "--outcome",
+      "{{progress_work_outcome}}",
+      "--next",
+      "none",
+      "--no-version-bump",
+    ]);
+    expect(read(file).progress.nodes[1].label).toBe("Deliver result");
+    expect(read(file).progress.nodes[1].content).toEqual({
+      summary: "Present the result",
+      outcome: "{{progress_work_outcome}}",
+    });
+  });
+
+  test("rename rewrites the node and every reference to it on disk", () => {
+    const output = run([file, "rename", "do", "perform", "--no-version-bump"]);
+    const saved = read(file);
+    expect(saved.nodes.map((n: { id: string }) => n.id)).toEqual([
+      "start",
+      "perform",
+      "verify",
+      "end",
+    ]);
+    expect(saved.nodes[0].connections).toEqual({ default: "perform" });
+    expect(saved.nodes[2].connections).toEqual({ true: "end", default: "perform" });
+    expect(saved.nodes[2].cases[0].when.left).toEqual({ contextPath: "perform.ok" });
+    expect(output).toContain("Renamed node: do → perform");
+    expect(output).toContain("nodes[verify].cases[0].when.left.contextPath: 1");
+  });
+
+  test("delete retargets the incoming edge it is told to, and leaves nothing dangling", () => {
+    run([file, "delete", "verify", "--retarget", "do.success=end", "--no-version-bump"]);
+    const saved = read(file);
+    expect(saved.nodes.map((n: { id: string }) => n.id)).toEqual(["start", "do", "end"]);
+    expect(saved.nodes[1].connections).toEqual({ success: "end" });
+  });
+
+  test.each([
+    ["an unknown node", ["set-label", "ghost", "success", "x"]],
+    ["an unknown connection key", ["set-label", "do", "failure", "x"]],
+    ["a return with only a cause", ["set-label", "verify", "default", "x", "--cause", "c"]],
+    ["moving a node to an unknown block", ["set-block", "do", "ghost"]],
+    ["a duplicate block id", ["add-block", "work", "Work", "Again"]],
+    ["editing an unknown block", ["edit-block", "ghost", "--summary", "x"]],
+    ["an empty summary", ["edit-block", "work", "--summary", " "]],
+    ["renaming to an existing id", ["rename", "do", "verify"]],
+    ["renaming to a dotted id", ["rename", "do", "do.it"]],
+    ["deleting a node whose incoming edge has no decision", ["delete", "verify"]],
+    ["dropping a primary output", ["delete", "verify", "--drop", "do.success"]],
+  ])("refuses %s and leaves the file unchanged", (_name, command) => {
+    const before = fs.readFileSync(file, "utf8");
+    expect(() => run([file, ...command, "--no-version-bump"])).toThrow();
+    expect(fs.readFileSync(file, "utf8")).toBe(before);
+  });
+});

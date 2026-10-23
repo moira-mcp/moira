@@ -1,122 +1,86 @@
 ---
 title: Паттерн ревью субагентом
-description: Делегирование ревью независимому субагенту для объективной проверки
+description: Независимая проверка и передача подтверждённых замечаний владельцу починки
 ---
 
 ## Назначение
 
-Обеспечивает независимую проверку путём делегирования задач ревью субагенту. Предотвращает предвзятость самопроверки, когда тот же агент оценивает свою собственную работу.
-
-:::caution
-Самопроверка ненадёжна. Агент, выполнивший работу, не может объективно оценить её качество.
-:::
+Используйте независимого рецензента, когда контракт workflow требует оценки участника, который не создавал артефакт. Самопроверка полезна, но не выполняет требование независимости.
 
 ## Проблема
 
-Когда агент проверяет собственную работу:
-
-- Предвзятость подтверждения влияет на суждение
-- Известные проблемы могут быть рационализированы
-- Стандарты качества размываются со временем
-- Синдром «выглядит нормально»
+Автор может не заметить собственные предположения. Отдельная роль даёт другую оценку, а не гарантию объективности и полноты. Судите ревью по рассуждению и первичным свидетельствам.
 
 ## Решение
 
-Workflow требует независимости, а не делегирования как такового: рецензентом не должен быть тот,
-кто произвёл артефакт. Делегирование субагенту через Task tool — обычный способ получить эту
-независимость; дочерний workflow или действительно отдельная роль рецензента удовлетворяют тому же
-требованию.
+Используйте доступный механизм делегирования хоста, дочерний workflow или другую действительно независимую роль. Рецензент не должен быть производителем проверяемого артефакта.
 
-Делегируйте ревью отдельному субагенту через Task tool:
+1. Завершите артефакт и зафиксируйте проверяемую редакцию.
+2. Передайте требования, доступ к артефакту, существенный первичный контекст и адрес отчёта.
+3. Дайте рецензенту изучить реальные источники и свидетельства проверок.
+4. Не меняйте артефакт до получения этого ревью.
+5. Исправьте подтверждённые замечания и верните изменённый артефакт тому же гейту.
 
-1. Агент завершает работу
-2. Workflow направляет к ноде ревью
-3. Нода ревью делегирует задачу субагенту через Task tool
-4. Субагент возвращает объективную оценку
-5. Workflow маршрутизирует на основе результатов
-
-## Контракт ревью и исправления
-
-Цикл вокруг независимого ревью всегда одной формы, кто бы это ревью ни выполнял:
+## Контракт ревью и починки
 
 ```mermaid
 flowchart LR
-    A[Создать или изменить] --> B[Независимое ревью]
-    B -->|issues_count = 0| C[Дальше]
-    B -->|issues_count > 0| D[Исправить тот же артефакт]
+    A[Создание или правка] --> B[Независимое ревью]
+    B -->|issues_count = 0| C[Далее]
+    B -->|issues_count > 0| D[Починка того же артефакта]
     D --> B
 ```
 
-Рецензент перезаписывает один известный файл отчёта полным текущим набором воспроизводимых
-блокирующих находок и возвращает только число, которое использует condition. Ноль находок — валидный
-и ожидаемый исход. Владелец исправления читает этот файл, воспроизводит каждый дефект, меняет артефакт
-и возвращает его тому же рецензенту; если дефект не воспроизводится или артефакт не меняется, он
-сообщает причину, а не запускает неизменную итерацию. Рецензент диагностирует и никогда не чинит,
-поэтому отчёт всегда описывает артефакт, созданный кем-то другим.
+Полный текущий набор замечаний хранится в одном каноническом отчёте. Рецензент перезаписывает его для каждой проверяемой редакции и возвращает только поле, нужное маршруту. Ноль замечаний допустим. Число описывает замечания отчёта, но не доказывает чтение всех источников или правильность артефакта.
 
-Находки остаются в файле. Их копия в контексте workflow расходится с отчётом и раздувает каждую
-следующую директиву.
+Владелец починки читает отчёт, воспроизводит каждый подтверждённый дефект и исправляет причину. Если замечание не воспроизводится или реальный блокер мешает исправлению, сообщите причину вместо неизменённого повторного круга. Рецензент диагностирует; производитель исправляет.
 
-## Контракт проблем
+## Контракт замечаний
 
-Субагент возвращает ПЛОСКИЙ список проблем, а не отчёт с уровнями серьёзности. Нет уровней BLOCKING / MAJOR / MINOR — каждую проблему обязательно устранить. Условный узел проходит только когда счётчик равен нулю.
+В отчёте используйте плоский список конкретных замечаний. Метка критичности не должна разрешать игнорировать подтверждённый дефект согласованного объёма. Отделяйте наблюдения и предложения от замечаний, блокирующих приёмку.
 
-- `issues_count` — количество найденных проблем (0 = пройдено)
-- `issues` — плоский список всех проблем, каждая обязательна
+Фрагмент схемы принадлежит ноде ревью. Подробные замечания остаются в отчёте без дублирующего массива в контексте:
 
 ```json
 {
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "issues_count": {
-        "type": "number",
-        "minimum": 0,
-        "description": "Number of issues found (0 = pass)"
-      },
-      "issues": {
-        "type": "array",
-        "items": { "type": "string" },
-        "description": "Flat list of every issue found (all mandatory, no severity tiers)"
-      }
-    },
-    "required": ["issues_count"]
-  }
+  "type": "object",
+  "properties": {
+    "issues_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Current actionable findings in the canonical review report"
+    }
+  },
+  "required": ["issues_count"]
 }
 ```
 
 ## Структура
 
-```
-[do-work] → [delegate-review] → [check-result] → pass → [next]
-                                      ↓
-                                    fail → [fix-issues] → [do-work]
+```text
+[do-work] → [delegate-review] → [check-result] → clean → [next]
+                                     ↓
+                                  repair → [fix-issues] → [delegate-review]
 ```
 
 ## Реализация
 
 ### Нода делегирования ревью
 
+Примеры предполагают объявленный и инициализированный глобальный `workspace_path` и существующие целевые ноды. Вердикту ревью не задаётся default.
+
 ```json
 {
   "type": "agent-directive",
   "id": "delegate-review",
-  "directive": "Delegate review to subagent using Task tool.\n\n1) Pass ONLY necessary information:\n   - File paths to review\n   - Success criteria\n   - Context directory\n\n2) Agent delegation rules:\n   - Role clarity: 'YOU ARE reviewer'\n   - Direct commands: 'CHECK' not 'could you check'\n   - Specify files: list exact paths\n   - Demand verification: 'VERIFY by reading files'\n\n3) Save review result to {{review_file_path}}\n\n4) Report findings honestly - if reviewer found issues, report issues_found: yes",
-  "completionCondition": "Review delegated, result saved, findings reported",
+  "directive": "Obtain independent review of the frozen artifact against the actual requirements. Give the reviewer direct access to the artifact, requirements and relevant primary sources. Save the complete current findings and reasoning in {{workspace_path}}/review.md. Do not change the artifact while review is in progress. Return the report's actual actionable finding count; do not copy its detailed contents into workflow variables.",
+  "completionCondition": "Independent review of the unchanged artifact completed, report saved and current finding count reported honestly",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "review_file": {
-        "type": "string",
-        "description": "Path to saved review file"
-      },
-      "issues_found": {
-        "type": "string",
-        "enum": ["yes", "no"],
-        "description": "Did reviewer find any issues? (every issue is mandatory; no severity tiers)"
-      }
+      "issues_count": { "type": "integer", "minimum": 0 }
     },
-    "required": ["review_file", "issues_found"]
+    "required": ["issues_count"]
   },
   "connections": { "success": "check-review-result" }
 }
@@ -124,34 +88,7 @@ flowchart LR
 
 ### Ключевые элементы директивы
 
-**Назначение роли:**
-
-```
-YOU ARE plan reviewer. Your assessment determines if we proceed.
-```
-
-**Прямые команды:**
-
-```
-READ plan file directly.
-CHECK step implementation.
-VERIFY by reading actual files.
-RETURN every issue found as a flat list — every issue is mandatory; no severity tiers.
-```
-
-**Границы информации:**
-
-```
-Pass ONLY:
-- File paths to review
-- Success criteria
-- Relevant context paths
-
-DO NOT pass:
-- Your interpretation of quality
-- Hints about what you expect
-- Explanations of your work
-```
+Назовите роль рецензента, критерии приёмки, зафиксированный артефакт и адрес отчёта. Дайте контекст зависимостей, нужный для оценки. Не заменяйте первоисточники заверениями автора, не скрывайте отрицательные свидетельства и не предписывайте положительный вердикт.
 
 ### Нода проверки результата
 
@@ -163,8 +100,8 @@ DO NOT pass:
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "issues_found" },
-        "right": "no"
+        "left": { "contextPath": "delegate-review.issues_count" },
+        "right": 0
       },
       "output": "clean"
     }
@@ -178,95 +115,36 @@ DO NOT pass:
 
 ## Реальный пример
 
-Из gate review в `development-flow.json`:
-
-```json
-{
-  "id": "agent-validate-step",
-  "directive": "Delegate critical review to subagent.\n\n1) Pass direct access to plan without interpretation\n2) No mentions of 'code was improved/added/fixed'\n3) Pass: file path, step index, changed files, reports directory\n4) Tell which project parts to study for context\n\nAgent prompt:\nYOU ARE plan step gate reviewer.\nYour assessment determines if we proceed.\nREAD plan file directly.\nCHECK step against PREVIOUS and FUTURE steps.\nEvaluate: code quality, errors, plan compliance.\nReturn every issue found as a flat list — every issue is mandatory; no severity tiers.\nProvide fix recommendations.",
-  "inputSchema": {
-    "properties": {
-      "agent_review_file": { "type": "string" },
-      "agent_issues_found": { "type": "string", "enum": ["yes", "no"] }
-    },
-    "required": ["agent_review_file", "agent_issues_found"]
-  }
-}
-```
+Гейт плана читает требования и предложенный план, проверяет порядок зависимостей и проверяемость результатов, затем сохраняет полный текущий набор замечаний по каноническому адресу. Гейт результата читает созданный артефакт и относящиеся к нему свидетельства. Они оценивают разные артефакты и не заменяют друг друга.
 
 ## Антипаттерны
 
 ### Самопроверка (неправильно)
 
-```json
-{
-  "directive": "Check if your work meets quality standards.",
-  "completionCondition": "Quality check passed"
-}
-```
-
-Проблема: агент оценивает собственную работу.
+Называть оценку производителя независимым ревью. Сохраните полезную самопроверку, затем получите отдельную оценку, требуемую контрактом.
 
 ### Предвзятое делегирование (неправильно)
 
-```json
-{
-  "directive": "Ask subagent to verify the improvements we made."
-}
-```
-
-Проблема: слово «improvements» предполагает положительный результат.
+Просите оценить фактическое изменение, а не подтвердить «улучшения». Передавайте реальные свидетельства, включая сбои и ограничения.
 
 ### Избыточный контекст (неправильно)
 
-```json
-{
-  "directive": "Tell the reviewer about all the hard work done and why each decision was made."
-}
-```
-
-Проблема: влияет на суждение ревьювера.
+Несвязанный разговор и дубли отчётов заслоняют артефакт. Дайте доступ к нужным источникам и требованиям без предписания вердикта.
 
 ## Числовая валидация
 
-Совместите с числовой валидацией для объективных критериев:
-
-```json
-{
-  "inputSchema": {
-    "properties": {
-      "issues_count": {
-        "type": "number",
-        "minimum": 0,
-        "description": "Number of issues found (0 = pass)"
-      }
-    }
-  }
-}
-```
-
-```json
-{
-  "when": {
-    "operator": "eq",
-    "left": { "contextPath": "issues_count" },
-    "right": 0
-  },
-  "output": "clean"
-}
-```
+Используйте фактическое число конкретных замечаний, когда по нему выбирается маршрут. В другом workflow ту же роль может выполнять обоснованный вердикт. Число и балл не заменяют смысловое ревью; JSON Schema проверяет только форму ответа.
 
 ## Лучшие практики
 
-1. **Минимум контекста** — передавайте только то, что нужно ревьюверу
-2. **Без интерпретации** — позвольте ревьюверу сформировать собственные выводы
-3. **Прямой доступ к файлам** — ревьювер читает файлы самостоятельно
-4. **Честная отчётность** — агент должен передавать результаты правдиво
-5. **Сохранение результатов** — записывайте ревью в файл для отслеживания
+- Проверяйте одну неизменённую редакцию и однозначно её обозначайте; используйте принятую вызывающей стороной версию или checksum, когда это требуется.
+- Давайте прямой доступ к первичным источникам.
+- Храните один канонический отчёт и сообщайте подтверждённые пробелы вместе.
+- Сохраняйте обязательное независимое ревью после починки; см. [Repair Reach](/ru/docs/patterns/repair-reach/).
 
 ## Связанные паттерны
 
-- [Цикл валидации](/ru/docs/patterns/validation-loop/) - Повторные попытки при неудаче
-- [Верификация шагов](/ru/docs/patterns/step-verification/) - Проверка конкретных шагов
-- [Эскалация](/ru/docs/patterns/escalation/) - Обработка повторяющихся сбоев
-- [Антипаттерны](/ru/docs/patterns/anti-patterns/) - Машинерия вокруг review-loop, которой не нужно
+- [Цикл валидации](/ru/docs/patterns/validation-loop/)
+- [Верификация шагов](/ru/docs/patterns/step-verification/)
+- [Эскалация](/ru/docs/patterns/escalation/)
+- [Антипаттерны](/ru/docs/patterns/anti-patterns/)

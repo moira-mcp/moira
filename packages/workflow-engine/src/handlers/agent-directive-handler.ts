@@ -1,5 +1,5 @@
 /**
- * Agent Directive Handler V2 - Universal message queue approach
+ * Agent Directive Handler - Message queue based communication
  * Uses AgentMessageQueue for decoupled communication
  */
 
@@ -19,10 +19,11 @@ import { IGraphExecutionEngine } from "../interfaces/graph-execution-engine.js";
 import { recordUnresolvedPlaybooks } from "../templates/playbook-degradation.js";
 import { GraphTemplateProcessor } from "../templates/graph-template-processor.js";
 import { SchemaValidator } from "../utils/schema-validator.js";
-import { createLogger, InternalError, ValidationError } from "@mcp-moira/shared";
+import { createLogger } from "@mcp-moira/shared/logging/logger";
+import { InternalError, ValidationError } from "@mcp-moira/shared/errors";
 
 /**
- * Default schema for nodes without inputSchema (Issue #369)
+ * Default schema for nodes without inputSchema
  * Accepts only: null or empty object {}
  * Rejects any object with properties - prevents garbage data
  */
@@ -171,14 +172,14 @@ export class AgentDirectiveHandler implements INodeHandler {
   /**
    * Validate agent response - throw exception on failure
    *
-   * Issue #369: Validation behavior:
+   * Validation behavior:
    * - If inputSchema is NOT defined: use EMPTY_INPUT_SCHEMA (accepts only null or {})
    * - If inputSchema IS defined: validate strictly with JSON Schema
    *
    * This prevents garbage data from being saved to context when workflow
    * nodes don't specify what data they expect.
    *
-   * Step 12: ValidationError now includes rich context (schema, input, errors)
+   * ValidationError includes rich context (schema, input, errors)
    * for comprehensive error formatting in graph-execution-engine.
    */
   private validateAgentResponseOrThrow(

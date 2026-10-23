@@ -10,8 +10,9 @@
  *      `*.localhost` loopback; deployed domains require the `*.<domain>` wildcard
  *      TLS cert.)
  *   2. Rendered inside a sandboxed <iframe> within a Moira-controlled wrapper
- *      page. Scripts run in the frame but cannot reach the network
- *      (connect-src 'none'), submit forms, navigate the top frame, or touch the
+ *      page. Its CSP blocks fetch/XHR/WebSocket and form submission but permits
+ *      HTTPS images and selected script, stylesheet and font resources. The
+ *      sandbox prevents forms, top-frame navigation and access to the
  *      wrapper document — so the Moira footer cannot be removed or overlapped.
  *   3. Gated by a first-visit interstitial warning that the content is
  *      user-generated and not vetted by Moira.
@@ -115,7 +116,7 @@ function pickWrapperLang(req: Request): WrapperLang {
 
 /**
  * Escape a string for safe embedding inside an HTML attribute (double-quoted).
- * Used for the iframe srcdoc payload.
+ * Used for the iframe title and other attribute values.
  */
 function escapeHtmlAttribute(value: string): string {
   return value
@@ -134,9 +135,8 @@ function escapeHtmlText(value: string): string {
 }
 
 /**
- * CSP for the Moira wrapper document. Strict: only our own inline styles, no
- * scripts from anywhere except our own inline interstitial/report handler
- * (kept minimal), no network. The artifact frame is loaded via srcdoc.
+ * CSP for the Moira wrapper document: inline styles, same-origin images and
+ * frame, and the report form. The artifact loads from /__frame under its own CSP.
  */
 function setWrapperSecurityHeaders(res: Response): void {
   res.setHeader(
@@ -145,7 +145,7 @@ function setWrapperSecurityHeaders(res: Response): void {
       "default-src 'none'",
       "style-src 'unsafe-inline'",
       "img-src 'self' data:",
-      "frame-src 'self'", // the sandboxed artifact frame (srcdoc) renders as 'self'
+      "frame-src 'self'", // the frame is fetched from this artifact's origin
       "form-action 'self'", // allow the footer Report form to POST to /static/__report
       "base-uri 'none'",
       "frame-ancestors 'none'", // wrapper itself must not be embedded elsewhere
@@ -163,11 +163,13 @@ function setWrapperSecurityHeaders(res: Response): void {
 /**
  * CSP applied to the artifact content itself (served for the iframe via
  * /__frame). JavaScript is ALLOWED to run in-page, but:
- * - connect-src 'none'  → no fetch/XHR/WebSocket/beacon (no exfiltration / C2)
+ * - connect-src 'none'  → no fetch/XHR/WebSocket/beacon
  * - form-action 'none'  → no form posts (no phishing submit)
  * - base-uri 'none'     → no base hijack
  * - object-src 'none'   → no plugins
  * - frame-ancestors     → only embeddable by our wrapper (same origin)
+ * HTTPS images and the explicitly listed external resource origins remain allowed;
+ * connect-src does not provide complete network isolation for embedded data.
  * The iframe sandbox (allow-scripts, NO allow-same-origin, NO allow-top-navigation,
  * NO allow-forms, NO allow-popups) is the second, primary confinement layer.
  */
@@ -458,7 +460,7 @@ router.get("/", artifactViewLimiter, serveWrapper);
 
 /**
  * Raw artifact content for the sandboxed iframe. Applies the JS-enabled,
- * no-network CSP. Never includes the Moira footer (that lives in the wrapper).
+ * restricted-connect CSP. Never includes the Moira footer (that lives in the wrapper).
  *
  * SECURITY: this route must only ever be loaded AS A FRAME inside the wrapper.
  * A top-level navigation here would render a full-page, script-running,

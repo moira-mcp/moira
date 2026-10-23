@@ -14,7 +14,8 @@ describe("self-host upgrade documentation parity", () => {
   const envExample = readFileSync(resolve(".env.example"), "utf8");
   const compose = readFileSync(resolve("docker-compose.yml"), "utf8");
   const readme = readFileSync(resolve("README.md"), "utf8");
-  const internalWorkflows = readFileSync(resolve("docs/WORKFLOWS.md"), "utf8");
+  const configuration = readFileSync(resolve("docs/operator/configuration.md"), "utf8");
+  const internalWorkflows = readFileSync(resolve("docs/reference/bundled-catalog.md"), "utf8");
   const commands = [
     "docker compose pull",
     "docker compose up -d",
@@ -49,7 +50,11 @@ describe("self-host upgrade documentation parity", () => {
     }
     expect(envExample).toContain("MOIRA_IMAGE=ghcr.io/moira-mcp/moira:latest");
     expect(compose).toContain("${MOIRA_IMAGE:-ghcr.io/moira-mcp/moira:latest}");
-    expect(readme).toContain("data/.moira-startup-backups/");
+    expect(readme).toContain(
+      "packages/mcp-server/src/help/content/getting-started/self-hosting.md#updating-and-recovery",
+    );
+    expect(readme).toContain("docs/operator/configuration.md");
+    expect(configuration).toContain("<dirname(DB_PATH)>/.moira-startup-backups/");
     expect(english).toContain("persistent initialization-pending marker");
     expect(english).toContain("without a fake database backup");
     expect(russian).toContain("persistent-маркер незавершённой инициализации");
@@ -64,7 +69,7 @@ describe("self-host upgrade documentation parity", () => {
     expect(internalWorkflows).toContain(
       "docker compose run --rm moira npm run reconcile -- status",
     );
-    expect(internalWorkflows).toContain("--selection current --revision REVISION");
+    expect(internalWorkflows).toContain("--selection current --revision INSPECTED_REVISION");
     expect(internalWorkflows).toContain('--rationale "Retain the reviewed local intent"');
     expect(internalWorkflows).toContain("docker compose run --rm moira npm run reconcile -- apply");
     expect(internalWorkflows).not.toContain(

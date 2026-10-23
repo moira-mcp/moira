@@ -5,7 +5,7 @@ description: Special variables with automatic handling in workflows
 
 ## Overview
 
-Magic variables are special input fields that trigger automatic behavior beyond normal context storage.
+Magic variables are declared input fields that trigger behavior beyond normal context storage. The examples below are field fragments: a complete agent node also needs type, id, directive, completionCondition and connections. A magic input is not automatically a bare-name global.
 
 ## execution_note
 
@@ -35,6 +35,8 @@ When agent provides `execution_note`:
 1. Value stored in context like normal
 2. Execution record's `note` field updated in database
 3. Note visible in execution lists and session queries
+
+With the shown `properties` declaration, the value remains node-local and is referenced as `node-id.execution_note`. To use a bare global, declare it in `variableRegistry` and write it through `globalInputs` instead.
 
 ### Use Cases
 
@@ -113,6 +115,10 @@ heading; use it to point at the run from any other text.
 {{runUrl}}
 ```
 
+### userId
+
+The user who owns this execution: `{{userId}}`. This does not authorize an operation for another user.
+
 ### Usage Example
 
 ```json
@@ -178,8 +184,10 @@ All magic and context variables work with templates:
 ### Conditional Templates
 
 ```
-{{#if execution_note}}Note: {{execution_note}}{{/if}}
+{{#if intake.execution_note}}Note: {{intake.execution_note}}{{/if}}
 ```
+
+Here `intake` is the node that declared and returned the local field.
 
 ## See Also
 

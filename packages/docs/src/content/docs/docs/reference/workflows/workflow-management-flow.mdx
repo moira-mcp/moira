@@ -22,7 +22,7 @@ On the standard and complex levels, requirements and the full antipattern audit 
 
 The design contract expresses each decision on the node that has its evidence — routing `cases` and folded `expressions` on the deciding node, `success` when no case holds — and keeps a separate condition or expression node only for a shared or standalone decision; the reviews treat a routing node that only routes or counts what the preceding node already knows (avoidable routing scaffolding) as a finding. When a stage works through a list the flow keeps in its variables, the design binds the progress block to it so the run shows done/total and the current item.
 
-For a workflow with meaningful user-visible stages, the same design lifecycle designs its process view: a short chain of blocks in process order, each with a one-sentence description, every node of the graph — routing nodes included — owned by one block, every edge that leaves a block labelled with the decision it represents, every return explaining its cause and exit, and hubs placed after the blocks that lead into them. WMF's design gate specifies this as part of the pre-mutation contract, its build gates author it with the official CLI and complete only when `derive` reports no diagnostic, and its reviews judge that labels, cycle explanations, descriptions and order are true to the graph. Execution conditions and routes remain in the primary workflow graph; a run is shown from its recorded route. One shared projection and visual model drives both the interface and the server-rendered PNG, and agents may request a short-lived one-time PNG download of it. A notification attaches a phone-width picture of the run's steps built from the same projection, without storing any token in workflow state. WMF omits progress when it would be decorative.
+For a workflow with meaningful user-visible stages, the same design lifecycle designs its process view: a short chain of blocks in process order, each with a one-sentence description, every node of the graph — routing nodes included — owned by one block, every edge that leaves a block labelled with the decision it represents, every return explaining its cause and exit, and hubs placed after the blocks that lead into them. WMF's design gate specifies this as part of the pre-mutation contract, its build gates author it with the official CLI and complete only when `derive` reports no diagnostic, and its reviews judge that labels, cycle explanations, descriptions and order are true to the graph. Execution conditions and routes remain in the primary workflow graph; a run is shown from its recorded route. One shared projection and visual model drives both the interface and rendered PNG. Agents may request a short-lived one-time PNG download when a paired controller is available. Progress pictures are an optional notification capability; WMF's own notifications contain text and links. WMF omits progress when it would be decorative.
 
 When one block represents several current roles, WMF may design `progressActiveLabel` on its
 waiting nodes. It appears only for the exact current primary node; inactive blocks retain their
@@ -70,39 +70,9 @@ Server upload is a separate decision: standard, copy-new, or explicitly authoriz
 
 ## Notifications
 
-WMF notifies through the user's configured channels. Every message is headed by the flow name and
-the run's task, linked to the run page, and carries no image. Every line written from the run's
-values comes from a one-sentence field the step writes for a person, without file names or
-internal values; the fields are listed below. The messages are in English.
+Configured channels receive English text with the flow/task heading and a run link, without images or internal paths. Interactive runs explain the choices at structure/edit-plan approval, optional standard-edit audit, result review, saving and saving failure. Autonomous runs report what they decided and why; they do not imply that a decision is pending. Upload authority still requires the explicit authorization above.
 
-| When | Interactive | Autonomous |
-| --- | --- | --- |
-| The plan is ready | Standard and complex: "Workflow structure ready for your approval" or "Edit plan ready for your approval", with the planned stages or changes and the choices — approve it and the build goes ahead, or reject it with feedback. Simple: "Plan ready — the build goes ahead" (or "the changes are being applied"), with the list | "Plan ready — the build goes ahead" (or "the changes are being applied"), with the list |
-| A standard edit asks about the full audit | "Audit the whole workflow first?": what the audit does and costs, and the choices | "Decided for you": auditing the whole workflow, or planning only the requested change, and why |
-| The result is ready | "The workflow is ready for your review": approve it to go on to saving, or ask for changes | — |
-| Saving | "Save the workflow to your catalogue?": what each way of saving does, and not saving | "Decided for you": saving it, or not saving it, and why |
-| Saving failed | "Saving the workflow failed": why, and the choices — try again, keep it unsaved, or cancel; for a workflow that belongs to someone else, a separate copy or an administrator's replacement | "Decided for you": trying again (or the method the user authorized), or keeping it unsaved, and why |
-| The run ends | "Workflow created" or "Workflow updated": its name and version, whether it was saved to the catalogue, and the planned stages or changes marked done | the same |
-| The run is cancelled | "Cancelled": the name and version were built but not saved, and why | the same |
-
-The plan list is the build block's list: `planned_changes`, the stages of a new workflow or the
-planned changes of an edit. The requirements owner writes it on the simple level; the design or
-the edit plan writes it on the standard and complex levels. Every revision rewrites it — a
-revision after a rejected result, a process revision, and a lowering of the level at an
-approval — so the changed plan is announced again. It reads as not yet done whenever a plan is
-announced, and as done once the build has run. A complex edit is audited without the question.
-The reader lines come from one-sentence fields the steps write for a person:
-
-- `decision_summary` from the audit, upload and upload-error decisions;
-- `workflow_name` and `workflow_version` from the upload decision;
-- `failure_summary` from a failed upload.
-
-Intake may return an optional arbitrary `execution_note` of at most 120 characters. It is separate
-from the persisted task name and does not supply these notification reader fields.
-
-A revised plan is announced again. Because the flow notifies, starting it for a user with no
-configured channel is refused with an instruction; an agent that wants to run without
-notifications prepares the start again with `skipNotificationCheck: true`.
+Changed plans are announced again; finish messages identify the workflow name/version and whether it was saved or cancelled unsaved, with completed stages/changes. Optional intake `execution_note` (up to 120 characters) remains separate from the persisted task name. Missing channels refuse start unless a new prepare explicitly uses `skipNotificationCheck: true`.
 
 ### What the workflows it builds may say
 

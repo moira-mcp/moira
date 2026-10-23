@@ -22,6 +22,8 @@ flowchart LR
 
 The three parts are an entry, an owner, and a re-entry.
 
+These fragments assume the workflow declares tasks (array), resume_from_task (integer), total_tasks and current_task (numbers) in variableRegistry, with descriptions and appropriate bounds/initial values. The revision owner checks that the resume position fits the actual revised list; a fixed schema bound cannot enforce its dynamic length.
+
 ## 1. The entry is a teleport
 
 A `teleport` node has no ordinary incoming connections, so no route walks into it: an agent reaches
@@ -95,13 +97,7 @@ declared in `variableRegistry`.
 
 ## Why not an API that sets variables directly
 
-A call that writes any execution variable looks universal and costs three guarantees at once: it
-bypasses the registry and the node schema, which are the only places state is validated; it erases
-the authority boundary, because the same call that fixes a task list can raise a commit-authority
-flag or switch the operating mode; and it detaches a state change from any node transition, so the
-execution history stops explaining why the run behaves as it does. Everything legitimate is
-expressible as a teleport plus an owner, and that form keeps validation, authority, and the audit
-trail intact.
+The platform supports policy-controlled `session set-variable`: it requires a declared registry variable, explicit external-write policy for the current paused step, current execution/context revisions and a schema-valid value, and records the adjustment. It is not an unrestricted bypass. For substantive plan or checklist revision, prefer the authored teleport/owner route: it preserves reasoning, dependent-state derivation and required review/approval. An allowed single-variable edit alone does not perform that process.
 
 ## When a workflow needs this
 

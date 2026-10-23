@@ -14,10 +14,10 @@ import {
   EXTENSION_API_VERSION,
   setActiveExtensionRegistry,
   extensionSettingsCategory,
-  decryptValue,
   ExtensionNodeHandler,
   AgentMessageQueue,
 } from "@mcp-moira/workflow-engine";
+import { decryptValue } from "@mcp-moira/shared/settings-encryption";
 import type { ExtensionInvocationRequest, ExtensionManifest } from "@mcp-moira/workflow-engine";
 import { getDatabase, getSqliteInstance, user } from "@mcp-moira/shared";
 import { eq } from "drizzle-orm";

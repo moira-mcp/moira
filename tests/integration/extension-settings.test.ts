@@ -25,9 +25,8 @@ import {
   mergeSettingDefinitions,
   validateExtensionSettingValue,
   extensionSettingsCategory,
-  decryptValue,
-  maskEncryptedValue,
 } from "@mcp-moira/workflow-engine";
+import { decryptValue, maskEncryptedValue } from "@mcp-moira/shared/settings-encryption";
 import { ExtensionNodeHandler, AgentMessageQueue } from "@mcp-moira/workflow-engine";
 import type {
   ExtensionManifest,

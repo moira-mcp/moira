@@ -16,6 +16,10 @@ description: Разные пути для разных сценариев
 
 ## Реализация
 
+Ниже приведены фрагменты узлов; цели connections должны существовать в содержащем workflow.
+Ответ хранится в области вернувшего его узла, если поле не объявлено в реестре и не записано через
+`globalInputs`. Когда решение принадлежит этому узлу, размещайте `cases` прямо на нём.
+
 ### Сбор выбора
 
 ```json
@@ -23,6 +27,7 @@ description: Разные пути для разных сценариев
   "type": "agent-directive",
   "id": "get-action",
   "directive": "Ask user: create new or edit existing?",
+  "completionCondition": "The user selected create or edit",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -44,7 +49,7 @@ description: Разные пути для разных сценариев
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "action" },
+        "left": { "contextPath": "get-action.action" },
         "right": "create"
       },
       "output": "create"
@@ -74,7 +79,7 @@ description: Разные пути для разных сценариев
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "action" },
+        "left": { "contextPath": "get-action.action" },
         "right": "create"
       },
       "output": "create"
@@ -82,7 +87,7 @@ description: Разные пути для разных сценариев
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "action" },
+        "left": { "contextPath": "get-action.action" },
         "right": "edit"
       },
       "output": "edit"
@@ -91,17 +96,19 @@ description: Разные пути для разных сценариев
   "connections": {
     "create": "create-branch",
     "edit": "edit-branch",
-    "default": "delete-branch"
+    "default": "clarify-action"
   }
 }
 ```
 
 :::tip
-Для ветвлений на несколько путей упорядочивайте cases от наиболее частых к наименее частым для
-эффективности.
+Порядок cases задаёт приоритет: при пересекающихся условиях выбирается первое совпадение.
+Перестановка по частоте меняет поведение. Неизвестное действие не должно вести к удалению.
 :::
 
 ## Ветвление по булевому флагу
+
+Здесь `collect-capabilities` возвращает строковый enum `has_tests: "yes" | "no"`, а не boolean.
 
 ```json
 {
@@ -111,7 +118,7 @@ description: Разные пути для разных сценариев
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "has_tests" },
+        "left": { "contextPath": "collect-capabilities.has_tests" },
         "right": "yes"
       },
       "output": "has-tests"
@@ -126,6 +133,8 @@ description: Разные пути для разных сценариев
 
 ## Ветвление по числовому значению
 
+Здесь `validate-result` возвращает наблюдённое число ошибок; само введённое число не доказывает качество.
+
 ```json
 {
   "type": "condition",
@@ -134,7 +143,7 @@ description: Разные пути для разных сценариев
     {
       "when": {
         "operator": "gt",
-        "left": { "contextPath": "error_count" },
+        "left": { "contextPath": "validate-result.error_count" },
         "right": 0
       },
       "output": "has-errors"
@@ -150,6 +159,7 @@ description: Разные пути для разных сценариев
 ## Сложные условия
 
 Комбинирование нескольких проверок внутри одного case:
+`prepare-result` и `collect-items` должны вернуть указанные значения до маршрутизации.
 
 ```json
 {
@@ -158,12 +168,12 @@ description: Разные пути для разных сценариев
     "conditions": [
       {
         "operator": "eq",
-        "left": { "contextPath": "status" },
+        "left": { "contextPath": "prepare-result.status" },
         "right": "ready"
       },
       {
         "operator": "gt",
-        "left": { "contextPath": "items_count" },
+        "left": { "contextPath": "collect-items.items_count" },
         "right": 0
       }
     ]

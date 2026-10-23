@@ -22,6 +22,7 @@ Use template variables for file paths to make workflows reusable across differen
   "type": "agent-directive",
   "id": "collect-project-paths",
   "directive": "Determine project structure:\n- Docs location?\n- Output location?\n- Test files location?",
+  "completionCondition": "Relevant existing paths and authorized output location identified",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -47,7 +48,8 @@ Use template variables for file paths to make workflows reusable across differen
 {
   "type": "agent-directive",
   "id": "read-documentation",
-  "directive": "Read project documentation from {{docs_path}}.\nAnalyze structure and content.",
+  "directive": "Read project documentation from {{collect-project-paths.docs_path}}.\nAnalyze structure and content.",
+  "completionCondition": "Relevant documentation read completely and analysis produced",
   "connections": { "success": "write-output" }
 }
 ```
@@ -58,7 +60,8 @@ Use template variables for file paths to make workflows reusable across differen
 {
   "type": "agent-directive",
   "id": "write-output",
-  "directive": "Write results to {{output_path}}/analysis-results.md",
+  "directive": "Write results to {{collect-project-paths.output_path}}/analysis-results.md",
+  "completionCondition": "Result written to the authorized path and checked",
   "connections": { "success": "next-step" }
 }
 ```
@@ -83,18 +86,17 @@ Combine with conditional templates:
 
 ```json
 {
-  "directive": "{{#if testing_guide_path}}Read testing guide from {{testing_guide_path}}{{else}}No testing guide found, proceed with default patterns{{/if}}"
+  "directive": "{{#if get-initial-requirements.testing_guide_path}}Read testing guide from {{get-initial-requirements.testing_guide_path}}{{else}}Determine validation from the actual project configuration{{/if}}"
 }
 ```
 
 :::tip
-Collect all paths upfront in an information collection step. This allows validation and prevents
-mid-workflow errors.
+Collect paths needed by the current responsibility. Treat them as data: check ownership, allowed location and actual existence before reading or writing. Templates do not validate filesystem access.
 :::
 
 ## Real Example
 
-From `development-flow.json`:
+Collector configuration fragment; add the agent directive, type, completion condition and connections in the containing workflow:
 
 ```json
 {
@@ -126,13 +128,13 @@ Used later:
 
 ```json
 {
-  "directive": "{{#if has_checklist}}Review project checklist: {{checklist_path}}{{/if}}"
+  "directive": "{{#if get-initial-requirements.checklist_path}}Review project checklist: {{get-initial-requirements.checklist_path}}{{/if}}"
 }
 ```
 
 ## Path Validation
 
-Use pattern in inputSchema for basic validation:
+An inputSchema pattern checks only string format. This example restricts names to ASCII and excludes spaces; adapt it to the project. It does not prevent traversal or enforce an authorized filesystem boundary:
 
 ```json
 {

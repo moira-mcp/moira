@@ -79,33 +79,32 @@ export function getApiUrl() {
 }
 
 /**
- * Load profile definitions
- * Matching existing SLAs from BASELINES.md
+ * Ramping virtual-user profiles, not fixed requests-per-second or measured SLAs.
  */
 export const loadProfiles = {
   light: {
     stages: [
-      { duration: "2m", target: 10 }, // Ramp up to 10 RPS
-      { duration: "3m", target: 10 }, // Stay at 10 RPS
+      { duration: "2m", target: 10 }, // Ramp up to 10 VUs
+      { duration: "3m", target: 10 }, // Stay at 10 VUs
       { duration: "30s", target: 0 }, // Ramp down
     ],
-    description: "Light load profile (10 RPS peak)",
+    description: "Light load profile (10 VUs peak)",
   },
   medium: {
     stages: [
-      { duration: "5m", target: 50 }, // Ramp up to 50 RPS
-      { duration: "10m", target: 50 }, // Stay at 50 RPS
+      { duration: "5m", target: 50 }, // Ramp up to 50 VUs
+      { duration: "10m", target: 50 }, // Stay at 50 VUs
       { duration: "1m", target: 0 }, // Ramp down
     ],
-    description: "Medium load profile (50 RPS peak)",
+    description: "Medium load profile (50 VUs peak)",
   },
   heavy: {
     stages: [
-      { duration: "10m", target: 200 }, // Ramp up to 200 RPS
-      { duration: "15m", target: 200 }, // Stay at 200 RPS
+      { duration: "10m", target: 200 }, // Ramp up to 200 VUs
+      { duration: "15m", target: 200 }, // Stay at 200 VUs
       { duration: "2m", target: 0 }, // Ramp down
     ],
-    description: "Heavy load profile (200 RPS peak)",
+    description: "Heavy load profile (200 VUs peak)",
   },
   soak: {
     stages: [
@@ -113,7 +112,7 @@ export const loadProfiles = {
       { duration: "30m", target: 50 }, // Sustained load
       { duration: "1m", target: 0 }, // Ramp down
     ],
-    description: "Soak test (50 RPS for 30 min)",
+    description: "Soak profile (50 VUs sustained for 30 min)",
   },
 };
 
@@ -172,7 +171,7 @@ export const httpDefaults = {
 
 /**
  * Rate limit for load testing requests
- * Used to ensure we don't exceed target RPS
+ * Exported request-rate budgets; exporting these values does not throttle a workload.
  */
 export const rateLimits = {
   light: 15, // 15 RPS max

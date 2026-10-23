@@ -16,6 +16,8 @@ responsibility of the agent-directive that produces them.
 
 Store reusable text in a string entry of `variableRegistry`, then reference it with `from`:
 
+This is a declaration fragment. The containing graph must also declare and establish the trusted string global `workspace_path` before this node, and define its start and connection targets.
+
 ```json
 {
   "variableRegistry": {
@@ -73,7 +75,7 @@ or `{}`. No other input shape is accepted.
 The generated directive states the lifetime and retry behavior, warns that advancing the execution
 invalidates the URL, names the context-delivery fallback below as conditional on this host being
 unable to run the command, and explains that delivery does not prove reading on either route. Calling
-`session({ action: "current_step" })` while the execution is paused issues a fresh command and grant
+`session({ action: "current_step", executionId })` while the execution is paused issues a fresh command and grant
 without advancing the graph. A later directive must still explicitly require the agent to read each
 materialized file it uses.
 
@@ -179,7 +181,7 @@ get-action-type
        | edit   -> prepare-edit-workflow
 ```
 
-Its materialize declaration is equivalent to:
+Its file-delivery declaration, with progress metadata omitted, is:
 
 ```json
 {
@@ -188,15 +190,30 @@ Its materialize declaration is equivalent to:
   "basePath": "{{workspace_path}}",
   "files": [
     { "path": "process-id.txt", "from": "workspace_process_id_file" },
-    { "path": "workflow-authoring-reference.md", "from": "workflow_authoring_reference" }
+    { "path": "reference/engine.md", "from": "workflow_reference_engine" },
+    { "path": "reference/design.md", "from": "workflow_reference_design" },
+    { "path": "reference/artifacts.md", "from": "workflow_reference_artifacts" },
+    { "path": "reference/review-repair.md", "from": "workflow_reference_review_repair" },
+    { "path": "reference/validation.md", "from": "workflow_reference_validation" },
+    { "path": "reference/authority.md", "from": "workflow_reference_authority" },
+    { "path": "reference/patterns.md", "from": "workflow_reference_patterns" },
+    { "path": "reference/antipatterns.md", "from": "workflow_reference_antipatterns" },
+    { "path": "reference/progress.md", "from": "workflow_reference_progress" },
+    { "path": "reference/conversation.md", "from": "workflow_reference_conversation" },
+    { "path": "reference/templates/checklist.json", "from": "workflow_template_checklist" },
+    { "path": "reference/templates/do-check-redo.json", "from": "workflow_template_do_check_redo" },
+    { "path": "reference/templates/approval-gate.json", "from": "workflow_template_approval_gate" }
   ],
   "connections": { "success": "route-action-type" }
 }
 ```
 
-The preceding owner writes the global `workspace_path`. Registry defaults supply the execution ID
-and the authoring reference. Later create and edit owners write dynamic requirements, provenance,
-plans, and review reports; they do not rewrite these stable bootstrap files.
+The preceding owner establishes the global `workspace_path`. The `workspace_process_id_file`
+default is `{{executionId}}`; the other defaults supply thematic authoring references, a
+requirements-conversation guide, and starting workflow templates. Each consumer must read its
+applicable files: create requirements uses authority and conversation guidance, while edit-source
+preparation reads engine and artifact contracts. Later create and edit owners write dynamic
+requirements, provenance, plans, and review reports without rewriting the stable bootstrap files.
 
 ## Convert a manual bootstrap
 

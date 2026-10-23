@@ -14,7 +14,7 @@
  * Pure: the view lays out and draws what this returns.
  */
 
-import type { WorkflowGraph } from "../../types/workflow-types";
+import type { WorkflowGraph, WorkflowNode } from "../../types/workflow-types";
 
 export type StepCardKind = "start" | "instruction" | "check" | "system" | "finish";
 
@@ -44,18 +44,7 @@ export interface StepsModel {
   edges: StepEdge[];
 }
 
-type AnyNode = {
-  id: string;
-  type: string;
-  directive?: unknown;
-  message?: unknown;
-  connections?: Record<string, string>;
-  connectionLabels?: Record<string, unknown>;
-};
-
-const SYSTEM_TYPES_WITH_TEXT = new Set(["user-notification", "telegram-notification"]);
-
-function labelOf(node: AnyNode, key: string): string {
+function labelOf(node: WorkflowNode, key: string): string {
   const label = node.connectionLabels?.[key];
   if (typeof label === "string") return label;
   if (
@@ -76,7 +65,7 @@ function kindOf(type: string): StepCardKind {
 }
 
 export function stepsModel(workflow: Pick<WorkflowGraph, "nodes">): StepsModel {
-  const nodes = workflow.nodes as unknown as AnyNode[];
+  const nodes = workflow.nodes;
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const start = nodes.find((node) => node.type === "start");
   if (!start) return { cards: [], edges: [] };
@@ -86,7 +75,7 @@ export function stepsModel(workflow: Pick<WorkflowGraph, "nodes">): StepsModel {
   const state = new Map<string, "open" | "done">();
   let instructions = 0;
 
-  const visit = (node: AnyNode): void => {
+  const visit = (node: WorkflowNode): void => {
     state.set(node.id, "open");
     const kind = kindOf(node.type);
     cards.push({
@@ -95,9 +84,10 @@ export function stepsModel(workflow: Pick<WorkflowGraph, "nodes">): StepsModel {
       nodeType: node.type,
       number: kind === "instruction" ? ++instructions : null,
       text:
-        kind === "instruction" && typeof node.directive === "string"
+        node.type === "agent-directive" && typeof node.directive === "string"
           ? node.directive
-          : SYSTEM_TYPES_WITH_TEXT.has(node.type) && typeof node.message === "string"
+          : (node.type === "user-notification" || node.type === "telegram-notification") &&
+              typeof node.message === "string"
             ? node.message
             : "",
     });

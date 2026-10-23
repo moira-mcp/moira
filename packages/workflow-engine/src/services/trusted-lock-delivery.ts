@@ -1,9 +1,7 @@
-import {
-  createLogger,
-  getLockService,
-  ValidationError,
-  type LockDeliverySecret,
-} from "@mcp-moira/shared";
+import { createLogger } from "@mcp-moira/shared/logging/logger";
+import { getLockService } from "@mcp-moira/shared/services";
+import { ValidationError } from "@mcp-moira/shared/errors";
+import type { LockDeliverySecret } from "@mcp-moira/shared/services/lock-service";
 import type { IDataRepository } from "../interfaces/data-repository.js";
 import { buildApproveKeyboard } from "../types/telegram-types.js";
 import { getTelegramClient } from "./telegram-client-factory.js";

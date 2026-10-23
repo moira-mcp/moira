@@ -1,43 +1,27 @@
 ---
 title: Subagent Review Pattern
-description: Delegate reviews to independent subagents for unbiased verification
+description: Obtain independent review and route confirmed findings to their repair owner
 ---
 
 ## Purpose
 
-Ensure independent verification by delegating review tasks to a subagent. Prevents self-review bias where the same agent evaluates its own work.
-
-:::caution
-Self-review is unreliable. The agent that did the work cannot objectively assess its quality.
-:::
+Use an independent reviewer when the workflow contract requires someone other than the producer to assess the artifact. Self-review remains useful, but it does not satisfy that independence requirement.
 
 ## Problem
 
-When an agent reviews its own work:
-
-- Confirmation bias affects judgment
-- Known issues may be rationalized
-- Quality standards drift over time
-- "Looks good to me" syndrome
+A producer may overlook assumptions in its own work. A separate role provides another assessment, not a guarantee of objectivity or completeness. Judge the review by its reasoning and primary evidence.
 
 ## Solution
 
-What the workflow requires is independence, not delegation as such: the reviewer must not be the
-participant that produced the artifact. Delegating to a subagent through the Task tool is the usual
-way to obtain that independence, and a child workflow or a genuinely separate reviewing role
-satisfies the same requirement.
+Use the host's available delegation mechanism, a child workflow, or another genuinely independent reviewing role. The reviewer must not have produced the artifact being judged.
 
-Delegate review to a separate subagent using the Task tool:
-
-1. Agent completes work
-2. Workflow directs to review node
-3. Review node delegates to subagent via Task tool
-4. Subagent returns objective assessment
-5. Workflow routes based on findings
+1. Finish the artifact and freeze the version being reviewed.
+2. Give the reviewer the requirements, artifact access, relevant primary context and report destination.
+3. Let the reviewer inspect the actual sources and validation evidence.
+4. Keep the artifact unchanged until that review returns.
+5. Repair confirmed findings and return the revised artifact to the same gate.
 
 ## Review and Repair Contract
-
-The loop around an independent review is always the same shape, whoever performs the review:
 
 ```mermaid
 flowchart LR
@@ -47,76 +31,56 @@ flowchart LR
     D --> B
 ```
 
-The reviewer overwrites one known report file with the complete current set of reproducible blocking
-findings and returns only the count the condition uses. Zero findings is a valid, expected outcome.
-The repair owner reads that file, reproduces each defect, changes the artifact, and returns it to the
-same reviewer; if it cannot reproduce a defect or cannot change the artifact, it reports that cause
-instead of starting an unchanged iteration. A reviewer diagnoses and never repairs, so the report
-always describes an artifact someone else produced.
+Keep the complete current findings in one canonical report. The reviewer overwrites that report for each reviewed version and returns only the field the route needs. Zero findings is valid. A count describes findings in the report; it does not prove that every source was read or that the artifact is correct.
 
-Findings stay in the file. Copying them into workflow context creates a second copy that drifts from
-the report and inflates every later directive.
+The repair owner reads the report, reproduces each confirmed defect and fixes its cause. If a finding cannot be reproduced, or a real blocker prevents repair, report that cause instead of starting an unchanged iteration. The reviewer diagnoses; the producer repairs.
 
 ## Issue Contract
 
-The subagent returns a FLAT list of issues, not a severity-tiered report. There are no BLOCKING / MAJOR / MINOR tiers — every issue is mandatory to address. The condition node passes only when the count is zero.
+Use a flat list of actionable findings in the report. Do not make a severity label a reason to ignore a confirmed defect within the agreed scope. Keep observations or suggestions distinct from findings that block acceptance.
 
-- `issues_count` — number of issues found (0 = pass)
-- `issues` — the flat list of every issue, each mandatory
+The following schema fragment belongs to the reviewing node. Detailed findings stay in the report, without a duplicate context array:
 
 ```json
 {
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "issues_count": {
-        "type": "number",
-        "minimum": 0,
-        "description": "Number of issues found (0 = pass)"
-      },
-      "issues": {
-        "type": "array",
-        "items": { "type": "string" },
-        "description": "Flat list of every issue found (all mandatory, no severity tiers)"
-      }
-    },
-    "required": ["issues_count"]
-  }
+  "type": "object",
+  "properties": {
+    "issues_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Current actionable findings in the canonical review report"
+    }
+  },
+  "required": ["issues_count"]
 }
 ```
 
 ## Structure
 
-```
-[do-work] → [delegate-review] → [check-result] → pass → [next]
-                                      ↓
-                                    fail → [fix-issues] → [do-work]
+```text
+[do-work] → [delegate-review] → [check-result] → clean → [next]
+                                     ↓
+                                  repair → [fix-issues] → [delegate-review]
 ```
 
 ## Implementation
 
 ### Review Delegation Node
 
+These node examples assume a declared, initialized global `workspace_path` and existing connection targets. No review verdict receives a default.
+
 ```json
 {
   "type": "agent-directive",
   "id": "delegate-review",
-  "directive": "Delegate review to subagent using Task tool.\n\n1) Pass ONLY necessary information:\n   - File paths to review\n   - Success criteria\n   - Context directory\n\n2) Agent delegation rules:\n   - Role clarity: 'YOU ARE reviewer'\n   - Direct commands: 'CHECK' not 'could you check'\n   - Specify files: list exact paths\n   - Demand verification: 'VERIFY by reading files'\n\n3) Save review result to {{review_file_path}}\n\n4) Report findings honestly - if reviewer found issues, report issues_found: yes",
-  "completionCondition": "Review delegated, result saved, findings reported",
+  "directive": "Obtain independent review of the frozen artifact against the actual requirements. Give the reviewer direct access to the artifact, requirements and relevant primary sources. Save the complete current findings and reasoning in {{workspace_path}}/review.md. Do not change the artifact while review is in progress. Return the report's actual actionable finding count; do not copy its detailed contents into workflow variables.",
+  "completionCondition": "Independent review of the unchanged artifact completed, report saved and current finding count reported honestly",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "review_file": {
-        "type": "string",
-        "description": "Path to saved review file"
-      },
-      "issues_found": {
-        "type": "string",
-        "enum": ["yes", "no"],
-        "description": "Did reviewer find any issues? (every issue is mandatory; no severity tiers)"
-      }
+      "issues_count": { "type": "integer", "minimum": 0 }
     },
-    "required": ["review_file", "issues_found"]
+    "required": ["issues_count"]
   },
   "connections": { "success": "check-review-result" }
 }
@@ -124,34 +88,7 @@ The subagent returns a FLAT list of issues, not a severity-tiered report. There 
 
 ### Key Directive Elements
 
-**Role Assignment:**
-
-```
-YOU ARE plan reviewer. Your assessment determines if we proceed.
-```
-
-**Direct Commands:**
-
-```
-READ plan file directly.
-CHECK step implementation.
-VERIFY by reading actual files.
-RETURN every issue found as a flat list — every issue is mandatory; no severity tiers.
-```
-
-**Information Boundaries:**
-
-```
-Pass ONLY:
-- File paths to review
-- Success criteria
-- Relevant context paths
-
-DO NOT pass:
-- Your interpretation of quality
-- Hints about what you expect
-- Explanations of your work
-```
+State the reviewer's role, acceptance criteria, frozen artifact and report destination. Include enough dependency context to assess the change. Do not replace primary sources with the producer's assurances, conceal adverse evidence or frame the expected verdict as positive.
 
 ### Check Result Node
 
@@ -163,8 +100,8 @@ DO NOT pass:
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "issues_found" },
-        "right": "no"
+        "left": { "contextPath": "delegate-review.issues_count" },
+        "right": 0
       },
       "output": "clean"
     }
@@ -178,95 +115,36 @@ DO NOT pass:
 
 ## Real Example
 
-From `development-flow.json` gate review:
-
-```json
-{
-  "id": "agent-validate-step",
-  "directive": "Delegate critical review to subagent.\n\n1) Pass direct access to plan without interpretation\n2) No mentions of 'code was improved/added/fixed'\n3) Pass: file path, step index, changed files, reports directory\n4) Tell which project parts to study for context\n\nAgent prompt:\nYOU ARE plan step gate reviewer.\nYour assessment determines if we proceed.\nREAD plan file directly.\nCHECK step against PREVIOUS and FUTURE steps.\nEvaluate: code quality, errors, plan compliance.\nReturn every issue found as a flat list — every issue is mandatory; no severity tiers.\nProvide fix recommendations.",
-  "inputSchema": {
-    "properties": {
-      "agent_review_file": { "type": "string" },
-      "agent_issues_found": { "type": "string", "enum": ["yes", "no"] }
-    },
-    "required": ["agent_review_file", "agent_issues_found"]
-  }
-}
-```
+A plan gate reads the requirements and proposed plan, checks dependency order and whether each planned outcome is verifiable, then records the complete current findings at its canonical report address. A result gate reads the produced artifact and relevant evidence. They judge different artifacts and should not substitute for each other.
 
 ## Anti-Patterns
 
 ### Self-Review (Wrong)
 
-```json
-{
-  "directive": "Check if your work meets quality standards.",
-  "completionCondition": "Quality check passed"
-}
-```
-
-Problem: Agent evaluates own work.
+Calling the producer's own assessment an independent review. Keep useful self-review, then obtain the separate assessment the contract requires.
 
 ### Biased Delegation (Wrong)
 
-```json
-{
-  "directive": "Ask subagent to verify the improvements we made."
-}
-```
-
-Problem: "improvements" assumes positive outcome.
+Ask the reviewer to judge the actual change rather than to confirm “the improvements.” Give actual evidence, including failures and limitations.
 
 ### Excessive Context (Wrong)
 
-```json
-{
-  "directive": "Tell the reviewer about all the hard work done and why each decision was made."
-}
-```
-
-Problem: Influences reviewer's judgment.
+Copying unrelated conversation or duplicate reports obscures the primary artifact. Supply relevant source access and requirements without prescribing the verdict.
 
 ## Numeric Validation
 
-Combine with numeric validation for objective criteria:
-
-```json
-{
-  "inputSchema": {
-    "properties": {
-      "issues_count": {
-        "type": "number",
-        "minimum": 0,
-        "description": "Number of issues found (0 = pass)"
-      }
-    }
-  }
-}
-```
-
-```json
-{
-  "when": {
-    "operator": "eq",
-    "left": { "contextPath": "issues_count" },
-    "right": 0
-  },
-  "output": "clean"
-}
-```
+Use the actual count of actionable findings when the graph routes on it. A reasoned verdict can serve the same purpose in another workflow. Neither a count nor a score substitutes for semantic review; JSON Schema validates the returned shape only.
 
 ## Best Practices
 
-1. **Minimal context** - Pass only what reviewer needs
-2. **No interpretation** - Let reviewer form own conclusions
-3. **Direct file access** - Reviewer reads files directly
-4. **Honest reporting** - Agent must report findings truthfully
-5. **Save results** - Write review to file for traceability
+- Review one unchanged version and identify it unambiguously; use the caller's version/checksum convention when required.
+- Give the reviewer direct access to the primary sources.
+- Keep one canonical report and report confirmed gaps together.
+- Preserve required independent review after repair; see [Repair Reach](/docs/patterns/repair-reach/).
 
 ## Related Patterns
 
-- [Validation Loop](/docs/patterns/validation-loop/) - Retry on failure
-- [Step Verification](/docs/patterns/step-verification/) - Verify specific steps
-- [Escalation](/docs/patterns/escalation/) - Handle repeated failures
-- [Anti-Patterns](/docs/patterns/anti-patterns/) - Review-loop machinery to avoid
+- [Validation Loop](/docs/patterns/validation-loop/)
+- [Step Verification](/docs/patterns/step-verification/)
+- [Escalation](/docs/patterns/escalation/)
+- [Anti-Patterns](/docs/patterns/anti-patterns/)

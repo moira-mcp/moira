@@ -7,6 +7,10 @@ description: Обработка сбоев с вмешательством по�
 
 Когда автоматические повторные попытки не дают результата, эскалация пользователю для ручного вмешательства. Предотвращает бесконечные циклы и позволяет использовать человеческое суждение при сложных сбоях.
 
+Примеры ниже — фрагменты, целевые ноды которых должны существовать в содержащем workflow. `current_iteration`, `validation_round` и `max_validation_rounds` нужны только действующей политике повторов; объявите их числовыми записями реестра с начальными default, как в паттерне цикла валидации. Выходы ошибок принадлежат `handle-error`, решение пользователя — ноде, получившей настоящий ответ.
+
+`continue` и `skip` допустимы только для явно необязательного или допускающего отказ условия. Они не обходят обязательное ревью, согласование, доступ или границу внешнего эффекта. При таком блокере сохраняйте работу и эскалируйте. Сброс счётчика не разрешает повтор внешнего действия с неизвестным исходом.
+
 ## Эскалация при достижении лимита ограниченного цикла
 
 Когда ограниченный цикл ([цикл валидации](/ru/docs/patterns/validation-loop/) или цикл исправления/повтора) достигает лимита итераций, ветвь лимита направляет к узлу запроса у пользователя. Она никогда не пропускает молча к следующей фазе — это скрывает неустранённые проблемы от пользователя.
@@ -19,7 +23,8 @@ description: Обработка сбоев с вмешательством по�
 ```mermaid
 flowchart LR
     F[fix] --> V[validate]
-    V --> C{count < max?}
+    V -->|clean| N[next phase]
+    V -->|unresolved| C{count < max?}
     C -->|under-limit| F
     C -->|default| A[ask-user-limit]
     A --> D{decision}
@@ -34,7 +39,7 @@ flowchart LR
 {
   "type": "agent-directive",
   "id": "ask-user-limit",
-  "directive": "Validation reached its limit of {{max_validation_rounds}} rounds with {{issues_count}} issues remaining.\n\nAsk the user how to proceed:\n- continue: accept the current result and move on\n- reset: keep fixing (the round counter resets to 0)",
+  "directive": "Validation reached its limit of {{max_validation_rounds}} rounds with {{validate-result.issues_count}} issues remaining.\n\nAsk the user how to proceed:\n- continue: accept the current result and move on\n- reset: keep fixing (the round counter resets to 0)",
   "completionCondition": "User chose continue or reset",
   "inputSchema": {
     "type": "object",
@@ -57,7 +62,7 @@ flowchart LR
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "decision" },
+        "left": { "contextPath": "ask-user-limit.decision" },
         "right": "reset"
       },
       "output": "reset"
@@ -123,14 +128,20 @@ flowchart LR
 {
   "type": "agent-directive",
   "id": "escalate-to-user",
-  "directive": "Automated resolution failed after {{current_iteration}} attempts.\n\nProblem: {{last_error}}\nAttempted fixes: {{attempted_fixes}}\n\nAsk user how to proceed:\n- Continue with current result as-is?\n- Reset counter and try fixing again?\n- Provide manual fix instructions?\n- Skip this step?\n- Abort workflow?",
+  "completionCondition": "Actual user decision and any required repair instructions recorded without waiving mandatory authority or review",
+  "directive": "Automated resolution failed after {{current_iteration}} attempts.\n\nProblem: {{handle-error.last_error}}\nAttempted fixes: {{handle-error.attempted_fix}}\n\nAsk user how to proceed:\n- Continue with current result as-is?\n- Reset counter and try fixing again?\n- Provide manual fix instructions?\n- Skip this step?\n- Abort workflow?",
   "inputSchema": {
     "type": "object",
     "properties": {
       "user_decision": { "type": "string", "enum": ["continue", "reset", "fix", "skip", "abort"] },
       "user_instructions": { "type": "string" }
     },
-    "required": ["user_decision"]
+    "required": ["user_decision"],
+    "if": { "properties": { "user_decision": { "const": "fix" } }, "required": ["user_decision"] },
+    "then": {
+      "required": ["user_instructions"],
+      "properties": { "user_instructions": { "type": "string", "minLength": 1 } }
+    }
   },
   "connections": { "success": "route-user-decision" }
 }
@@ -155,7 +166,7 @@ flowchart LR
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "user_decision" },
+        "left": { "contextPath": "escalate-to-user.user_decision" },
         "right": "reset"
       },
       "output": "reset"
@@ -163,7 +174,7 @@ flowchart LR
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "user_decision" },
+        "left": { "contextPath": "escalate-to-user.user_decision" },
         "right": "continue"
       },
       "output": "proceed"
@@ -171,7 +182,7 @@ flowchart LR
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "user_decision" },
+        "left": { "contextPath": "escalate-to-user.user_decision" },
         "right": "skip"
       },
       "output": "proceed"
@@ -179,7 +190,7 @@ flowchart LR
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "user_decision" },
+        "left": { "contextPath": "escalate-to-user.user_decision" },
         "right": "abort"
       },
       "output": "abort"
@@ -210,13 +221,16 @@ flowchart LR
 ```json
 {
   "id": "handle-error",
+  "type": "agent-directive",
+  "completionCondition": "Observed failure and attempted repair recorded for the escalation consumer",
+  "connections": { "success": "escalate-to-user" },
   "directive": "Record error details for escalation context.\n\nCurrent iteration: {{current_iteration}}\nError encountered: [describe error]",
   "inputSchema": {
     "properties": {
       "last_error": { "type": "string" },
       "attempted_fix": { "type": "string" }
     },
-    "required": ["last_error"]
+    "required": ["last_error", "attempted_fix"]
   }
 }
 ```
@@ -227,6 +241,7 @@ flowchart LR
 {
   "type": "agent-directive",
   "id": "workflow-aborted",
+  "completionCondition": "Owned partial results and unresolved work recorded; only authorized cleanup performed",
   "directive": "User chose to abort workflow.\n\nCleanup tasks:\n- Save partial progress\n- Document what was completed\n- Note why abort was necessary",
   "inputSchema": {
     "properties": {
@@ -238,6 +253,8 @@ flowchart LR
   "connections": { "success": "end-aborted" }
 }
 ```
+
+Завершение авторского маршрута через `end` даёт обычный завершённый запуск с описанным частичным результатом; оно не переводит выполнение в статус `stopped`. Для фактической остановки используйте разрешённое действие `session stop` и его требования, не отвечая фиктивным успехом.
 
 ## Уровни эскалации
 
@@ -251,11 +268,14 @@ flowchart LR
 
 ## Реальный пример
 
-Из `development-flow.json`:
+Пример ответственности за получение настоящего ответа пользователя; его решение должен читать соответствующий маршрут содержащего workflow:
 
 ```json
 {
   "id": "collect-user-feedback",
+  "type": "agent-directive",
+  "completionCondition": "Actual user decision and relevant guidance recorded",
+  "connections": { "success": "route-feedback" },
   "directive": "Verification failed {{current_iteration}} times.\n\nAsk user:\n- Provide guidance for resolution?\n- Skip this step?\n- Modify the plan?\n\nSummarize the problem and what has been attempted.",
   "inputSchema": {
     "properties": {

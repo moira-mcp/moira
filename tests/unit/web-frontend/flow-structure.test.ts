@@ -74,7 +74,7 @@ describe("rename preview", () => {
 });
 
 describe("the block of a step inserted on a connection", () => {
-  const derive = (graph: WorkflowGraph) => deriveProcess(graph as never)!;
+  const derive = (graph: WorkflowGraph) => deriveProcess(graph)!;
   const insert = (edge: { source: string; key: string }, blockId?: string) =>
     applyOperation(quickTask(), {
       kind: "insert-on-edge",
@@ -176,7 +176,7 @@ describe("delete plan", () => {
 describe("connection targets", () => {
   test("steps are grouped by block in process order, without the start step", () => {
     const graph = quickTask();
-    const blocks = runBlocks(definitionProgress(graph, deriveProcess(graph as never)!));
+    const blocks = runBlocks(definitionProgress(graph, deriveProcess(graph)!));
     const groups = targetGroups(graph, blocks);
     expect(groups.map((g) => g.blockId)).toEqual(blocks.map((b) => b.id));
     expect(groups[0].steps.map((s) => s.id)).toEqual(["get-task"]);

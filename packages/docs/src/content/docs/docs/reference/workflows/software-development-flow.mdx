@@ -16,22 +16,7 @@ mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from p
 
 ## Lifecycle
 
-The flow captures source-grounded requirements and authority, resolves one simple visual preference (`disabled`, `screenshots`, or `html_report`), creates and independently reviews an architecture-aware plan, and then treats that current plan as the sole source of each unit's visual and user-approval policy. It prepares every unit from the real repository before mutation, implements complete vertical behavior, and runs a fresh producer-completion pass before deterministic validation and independent semantic review. Documentation and tests are part of production, not late cleanup.
-
-Every execution also exposes one always-visible process view of fifteen blocks: Intake, Project
-health, Plan and plan review, Plan approval and activation, Implement a unit, Unit validation
-gates, Broad validation and documentation, Independent completeness review, Unit review with the
-user, Checkpoint and advance, Feature-wide validation, Final review and report, Replan, Finalize,
-and Stopped. Every node belongs to one block, every edge that leaves a block is labelled, and
-every return explains its cause and exit, so transitions, loops and hub blocks are derived from
-the executable graph. The active block follows the current primary workflow node, so repair,
-replan, and the normal multi-unit checkpoint loop reopen the corresponding earlier block without
-separate status variables. Notifications attach no picture; they carry the plan as a text list (see
-[Notifications](#notifications)). Progress never changes SDF routing or its authority boundary.
-
-The stable inactive labels stay short. While an exact implementation, validation, independent
-review, repair, or checkpoint node is current, its active-only label adds the authoritative unit,
-total, and iteration values for that role. Plan/replan nodes never reuse stale unit counters.
+The flow captures source-grounded requirements and authority, resolves one simple visual preference (`disabled`, `screenshots`, or `html_report`), creates and independently reviews an architecture-aware plan, and then treats that current plan as the sole source of each unit's visual and user-approval policy. It prepares every unit from the real repository before mutation, implements complete vertical behavior with its tests, and runs producer completion before validation. Once the applicable checks converge, it updates affected permanent documentation before independent unit completeness review. A product defect discovered while documenting returns to implementation and the checks it invalidates.
 
 `screenshots` captures and actually inspects the required states once. `html_report` reuses those same accepted images in a self-contained report, uploads it through Moira's Artifact API, and sends the public URL through the current user's configured communication channels; it never performs a second screenshot pass. Artifact upload failure blocks the unit. Missing channels or send failure at a reached notification node is non-blocking. Interactive plan, selected-unit, and final approvals receive attention notifications and wait in ordinary directives. Autonomous mode has no human-approval directives. Ending the whole run early is the exception and is not an approval: where a blocker cannot be cleared or a unit cannot close, the flow states what ending it now leaves incomplete and ends only on the user's explicit confirmation, which autonomous mode never infers for itself.
 
@@ -41,50 +26,20 @@ Every current-unit producer, validator, reviewer, repair role, checkpoint, and r
 
 When the originating request already authorizes a later caller-owned push, pull request, publication, release, or deployment, SDF records that intent through the `session` reminder API during intake. The write requires the current workflow-step revision but does not advance that revision or invalidate the presented Step attempt. The reminder is returned under `Next requested actions` on ordinary completion for both standalone and child runs. It never becomes a development-plan unit, changes `vcs_commits_authorized`, performs the effect, or grants new authority.
 
-Runtime, browser, visual, integration, performance, and full-suite checks remain conditional on the feature and repository. Permanent documentation closes with its vertical unit; final reconciliation still checks cross-unit truth and independently reviews only changed or previously uncovered documentation. The final suffix covers feature-wide validation, semantic review, requirements coverage, factual reporting, and authority-bound local VCS reconciliation. A run ends in one of three ways, and each sends a best-effort notification through the configured
+Runtime, browser, visual, integration, performance, and full-suite checks remain conditional on the feature and repository. Permanent documentation closes with its vertical unit. One unified final semantic review checks the complete result against the requirements, including cross-unit documentation; there is no separate documentation-only reconciliation. Finalization covers feature-wide validation, requirements coverage, factual reporting, and authority-bound local VCS reconciliation. A run ends in one of three ways, and each sends a best-effort notification through the configured
 user channels: it completes; it ends early on the user's explicit confirmation; or it finishes the
 development work while local finalization stays blocked, which is reported as such rather than as a
 complete run.
 
 ## Notifications
 
-The intake persists the [task name](/docs/concepts/workflows/#execution-task-name) with fresh
-Progress/session guards before completing. The next node delivers `standards/planning.md`, whose
-naming contract later responsibilities read. Optional `execution_note` is arbitrary nonempty text
-of at most 120 characters. Authorized requirements/revision/feedback owners rename only when actual
-scope changes; tactical repairs retain the name, completed origins and delivery boundaries.
+Intake persists the [task name](/docs/concepts/workflows/#execution-task-name) with fresh guards before completing. Only an authorized scope change renames it; optional `execution_note` (up to 120 characters) remains separate.
 
-SDF notifies through the user's configured channels. Every message is headed by the flow name and
-the run's independently persisted task name, linked to the run page, and carries no
-image. Every line written from the run's values comes from a one-sentence field the step writes for
-a person: the goal (`goal_summary`, rewritten when the requirements are revised), the unit titles (`plan_units`), a unit's result (`unit_result_summary`), a blocker
-(`blocker_summary`), and the final outcome and limitations. Report links stand as plain URLs. The
-messages are in English.
+Configured channels receive English text with the flow/task heading, run link, goal, unit list, current result or blocker, and report links, without images or internal variable names. Revised plans are announced again. Interactive plan, selected-unit and final acceptance messages explain their choices; autonomous runs do not ask for those approvals.
 
-| When | Interactive | Autonomous |
-| --- | --- | --- |
-| The reviewed plan is ready | "Plan ready for your approval": the goal, the full unit list, approve it and the work goes ahead on this plan, or reject it with feedback | "Plan approved — the work goes ahead on this plan": the goal, the full unit list |
-| A unit with a report and no approval | "Unit N “title” is done": its result and the report link | the same, also when the unit asked for approval |
-| A unit that needs approval | "Unit N “title” is ready for your review": its result, accept it or reject it with feedback — with the report link in the same message when the unit has one | — (autonomous runs never stop for unit approval) |
-| A blocker at the health check, runtime, broad or final checks | "Blocked": the blocker and the choices — fix it and let the agent try again, or end the whole run | the same |
-| Finalization is blocked | "Finishing is blocked": the blocker and the choices — retry, finish without the final local commit, or end the whole run | the same |
-| A unit needs a plan change | "Unit N “title” needs a plan change": why, approve closing it and revising the plan, or end the run | the same unit and reason, and that the agent closes the unit and revises the plan when the reason holds, or otherwise asks the person whether to end the run; the revised plan is announced |
-| The result is ready | "The result is ready for your approval": the outcome, limitations, the final report link, the choices, and every unit's state | — |
-| The run finishes | "Finished": the outcome, limitations and follow-ups, whether local commits were made, the final report link, the unit list | the same |
-| The run finishes without the final commit | "Finished without the final local commit": the blocker and what is left, the unit list | the same |
-| The person ends the run | "Stopped": why, that the work done so far stays and nothing after that point was done, the unit list when a plan exists | the same |
+Blocker gates wait for the person in both modes: repair the external condition and retry, or explicitly end the whole run. Blocked finalization additionally offers finishing without the final local commit. An interactive unit closure requests approval to revise the plan; an autonomous closure follows the confirmed cause or asks whether to end the run. Finishing, finishing without the commit and user-confirmed early termination are reported distinctly, with limitations, local commit state and follow-ups; terminal lists show no unit still in progress.
 
-Messages that ask are sent only before steps that wait for the person. The blocker gates wait for
-the person in autonomous runs too, so their messages give the choices in both modes. Every other
-autonomous message, the unit closure's included, states what happens rather than asking: at the
-closure it says what the agent does with the plan change.
-
-The final report is rendered as a self-contained HTML page and uploaded through the Artifact API,
-like a unit's report; either link may be `http` or `https`, as the instance serves artifacts. The
-last messages connect straight to the end of the run, so their lists show no unit still in
-progress. Because the flow notifies, starting it for a user with no configured channel is refused
-with an instruction; an agent that wants to run without notifications prepares the start again
-with `skipNotificationCheck: true`. A failed notification does not stop the run.
+Final and unit HTML reports are self-contained Artifact API publications; URLs use the instance's HTTP or HTTPS scheme. Missing channels refuse start unless a new prepare explicitly uses `skipNotificationCheck: true`; notification delivery failure does not stop the run.
 
 ### Waiting for you
 
@@ -101,7 +56,7 @@ link to the run.
 
 ## Execution progress
 
-The run's progress map is derived from the executable graph: every node belongs to one stage, every stage-leaving edge is labelled, and every return explains its cause and exit. The implementation stage binds the plan itself — `plan_units` as the items with each `title`, `current_step_index` as the unit in progress, counted from `1`, `completed_units` as the units closed, and `total_steps` as the unit count — so the run's progress data (`session progress` and the execution progress API) and its notifications show every unit, which ones are done and which one is in progress, and how long each pass through the stage took. Every plan writer returns `plan_units`, one short title per unit in plan order; the plan review derives `total_steps` from it, and activation returns only where to resume.
+The process view follows the recorded route and current node, showing the plan, completed units and current work. Repair or replanning reopens the corresponding stage without invented execution state. Display data never changes routing or authority. See [Process view](/docs/concepts/process-view/).
 
 ## When to use it
 

@@ -1,10 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import {
-  ConflictError,
-  createLogger,
-  executionMutationAttemptsTotal,
-  ValidationError,
-} from "@mcp-moira/shared";
+import { ConflictError, ValidationError } from "@mcp-moira/shared/errors";
+import { createLogger } from "@mcp-moira/shared/logging/logger";
+import { executionMutationAttemptsTotal } from "@mcp-moira/shared/metrics";
 import type { WorkflowGraph } from "../interfaces/core-interfaces.js";
 import type { IDataRepository } from "../interfaces/data-repository.js";
 import type {
@@ -14,7 +11,7 @@ import type {
   PresentedExecutionAttempt,
   WorkflowExecution,
 } from "../types/index.js";
-import { canonicalJson } from "../extensions/declared-schema.js";
+import { canonicalJson } from "@mcp-moira/shared/canonical-json";
 import { continuationFacts, continuationSurfaceDigest } from "./continuation-surface.js";
 
 export const EXECUTION_ATTEMPT_LEASE_MS = 30_000;

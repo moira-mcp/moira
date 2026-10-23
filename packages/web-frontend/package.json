@@ -2,7 +2,6 @@
   "name": "@mcp-moira/web-frontend",
   "version": "0.3.0",
   "description": "React frontend for MCP Moira workflow visualization",
-  "main": "dist/index.js",
   "type": "module",
   "scripts": {},
   "dependencies": {

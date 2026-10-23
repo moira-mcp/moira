@@ -14,7 +14,7 @@ import {
   WorkflowListItem,
 } from "../interfaces/core-interfaces.js";
 import { GraphValidator } from "../validation/graph-validator.js";
-import { createLogger } from "@mcp-moira/shared";
+import { createLogger } from "@mcp-moira/shared/logging/logger";
 
 export class InMemoryGraphStorage implements IGraphStorage {
   private logger = createLogger({ component: "InMemoryGraphStorage" });

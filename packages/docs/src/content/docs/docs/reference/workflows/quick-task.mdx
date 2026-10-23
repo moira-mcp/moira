@@ -8,7 +8,7 @@ import { Aside } from '@astrojs/starlight/components';
 Quick Task runs a bounded multi-step non-development task as Plan → Approve → Execute → Review → Accept; in autonomous mode the approval and acceptance steps are skipped (see [Operating mode](#operating-mode)). It keeps complete task, plan, review, decision, change, and evidence records in an execution-specific filesystem workspace. Workflow context carries only bounded file references, the plan's unit titles and length, the execution cursor, a one-line result, and short values used for routing.
 
 <Aside type="tip">
-Use Quick Task when an agent has filesystem access and bounded non-development work fits a plan of at most ten meaningful units. For software implementation, bug fixing, refactoring, migrations, or rollout, use [Software Development Flow](./software-development-flow/); its plan scales the lifecycle to the actual change. Use [Robust Task](/docs/reference/workflows/robust-task/) when a complex general task needs a stronger recovery policy for partial execution or operational failures.
+Use Quick Task when an agent has filesystem access and bounded non-development work fits a plan of at most ten meaningful units. For software implementation, bug fixing, refactoring, migrations, or rollout, use [Software Development Flow](/docs/reference/workflows/software-development-flow/); its plan scales the lifecycle to the actual change. Use [Robust Task](/docs/reference/workflows/robust-task/) when a complex general task needs a stronger recovery policy for partial execution or operational failures.
 </Aside>
 
 ## Start
@@ -20,47 +20,13 @@ mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from p
 
 ## Process
 
-```mermaid
-flowchart LR
-    A[Write task contract] --> B[Write plan iteration]
-    B --> C[Independent plan review]
-    C -->|Findings| D[Write corrected plan iteration]
-    D --> C
-    C -->|Clean| E[User approval]
-    E -->|Revision requested| F[Write revised plan iteration]
-    F --> C
-    E -->|Approved| G[Execute units in order]
-    G -->|Plan no longer fits| F
-    G --> H[Independent result review]
-    H -->|Findings| I[Fix result and record change]
-    I --> H
-    H -->|Clean| J[User acceptance]
-    J -->|Rework requested| K[Rework and record change]
-    K --> H
-    J -->|Accepted| L[End]
-```
+Intake → independent plan review → approval → sequential execution → independent result review → acceptance. Findings return to a separate repair owner; changed plans and results pass the same review again.
 
 ## Workspace contract
 
 The intake step derives the complete task contract from the triggering conversation, asking only for a material fact that cannot be discovered. It creates a workspace correlated with the Moira execution:
 
-```text
-./moira-ws/quick-task-<executionId>/
-├── process-id.txt
-├── task.md
-├── execution.md
-├── plans/
-│   └── <iteration>/
-│       ├── plan.md
-│       ├── review.md
-│       ├── decision.md
-│       └── change.md
-└── result-reviews/
-    └── <iteration>/
-        ├── review.md
-        ├── decision.md
-        └── change.md
-```
+`./moira-ws/quick-task-<executionId>/` holds the task contract, execution evidence and immutable plan/result-review iterations, including exact decisions and changes. `process-id.txt` identifies the execution for recovery.
 
 Numeric iteration directories are published only after their record is complete. Existing completed iterations are not overwritten. A resumed node verifies and reuses its complete current record instead of duplicating it.
 
@@ -90,13 +56,7 @@ In `interactive` mode nothing changes. In `autonomous` mode the plan-approval ga
 
 ## Execution progress
 
-The execution card and exported progress image use the same seven-block process: Understand the task → Draft the plan → Independent plan review → Plan approval → Execute plan steps → Final review → Present the result. The task name is separate from the note and workflow name. Every node, including routing nodes and the jump-only replan entry, belongs to one of these blocks; every edge that leaves a block is labelled, and every return carries the cause of the loop and the condition that ends it, so the process view is derived from the executable graph and never adds routes or changes it.
-
-Each stage shows its stable purpose, the exact current role, the latest confirmed outcome, and the next meaningful action. The node that owns a semantic result writes one bounded outcome: intake summarizes the resolved contract, planning roles replace the current plan synopsis, execution replaces the latest completed-unit outcome, review roles replace the current review disposition, and presentation or rework replaces the result disposition. Writers replace the value instead of appending history.
-
-The Execute plan steps block binds the plan itself — `plan_steps` as the items with each `title`, `current_step` as the unit in progress, counted from `0`, and `total_steps` as the total — so the run and its notifications show every unit, which ones are done and which one is in progress.
-
-Active labels and summaries describe work currently in progress without hiding the last confirmed outcome. If plan repair or mid-execution replanning creates a new plan revision, its synopsis atomically replaces obsolete current and future plan meaning while retaining only still-valid completed outcomes. These progress values are render-only: conditions, connections, the plan cursor, approvals, and authority continue to come from the primary workflow state.
+The run page and progress image show the current role, latest confirmed outcome and plan items. A revised plan replaces obsolete current/future projections while retaining still-valid completed work. Progress is display-only: it does not grant authority, change routing or prove completion. See [Process view](/docs/concepts/process-view/).
 
 ## Execution and evidence
 
@@ -129,11 +89,7 @@ The user's exact acceptance or rework request is written to `decision.md`. Rewor
 Quick Task notifies through the user's configured channels. Every message is headed by the flow
 name and the run's task, linked to the run page; none carries a file path or an image.
 
-| When | Interactive | Autonomous |
-| --- | --- | --- |
-| The reviewed plan is ready | "Plan ready for your approval" with the whole plan and the choices: approve it and the work goes ahead, or reject it with feedback to have it revised | "Plan approved — the work goes ahead" with the whole plan |
-| The reviewed result is ready | "Result ready for your review": the result in one line; accept to finish, or ask for rework; how many units are done | — |
-| The run finishes | "Finished": the result in one line and every unit marked `✓` | the same |
+Interactive runs announce the reviewed plan with approval/revision choices, then the reviewed result with acceptance/rework choices. Autonomous runs announce that the reviewed plan goes ahead. Both announce the final result and completed units.
 
 A rejected plan, and a plan revised mid-run after a replan, is announced again in its revised form
 with the units already done kept as done; a rework is followed by a new result message. The

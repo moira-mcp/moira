@@ -19,7 +19,7 @@ import { createRateLimiters } from "../../packages/web-backend/src/middleware/ra
 import {
   encodeOwnerFrame,
   OWNER_STREAM_CONTENT_TYPE,
-} from "../../packages/workspace-service/src/stream-frame.mjs";
+} from "@mcp-moira/shared/http/owner-stream-frame";
 
 describe("Telegram streamed attachment HTTP transport", () => {
   it("delivers MP4 and quoted Unicode JPG documents through the secret-bound broker and vendor HTTP fixture", async () => {

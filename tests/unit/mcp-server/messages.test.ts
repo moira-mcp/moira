@@ -42,7 +42,7 @@ describe("MCP Messages Module", () => {
       expect(ERRORS.tool_not_found("my_tool")).toBe("Tool 'my_tool' not found in registry");
       expect(ERRORS.workflow_not_found("wf-123")).toBe("Workflow 'wf-123' not found");
       expect(ERRORS.execution_not_found("exec-456")).toBe("Execution 'exec-456' not found");
-      // Issue #386: "waiting" merged into "running"
+      // Waiting executions retain the active "running" state.
       expect(ERRORS.cannot_edit_execution("completed")).toBe(
         "Cannot edit execution in state 'completed'. Only 'running' executions can be edited.",
       );
@@ -52,7 +52,7 @@ describe("MCP Messages Module", () => {
     it("should generate documentation_file_not_found with path info", () => {
       const result = ERRORS.documentation_file_not_found("nodes.mdx", "/app/docs");
       expect(result).toContain("Documentation file not found: nodes.mdx");
-      expect(result).toContain("DOCS_DIR");
+      expect(result).toContain("MCP package includes its portable help content");
       expect(result).toContain("/app/docs");
     });
   });
@@ -72,8 +72,7 @@ describe("MCP Messages Module", () => {
     });
   });
 
-  // TOOL_DESCRIPTIONS removed - descriptions are loaded dynamically from DB
-  // See mcp-text-service.test.ts for DB loading tests
+  // Tool descriptions belong to the typed tool catalog, not the message constants tested here.
 
   describe("LABELS", () => {
     it("should have all UI labels defined", () => {
@@ -91,8 +90,7 @@ describe("MCP Messages Module", () => {
       expect(VALIDATION_HELP.process_troubleshooting).toBeDefined();
     });
 
-    it("should have new troubleshooting categories", () => {
-      // New categories added in Step 7 for error hints
+    it("should have troubleshooting categories for authentication, transport, tools, settings and help", () => {
       expect(VALIDATION_HELP.auth_troubleshooting).toBeDefined();
       expect(VALIDATION_HELP.connection_troubleshooting).toBeDefined();
       expect(VALIDATION_HELP.tool_update_troubleshooting).toBeDefined();
@@ -104,7 +102,7 @@ describe("MCP Messages Module", () => {
       expect(Array.isArray(VALIDATION_HELP.general)).toBe(true);
       expect(VALIDATION_HELP.general.length).toBeGreaterThan(0);
 
-      // Verify new categories have content
+      // Troubleshooting categories carry actual help text.
       expect(Array.isArray(VALIDATION_HELP.auth_troubleshooting)).toBe(true);
       expect(VALIDATION_HELP.auth_troubleshooting.length).toBeGreaterThan(0);
       expect(Array.isArray(VALIDATION_HELP.settings_troubleshooting)).toBe(true);

@@ -9,8 +9,8 @@ import {
   OWNER_STREAM_CONTENT_TYPE,
   readOwnerFrame,
   settleOwnerFrame,
-} from "../../../workspace-service/src/stream-frame.mjs";
-import { readOwnerJsonBody } from "../../../workspace-service/src/request-body.mjs";
+} from "@mcp-moira/shared/http/owner-stream-frame";
+import { readOwnerJsonBody } from "@mcp-moira/shared/http/request-body";
 
 /** Private actor endpoint: source bytes are opaque and never pass through a JSON body parser. */
 export function createCommunicationOwnerRoutes(service: CommunicationOwnerTransport): Router {

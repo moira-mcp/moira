@@ -125,7 +125,6 @@ jest.unstable_mockModule("@mcp-moira/workflow-engine", () => ({
   TelegramClient: class {
     setWebhook = setWebhook;
   },
-  maskEncryptedValue: jest.fn((value: string) => `masked:${value}`),
 }));
 
 jest.unstable_mockModule("../../../packages/web-backend/src/utils/admin-utils.js", () => ({

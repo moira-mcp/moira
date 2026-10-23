@@ -23,7 +23,7 @@ description: Проверка результатов и повторные по�
 {
   "type": "agent-directive",
   "id": "do-work",
-  "directive": "Complete the task. Iteration: {{current_iteration}}",
+  "directive": "Complete the task against its actual acceptance criteria. Report unresolved findings honestly.",
   "completionCondition": "Task completed with quality standards met",
   "inputSchema": {
     "type": "object",
@@ -47,7 +47,7 @@ description: Проверка результатов и повторные по�
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "quality_check_passed" },
+        "left": { "contextPath": "do-work.quality_check_passed" },
         "right": "yes"
       },
       "output": "passed"
@@ -66,27 +66,27 @@ description: Проверка результатов и повторные по�
 {
   "type": "agent-directive",
   "id": "fix-issues",
-  "directive": "Fix issues found in iteration {{current_iteration}}. Previous result: {{result}}",
+  "directive": "Repair the confirmed findings in {{do-work.result}} at their source; preserve valid work and return to verification.",
+  "completionCondition": "Confirmed defects repaired, with relevant checks performed or their blocker reported",
   "connections": { "success": "increment-iteration" }
 }
 ```
 
 ### Счётчик итераций
 
-С использованием expression ноды:
+Счётчик нужен только реальному бюджету повторов или потребителю нумерованных артефактов. Пример предполагает числовую запись `current_iteration` в реестре с description и `default: 0`. Иначе уберите счётчик и соедините починку с проверкой напрямую:
 
 ```json
 {
   "type": "expression",
   "id": "increment-iteration",
   "expressions": ["current_iteration = current_iteration + 1"],
-  "connections": { "default": "do-work" }
+  "connections": { "default": "check-max-iterations" }
 }
 ```
 
 :::caution
-Всегда включайте счётчики итераций для предотвращения бесконечных циклов. Рекомендуется добавить
-проверку максимального количества итераций.
+Счётчик без применяемой политики только считает повторы. Повторяйте после установления причины или изменения результата; останавливайтесь на реальном блокере или действующем бюджете повторов.
 :::
 
 ## С ограничением итераций
@@ -116,11 +116,11 @@ description: Проверка результатов и повторные по�
 
 ## Ограниченный цикл ре-валидации
 
-Цикл ре-валидации или ре-ревью на каждом круге возвращается к ОДНОЙ И ТОЙ ЖЕ ноде проверки. Без подсказки в директиве входа в цикл агент может ошибочно воспринять повторное появление той же ноды как зацикливание и сообщить о цикле пользователю. Два требования предотвращают это.
+Повторная проверка возвращается к той же ноде. Объясните, какой артефакт изменён и какие замечания перепроверяются. Числовой предел нужен только при требовании предметной области или вызывающей стороны.
 
 ### Счётчик — это expression нода
 
-Счётчик кругов ДОЛЖЕН инкрементироваться expression нодой (автоматически потоком), объявленной в `variableRegistry` с числовым `default`. Счётчик, инкрементируемый агентом, — это антипаттерн: агента не просят выполнять арифметику, а отсутствующее или нечисловое значение ломает проверку предела.
+Если у счётчика есть реальный потребитель, увеличивайте его expression-нодой и объявите в `variableRegistry` с числовым default. Фрагмент показывает выбранную политику повторов, а не универсальные пределы.
 
 ```json
 {
@@ -156,7 +156,7 @@ description: Проверка результатов и повторные по�
 {
   "type": "agent-directive",
   "id": "re-validate",
-  "directive": "Re-validation pass {{validation_round}} of {{max_validation_rounds}} — a normal quality loop, expected to converge. This is NOT a bug and NOT a stuck flow; do not report a loop to the user.\n\nRe-check the work against the criteria and report whether all issues are resolved.",
+  "directive": "Re-validation pass {{validation_round}} of {{max_validation_rounds}}. Inspect the changed artifact against the criteria. Report unresolved findings, an unchanged failure or a real blocker honestly; do not blindly replay an uncertain external action.",
   "completionCondition": "Work re-checked against criteria",
   "inputSchema": {
     "type": "object",
@@ -170,8 +170,7 @@ description: Проверка результатов и повторные по�
 ```
 
 :::caution
-Текст подсказки точный. Ре-валидация через одну и ту же ноду ожидаема, а не баг — директива должна
-это сообщать, иначе агент может остановиться и сообщить о ложном цикле.
+Формулировка примерная. Возврат к ревью после починки ожидаем; неизменённая работа, реальный блокер или небезопасный повтор внешнего действия требуют честного сообщения. Подсказка не разрешает слепые повторы.
 :::
 
 ## Числовая проверка качества
@@ -194,7 +193,7 @@ description: Проверка результатов и повторные по�
 {
   "when": {
     "operator": "eq",
-    "left": { "contextPath": "issues_count" },
+    "left": { "contextPath": "validate-result.issues_count" },
     "right": 0
   },
   "output": "clean"
@@ -209,12 +208,15 @@ description: Проверка результатов и повторные по�
 
 ## Реальный пример
 
-Из `development-flow.json`:
+Пример предполагает объявленные метаданные шага и существующие целевые ноды в содержащем workflow:
 
 ```json
 {
   "id": "verify-step-implementation",
-  "directive": "Verify step {{current_step_name}} implementation:\n- Expected: {{expected_outcome}}\n- Check actual matches expected",
+  "type": "agent-directive",
+  "completionCondition": "Actual step result assessed against its expected output and gaps reported",
+  "connections": { "success": "route-verification" },
+  "directive": "Verify step {{current_step_name}} implementation:\n- Expected: {{expected_output}}\n- Check actual matches expected",
   "inputSchema": {
     "properties": {
       "step_verified": { "type": "string", "enum": ["yes", "no"] },
@@ -235,7 +237,7 @@ description: Проверка результатов и повторные по�
 что честный ответ и есть единственный способ провести прогон правильно:
 
 ```
-`approval` записывает собственный ответ пользователя. Всё, кроме безоговорочного «да», — это «нет»,
+`plan_approved` записывает собственный ответ пользователя. Всё, кроме безоговорочного «да», — это «нет»,
 и замечания идут в `user_feedback`: флоу направляет «нет» той ответственности, которой принадлежит
 правка, поэтому исправление, сделанное здесь, — изменение, которого никто не рецензировал.
 ```
@@ -253,7 +255,7 @@ description: Проверка результатов и повторные по�
 {
   "type": "agent-directive",
   "id": "approve-plan",
-  "directive": "Представь план и спроси, утверждён ли он.\n\nПлан: {{plan_summary}}\n\n`approval` записывает собственный ответ пользователя: всё, кроме безоговорочного «да», — это «нет», с точными словами в `user_feedback`. «Нет» ведёт к ответственности, которой принадлежит ревизия, поэтому исправление, сделанное здесь, — изменение, которого никто не рецензировал.",
+  "directive": "Представь план и спроси, утверждён ли он.\n\nПлан: {{prepare-plan.summary}}\n\n`plan_approved` записывает собственный ответ пользователя: всё, кроме безоговорочного «да», — это «нет», с точными словами в `user_feedback`. «Нет» ведёт к ответственности, которой принадлежит ревизия, поэтому исправление, сделанное здесь, — изменение, которого никто не рецензировал.",
   "completionCondition": "User confirmed or rejected plan",
   "inputSchema": {
     "type": "object",
@@ -261,7 +263,12 @@ description: Проверка результатов и повторные по�
       "plan_approved": { "type": "string", "enum": ["yes", "no"] },
       "user_feedback": { "type": "string" }
     },
-    "required": ["plan_approved"]
+    "required": ["plan_approved"],
+    "if": { "properties": { "plan_approved": { "const": "no" } }, "required": ["plan_approved"] },
+    "then": {
+      "required": ["user_feedback"],
+      "properties": { "user_feedback": { "type": "string", "minLength": 1 } }
+    }
   },
   "connections": { "success": "route-plan-approval" }
 }

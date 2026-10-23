@@ -5,7 +5,7 @@ description: Bounded external-source research with durable evidence, independent
 
 import { Aside } from '@astrojs/starlight/components';
 
-Verified Research answers one specific question with a proportionate set of external sources and one durable local report. It records what the sources support, what is inferred, where evidence conflicts, and which limitations could change the answer. The workflow does not claim that opening a URL or calling a search tool proves source quality: an independent reviewer reads the evidence and the answer.
+Verified Research answers one specific question with a proportionate set of external sources and a local report when a workspace is available. Without writable storage, it returns the report in its answer and states that limitation. It records what the sources support, what is inferred, where evidence conflicts, and which limitations could change the answer. The workflow does not claim that opening a URL or calling a search tool proves source quality: an independent reviewer reads the evidence and the answer.
 
 ## Start
 
@@ -18,7 +18,7 @@ The workflow reuses an explicitly supplied operating mode. In `autonomous` mode 
 
 ## What it produces
 
-An execution-correlated workspace contains the canonical package:
+When storage is available, an execution-correlated workspace contains the canonical package:
 
 - question framing and evidence method;
 - source register with resolvable links, authority/applicability assessment, and relevant publication and retrieval dates;
@@ -30,7 +30,7 @@ An execution-correlated workspace contains the canonical package:
 - corrected-contract findings and repair notes when those routes apply;
 - `final-report.md`.
 
-The final result exposes only the local report path, bounded answer and limitation summaries, and a truthful terminal status. Detailed sources and findings remain in the workspace instead of being copied through workflow context.
+The final result exposes a bounded answer, limitations and truthful terminal status, with the local report path when one was written. Detailed sources and findings remain in the workspace when available; memory mode carries its records and report in the agent's answer without inventing file paths.
 
 ## Process
 

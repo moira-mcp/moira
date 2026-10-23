@@ -5,33 +5,38 @@
  * User operations handled by Better Auth directly (not in repository)
  */
 
+import { getDatabase, getSqliteInstance } from "@mcp-moira/shared/database/connection";
 import {
-  getDatabase,
-  getSqliteInstance,
   WorkflowRepository,
-  ExecutionRepository,
-  ExecutionAttemptRepository,
-  SettingsRepository,
-  ExtensionSettingsRepository,
-  AuditRepository,
-  getWorkflowService,
-  getExecutionService,
-  getSettingsService,
-  type WorkflowService,
-  type ExecutionService,
-  type SettingsService,
-  type AuditLogEntry,
-  type AuditLogFilter,
-  type ExecutionFilter,
-  type ExecutionListResult,
   type WorkflowFilter,
   type WorkflowListResult,
   type WorkflowSummaryListResult,
   type AdminWorkflowFilter,
   type AdminWorkflowListResult,
-  type ExecutionError,
-  type ExecutionTaskTitleMutationResult,
-} from "@mcp-moira/shared";
+} from "@mcp-moira/shared/database/repositories/workflow-repository";
+import {
+  ExecutionRepository,
+  type ExecutionFilter,
+  type ExecutionListResult,
+} from "@mcp-moira/shared/database/repositories/execution-repository";
+import { ExecutionAttemptRepository } from "@mcp-moira/shared/database/repositories/execution-attempt-repository";
+import { SettingsRepository } from "@mcp-moira/shared/database/repositories/settings-repository";
+import { ExtensionSettingsRepository } from "@mcp-moira/shared/database/repositories/extension-settings-repository";
+import {
+  AuditRepository,
+  type AuditLogEntry,
+  type AuditLogFilter,
+} from "@mcp-moira/shared/database/repositories/audit-repository";
+import {
+  getWorkflowService,
+  getExecutionService,
+  getSettingsService,
+} from "@mcp-moira/shared/services";
+import type { WorkflowService } from "@mcp-moira/shared/services/workflow-service";
+import type { ExecutionService } from "@mcp-moira/shared/services/execution-service";
+import type { SettingsService } from "@mcp-moira/shared/services/settings-service";
+import type { ExecutionError } from "@mcp-moira/shared/execution-error";
+import type { ExecutionTaskTitleMutationResult } from "@mcp-moira/shared/execution-task-identity";
 import { IDataRepository, WorkflowInfo, SettingDefinition } from "../interfaces/data-repository.js";
 import { WorkflowGraph } from "../interfaces/core-interfaces.js";
 import { WorkflowExecution, type ExecutionAwaitingUser } from "../types/base-types.js";
@@ -52,14 +57,17 @@ import type {
   ReconciledExecutionAttemptCounts,
   StartPreconditionCompletionResult,
 } from "../types/execution-attempt.js";
-import { createLogger, ValidationError, AuditAction, getAuditSource } from "@mcp-moira/shared";
+import { createLogger } from "@mcp-moira/shared/logging/logger";
+import { ValidationError } from "@mcp-moira/shared/errors";
+import { AuditAction } from "@mcp-moira/shared/audit/actions";
+import { getAuditSource } from "@mcp-moira/shared/logging/context";
 import {
   extensionSettingDefinition,
   extensionSettingDefinitions,
   mergeSettingDefinitions,
   prepareExtensionSettingValue,
 } from "../extensions/extension-settings.js";
-import { maskEncryptedValue, decryptValue } from "../utils/encryption.js";
+import { maskEncryptedValue, decryptValue } from "@mcp-moira/shared/settings-encryption";
 
 function convertSettingValue(raw: string, type: SettingDefinition["type"]): unknown {
   switch (type) {

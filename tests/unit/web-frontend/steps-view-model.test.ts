@@ -17,13 +17,14 @@ import {
   stepsPresentation,
 } from "../../../packages/web-frontend/src/components/flow/stepsModel.js";
 import { humanizeVariable } from "../../../packages/web-frontend/src/components/diagram/VariableText.js";
+import type { WorkflowGraph } from "../../../packages/web-frontend/src/types/workflow-types.js";
 import {
   preferredFlowView,
   recommendedFlows,
 } from "../../../packages/web-frontend/src/components/onboarding/recommended.js";
 
 const flowsDir = path.join(process.cwd(), "workflows/production/flows");
-function catalogFlow(slug: string): { nodes: never[] } {
+function catalogFlow(slug: string): Pick<WorkflowGraph, "nodes"> {
   for (const file of fs.readdirSync(flowsDir)) {
     const workflow = JSON.parse(fs.readFileSync(path.join(flowsDir, file), "utf8"));
     if (workflow.slug === slug) return workflow;
@@ -33,7 +34,7 @@ function catalogFlow(slug: string): { nodes: never[] } {
 
 describe("stepsModel", () => {
   test("a straight sequence is numbered instructions joined by unlabelled arrows", () => {
-    const model = stepsModel(catalogFlow("example-simple-steps") as never);
+    const model = stepsModel(catalogFlow("example-simple-steps"));
     expect(model.cards.map((card) => [card.kind, card.number])).toEqual([
       ["start", null],
       ["instruction", 1],
@@ -48,7 +49,7 @@ describe("stepsModel", () => {
   });
 
   test("a fork carries the authored answer labels on its ways out, in the reader's language", () => {
-    const english = stepsModel(catalogFlow("example-one-choice") as never);
+    const english = stepsModel(catalogFlow("example-one-choice"));
     const fork = english.edges.filter((edge) => edge.source === "check-result");
     expect(fork.map((edge) => [edge.label, edge.target])).toEqual([
       ["yes — it matches", "report"],
@@ -56,14 +57,14 @@ describe("stepsModel", () => {
     ]);
     expect(english.cards.filter((card) => card.kind === "finish")).toHaveLength(2);
 
-    const russian = stepsModel(catalogFlow("example-one-choice-ru") as never);
+    const russian = stepsModel(catalogFlow("example-one-choice-ru"));
     expect(
       russian.edges.filter((edge) => edge.source === "check-result").map((edge) => edge.label),
     ).toEqual(["да — совпадает", "нет — чего-то не хватает"]);
   });
 
   test("several paths keep one arrow per choice and one finish per path", () => {
-    const model = stepsModel(catalogFlow("example-several-paths") as never);
+    const model = stepsModel(catalogFlow("example-several-paths"));
     expect(
       model.edges.filter((edge) => edge.source === "sort-request").map((edge) => edge.label),
     ).toEqual(["a question", "a bug", "an idea"]);
@@ -82,11 +83,18 @@ describe("stepsModel", () => {
           id: "work",
           type: "agent-directive",
           directive: "Do {{task}}",
+          completionCondition: "Task completed",
           connections: { success: "review" },
         },
         {
           id: "review",
           type: "condition",
+          cases: [
+            {
+              when: { operator: "eq", left: { contextPath: "passed" }, right: true },
+              output: "true",
+            },
+          ],
           connections: { true: "done", default: "work" },
           connectionLabels: {
             true: "passed",
@@ -94,9 +102,16 @@ describe("stepsModel", () => {
           },
         },
         { id: "done", type: "end" },
-        { id: "unreachable", type: "teleport", connections: { success: "work" } },
+        {
+          id: "unreachable",
+          type: "teleport",
+          directive: "Resume the task",
+          completionCondition: "Ready to resume",
+          hint: "Use when the task needs revision",
+          connections: { success: "work" },
+        },
       ],
-    } as never);
+    });
     expect(model.cards.map((card) => card.id)).toEqual(["start", "work", "review", "done"]);
     expect(model.cards.find((card) => card.id === "review")?.kind).toBe("check");
     expect(model.edges.map((edge) => [edge.id, edge.label, edge.back])).toEqual([
@@ -108,7 +123,7 @@ describe("stepsModel", () => {
   });
 
   test("a workflow with no start node has nothing to read", () => {
-    expect(stepsModel({ nodes: [{ id: "end", type: "end" }] } as never)).toEqual({
+    expect(stepsModel({ nodes: [{ id: "end", type: "end" }] })).toEqual({
       cards: [],
       edges: [],
     });
@@ -163,20 +178,20 @@ describe("stepsPresentation", () => {
     "example-several-paths-ru",
     "todo-list",
   ])("%s stays a drawn diagram", (slug) => {
-    expect(stepsPresentation(stepsModel(catalogFlow(slug) as never))).toBe("diagram");
+    expect(stepsPresentation(stepsModel(catalogFlow(slug)))).toBe("diagram");
   });
 
   test.each(["quick-task", "robust-task", "software-development-flow"])(
     "%s reads as a list",
     (slug) => {
-      const model = stepsModel(catalogFlow(slug) as never);
+      const model = stepsModel(catalogFlow(slug));
       expect(model.cards.length).toBeGreaterThan(DIAGRAM_MAX_CARDS);
       expect(stepsPresentation(model)).toBe("list");
     },
   );
 
   test("size decides, not returns: a small flow with a loop is still drawn", () => {
-    const todo = stepsModel(catalogFlow("todo-list") as never);
+    const todo = stepsModel(catalogFlow("todo-list"));
     expect(todo.edges.some((edge) => edge.back)).toBe(true);
     expect(stepsPresentation(todo)).toBe("diagram");
   });

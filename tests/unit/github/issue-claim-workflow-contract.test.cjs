@@ -66,7 +66,7 @@ describe("issue claim GitHub Actions contract", () => {
     expect(contributing).toContain("three-day grace period");
     expect(contributing).toContain("closing keyword");
     expect(contributing).toContain("first successful reconciliation");
-    expect(agents).toContain("read `CONTRIBUTING.md` completely");
+    expect(agents).toContain("Read [CONTRIBUTING.md](CONTRIBUTING.md) completely");
     expect(triage).toContain("assignee");
     expect(triage).toContain("`/claim`");
     expect(triage).toContain("`/release`");

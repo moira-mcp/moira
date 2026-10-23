@@ -8,6 +8,6 @@ export type {
   ValidationIssueType,
   UnifiedValidationIssue,
   UnifiedValidationResult,
-} from "@mcp-moira/shared";
+} from "@mcp-moira/shared/validation-types";
 
-export { getErrors, getWarnings } from "@mcp-moira/shared";
+export { getErrors, getWarnings } from "@mcp-moira/shared/validation-types";

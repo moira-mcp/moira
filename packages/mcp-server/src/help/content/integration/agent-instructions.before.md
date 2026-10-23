@@ -28,7 +28,9 @@ The content below is the checked-in default reference, not a live view of an ins
 The default source is:
 
 - seeded into the runtime setting used for the MCP `instructions` field;
-- rendered on this documentation page from its matching public copy.
+- imported directly by the English documentation page and the default portable help reader.
+
+The Russian documentation page retains a translation. Public portable `agent-instructions` help shows the canonical English default; it has no language parameter or Russian topic-prefix selector. Neither reference substitutes for the effective DB-backed instructions returned by a particular server during initialization.
 
 ---
 

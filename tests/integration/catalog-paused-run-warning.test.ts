@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, test } from "@jest/globals";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "@jest/globals";
 import {
   getDatabase,
   getSqliteInstance,
@@ -93,12 +93,18 @@ describe("warning about paused runs a catalog update would invalidate", () => {
     };
   });
 
-  beforeEach(() => {
+  function cleanupOwner() {
     const sqlite = getSqliteInstance();
-    sqlite.prepare("DELETE FROM managedWorkflowBaseline WHERE ownerId = ?").run(OWNER);
-    sqlite.prepare("DELETE FROM workflowReconciliationConflict WHERE ownerId = ?").run(OWNER);
-    sqlite.prepare("DELETE FROM workflow WHERE userId = ?").run(OWNER);
-  });
+    sqlite.transaction(() => {
+      sqlite.prepare("DELETE FROM workflowReconciliationResolution WHERE ownerId = ?").run(OWNER);
+      sqlite.prepare("DELETE FROM workflowReconciliationConflict WHERE ownerId = ?").run(OWNER);
+      sqlite.prepare("DELETE FROM managedWorkflowBaseline WHERE ownerId = ?").run(OWNER);
+      sqlite.prepare("DELETE FROM workflow WHERE userId = ?").run(OWNER);
+    })();
+  }
+
+  beforeEach(cleanupOwner);
+  afterEach(cleanupOwner);
 
   /** Install a workflow and leave one run paused on `first` and one on `second`. */
   async function twoPausedRuns(slug: string) {

@@ -18,6 +18,8 @@ description: Доставка текста реестра через неизм�
 Храните переиспользуемый текст в строковой записи `variableRegistry` и ссылайтесь на неё через
 `from`:
 
+Это фрагмент объявления. Содержащий граф должен также объявить и задать доверенный строковый глобал `workspace_path` до этой ноды, определить start и целевые узлы connections.
+
 ```json
 {
   "variableRegistry": {
@@ -69,14 +71,14 @@ mkdir -p -- '<basePath>' && curl -sSf -- '<reusable-url>' | tar -x -C '<basePath
 
 Запускайте выданную команду без изменений. URL — непрозрачный bearer credential: не собирайте его
 самостоятельно, не редактируйте, не записывайте в лог и не передавайте другим. Одну и ту же команду
-можно повторять в течение пяти минут, пока выполнение ожидает на этой ноде. После успешной распаковки
+можно повторять в течение пяти минут, пока выполнение ожидает на этой ноде: повтор читает исходную публикацию, а не отправляет неопределённую публикацию заново. После успешной распаковки
 завершите шаг значением `null` или `{}`. Иная форма ответа не принимается.
 
 Сгенерированная директива сообщает срок и правила повтора, предупреждает, что переход выполнения
 делает URL недействительным, называет описанный ниже fallback-маршрут доставки в контекст при
 условии, что этот хост не может выполнить команду, и объясняет, что доставка не доказывает чтение
 ни на одном из маршрутов. Вызов
-`session({ action: "current_step" })` во время паузы выдаёт новые команду и разрешение, не продвигая
+`session({ action: "current_step", executionId })` во время паузы выдаёт новые команду и разрешение, не продвигая
 граф. Поздняя директива всё равно должна явно требовать чтения каждого используемого файла.
 
 ## Контракт архива и путей
@@ -184,7 +186,7 @@ get-action-type
        | edit   -> prepare-edit-workflow
 ```
 
-Его materialize-объявление эквивалентно следующему:
+Его объявление доставки файлов без метаданных прогресса:
 
 ```json
 {
@@ -193,15 +195,31 @@ get-action-type
   "basePath": "{{workspace_path}}",
   "files": [
     { "path": "process-id.txt", "from": "workspace_process_id_file" },
-    { "path": "workflow-authoring-reference.md", "from": "workflow_authoring_reference" }
+    { "path": "reference/engine.md", "from": "workflow_reference_engine" },
+    { "path": "reference/design.md", "from": "workflow_reference_design" },
+    { "path": "reference/artifacts.md", "from": "workflow_reference_artifacts" },
+    { "path": "reference/review-repair.md", "from": "workflow_reference_review_repair" },
+    { "path": "reference/validation.md", "from": "workflow_reference_validation" },
+    { "path": "reference/authority.md", "from": "workflow_reference_authority" },
+    { "path": "reference/patterns.md", "from": "workflow_reference_patterns" },
+    { "path": "reference/antipatterns.md", "from": "workflow_reference_antipatterns" },
+    { "path": "reference/progress.md", "from": "workflow_reference_progress" },
+    { "path": "reference/conversation.md", "from": "workflow_reference_conversation" },
+    { "path": "reference/templates/checklist.json", "from": "workflow_template_checklist" },
+    { "path": "reference/templates/do-check-redo.json", "from": "workflow_template_do_check_redo" },
+    { "path": "reference/templates/approval-gate.json", "from": "workflow_template_approval_gate" }
   ],
   "connections": { "success": "route-action-type" }
 }
 ```
 
-Предыдущий владелец записывает глобальный `workspace_path`. Значения реестра предоставляют ID
-выполнения и справочник автора. Последующие владельцы веток create и edit записывают динамические
-требования, provenance, планы и отчёты ревью, но не перезаписывают стабильные bootstrap-файлы.
+Предыдущий владелец задаёт глобальный `workspace_path`. Значение `workspace_process_id_file`
+по умолчанию — `{{executionId}}`; остальные defaults предоставляют тематические справочники автора,
+руководство по разговору о требованиях и стартовые шаблоны workflow. Каждый потребитель обязан
+прочитать применимые файлы: сбор требований для create использует правила полномочий и руководство
+по разговору, а подготовка edit-источника — контракты движка и артефактов. Последующие владельцы
+веток create и edit записывают динамические требования, provenance, планы и отчёты ревью,
+не перезаписывая стабильные bootstrap-файлы.
 
 ## Перевод ручного bootstrap
 

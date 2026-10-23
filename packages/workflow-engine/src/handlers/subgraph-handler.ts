@@ -17,7 +17,8 @@ import { IDataRepository } from "../interfaces/data-repository.js";
 import { IGraphExecutionEngine } from "../interfaces/graph-execution-engine.js";
 import { AgentMessageQueue } from "../services/agent-message-queue.js";
 import { ContextMapper } from "../utils/context-mapper.js";
-import { createLogger, NotFoundError, InternalError, ValidationError } from "@mcp-moira/shared";
+import { createLogger } from "@mcp-moira/shared/logging/logger";
+import { NotFoundError, InternalError, ValidationError } from "@mcp-moira/shared/errors";
 
 // Interface for subprocess state stored in context variables
 interface SubprocessState {
@@ -168,7 +169,7 @@ export class SubgraphNodeHandler implements INodeHandler {
 
         return NodeResultBuilder.continue(subgraphNode.id, "success");
       } else {
-        // Issue #386: "error" action removed - errors are logged and execution pauses for retry
+        // Errors are logged and execution pauses for retry.
         // Still paused - main execution stays on subgraph node
         this.logger.debug("Subprocess still paused, main execution remains on subgraph node", {
           nodeId: subgraphNode.id,

@@ -147,14 +147,14 @@ When the run waits for a step's input and you own the execution (or are an admin
 variables tab shows **Answer the waiting step** with the fields that step demands, including the
 declared global variables it writes. Submitting runs the answer as an ordinary engine step: the
 input is validated against the step's schema exactly as an agent's answer would be, and a rejected
-answer is shown with the step's message and changes nothing. An accepted answer continues the route
+answer is shown with the step's message. The step remains waiting, but refusal diagnostics and the execution revision can change; reread current state before another answer. An accepted answer continues the route
 and is recorded on it as a runtime adjustment with your name, as is a variable edited in its
 row of the variables panel.
 
 An agent that was holding the step you answered receives `ATTEMPT_STALE` on its next `step` and
 reads `session current_step` for the step the run is now on. An answer is refused while an agent is
 executing the current step, on a locked or finished execution, and when the page's copy of the run
-is behind the server's (reload and answer again).
+is behind the server's (reload, inspect the current step, and decide whether the answer still applies).
 
 ## Stopping your run
 

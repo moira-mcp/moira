@@ -23,6 +23,8 @@ A structured condition is the object that decides whether a routing case holds. 
 
 Every example below shows the condition object itself — what you place in a case's `when`.
 
+The containing graph must declare each bare-name root in `variableRegistry` and write it before use, or replace it with the producing node's local path (`node-id.field`). Define the connection targets in that graph. Cases are tested in authored order; overlapping predicates require intentional precedence, not frequency sorting.
+
 ## Comparison Operators
 
 ### Equal (`eq`)
@@ -121,6 +123,8 @@ Also works with arrays:
 ```
 
 Returns true if variable exists and is not null/undefined.
+
+This operator deliberately treats null and absence alike. It is not the settings/extension presence contract, where a stored null, false or empty string can differ from an absent key.
 
 ## Logical Operators
 
@@ -246,6 +250,8 @@ comparison.
 
 ### Check Boolean Flag
 
+This example uses a string yes/no enum. For an actual boolean, compare with the JSON boolean `true` instead of `"yes"`.
+
 ```json
 {
   "operator": "eq",
@@ -267,6 +273,8 @@ comparison.
 ### Route Three Outcomes
 
 One case per authored output; the first case that holds wins, and `default` covers the rest:
+
+This fragment assumes a declared verdict enum containing only blocked, minor and pass. An unrestricted unknown value must not silently authorize the proceed path; validate the answer or route unknowns to a safe decision.
 
 ```json
 {

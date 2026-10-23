@@ -145,19 +145,24 @@ describe("Workflow Catalog Loader Integration", () => {
     };
   });
 
-  beforeEach(() => {
+  function cleanupOwners() {
     const sqlite = getSqliteInstance();
-    sqlite
-      .prepare("DELETE FROM workflowReconciliationConflict WHERE ownerId IN (?, ?)")
-      .run(OWNER_A, OWNER_B);
-    sqlite
-      .prepare("DELETE FROM managedWorkflowBaseline WHERE ownerId IN (?, ?)")
-      .run(OWNER_A, OWNER_B);
-    sqlite
-      .prepare("DELETE FROM workflowReconciliationResolution WHERE ownerId IN (?, ?)")
-      .run(OWNER_A, OWNER_B);
-    sqlite.prepare("DELETE FROM workflow WHERE userId IN (?, ?)").run(OWNER_A, OWNER_B);
-  });
+    sqlite.transaction(() => {
+      sqlite
+        .prepare("DELETE FROM workflowReconciliationResolution WHERE ownerId IN (?, ?)")
+        .run(OWNER_A, OWNER_B);
+      sqlite
+        .prepare("DELETE FROM workflowReconciliationConflict WHERE ownerId IN (?, ?)")
+        .run(OWNER_A, OWNER_B);
+      sqlite
+        .prepare("DELETE FROM managedWorkflowBaseline WHERE ownerId IN (?, ?)")
+        .run(OWNER_A, OWNER_B);
+      sqlite.prepare("DELETE FROM workflow WHERE userId IN (?, ?)").run(OWNER_A, OWNER_B);
+    })();
+  }
+
+  beforeEach(cleanupOwners);
+  afterEach(cleanupOwners);
 
   test("installs each flow under its mapped owner and visibility", async () => {
     const slugA = `loader-map-a-${Date.now()}`;

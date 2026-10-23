@@ -1,4 +1,4 @@
-import { ValidationError } from "@mcp-moira/shared";
+import { ValidationError } from "@mcp-moira/shared/errors";
 import type { VariableRegistry } from "../types/graph-nodes.js";
 import { SchemaValidator } from "./schema-validator.js";
 

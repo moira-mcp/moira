@@ -2,7 +2,7 @@
  * React Flow specific type definitions for MCP Moira
  */
 
-import { WorkflowNode, StructuredCondition } from "./workflow-types.js";
+import type { WorkflowNode, StructuredCondition, StartNode } from "./workflow-types.js";
 
 export interface Node {
   id: string;
@@ -75,7 +75,7 @@ export interface MoiraNodeData extends Record<string, unknown> {
 
 export interface StartNodeData extends MoiraNodeData {
   nodeType: "start";
-  initialData?: Record<string, unknown>;
+  initialData?: StartNode["initialData"];
   defaultConnection: string;
 }
 

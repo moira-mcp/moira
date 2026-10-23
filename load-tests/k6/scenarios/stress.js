@@ -4,13 +4,13 @@
  * High-load stress test to validate system behavior under extreme load.
  * Tests rate limiting, error handling, and system stability.
  *
- * Load profile: 200 RPS peak with aggressive ramp
+ * Load profile: 200 virtual users peak with aggressive ramp
  *
  * Usage:
  *   k6 run load-tests/k6/scenarios/stress.js
  *
  * Environment variables:
- *   BASE_URL - Base URL of target system (default: http://localhost:4201)
+ *   TARGET_BASE_URL - Base URL of the explicitly selected test system
  *   LOAD_TEST_SECRET - Secret for load test authentication
  */
 
@@ -35,7 +35,7 @@ const requestsTotal = new Counter("requests_total");
 const requestsSuccess = new Counter("requests_success");
 const requestsFailed = new Counter("requests_failed");
 
-// Stress test load profile - aggressive ramp to 200 RPS
+// Stress test load profile - aggressive ramp to 200 virtual users
 const stressProfile = {
   stages: [
     { duration: "2m", target: 50 }, // Ramp up to 50 VUs
@@ -63,8 +63,7 @@ export const options = {
     http_req_duration: ["p(50)<500", "p(95)<2000", "p(99)<5000"],
     http_req_failed: ["rate<0.10"], // Allow up to 10% failure under extreme load
     errors: ["rate<0.15"], // Higher tolerance
-    // Track but don't fail on rate limiting
-    rate_limit_hits: ["count>0"], // Expect some rate limits to be hit
+    // rate_limit_hits remains observational; authenticated requests may use bypass.
   },
   tags: {
     scenario: "stress_test",

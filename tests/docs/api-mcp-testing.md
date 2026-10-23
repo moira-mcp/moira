@@ -1,195 +1,168 @@
-# API & MCP Testing Guide
+# API and MCP testing
 
-## MCP Tools Tests
+Use [API suites](../api/) for deployed HTTP behavior and [MCP suites](../mcp-tools/) for registered
+tool schemas, SDK transport, admission and public responses. Lower-level engine tests own algorithm
+edge cases; protocol tests add value when they observe a different boundary. Start with the
+[testing guide](../TESTING-GUIDE.md) and select the target through
+[infrastructure configuration](test-infrastructure.md#target-selection).
 
-**Location:** `tests/mcp-tools/`
-**Database:** `./data/moira.db` (Docker)
+## HTTP preparation
 
-```bash
-npm run test:mcp-tools              # Local Docker
-npm run test:mcp-tools:remote       # Remote server
-```
+[mcp-auth.ts](../utils/mcp-auth.ts) provides HTTP account/session preparation as well as the SDK
+client. Reuse its actual signatures:
 
-**Requires:** Docker for local, credentials for the remote target
+| Helper                                                               | Result or responsibility                                                                                                       |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `createTestUserViaApi(baseUrl, email, password, name, verifyEmail?)` | Signup with consent, actual user identity, optional email verification and deployment-specific approval; returns `{ userId }`. |
+| `verifyUserEmail(baseUrl, email)`                                    | Admin-authorized email verification. It does not replace deployment account approval.                                          |
+| `blockUserViaApi(baseUrl, userId, reason?)`                          | Signs in as the configured admin and blocks the selected user. The third argument is a reason, not a cookie.                   |
+| `signInUser(baseUrl, email, password)`                               | Session cookie value.                                                                                                          |
+| `getAdminSessionCookie(baseUrl)`                                     | Fresh configured-admin signin; returns the value.                                                                              |
+| `formatSessionCookie(baseUrl, value)`                                | Ready Cookie header with the protocol-appropriate cookie name.                                                                 |
 
----
-
-## Why MCP Tests Are Critical
-
-**ALL MCP functionality MUST be tested through MCP tests.**
-
-MCP is the primary way users interact with the system. Any new MCP-related functionality MUST be covered by E2E MCP tests.
-
-### What MUST Be Tested Through MCP
-
-- New MCP tools
-- New actions in existing tools (e.g., `manage({ action: "new-action" })`)
-- New tool parameters (e.g., `parentExecutionId` in start)
-- New node handlers (expression, condition, etc.) — via workflow execution
-- Handler behavior changes — via workflow execution
-- Magic variables (e.g., `execution_note`)
-- Template processing in directives
-- Condition evaluation
-- Any changes affecting workflow execution
-
-### Why Unit/Integration Tests Are NOT Enough
-
-- MCP tool registration in `server.ts` has separate schema from implementation
-- Integration tests call executor/services directly, bypassing MCP layer
-- Schema mismatches between `server.ts` and tool code are NOT caught by integration tests
-- Real users work through MCP protocol, not direct code calls
-
-### Example Bug NOT Caught by Integration Tests
+For an API test directly under `tests/api/`:
 
 ```typescript
-// server.ts - MCP registration (WRONG schema)
-action: z.enum(["user", "executions", "execution_context", "current_step"]);
+import { beforeAll, expect, test } from "@jest/globals";
+import { getTestBaseUrl } from "../utils/test-config.js";
+import { getAdminSessionCookie, formatSessionCookie } from "../utils/mcp-auth.js";
 
-// get-session-info.ts - actual tool (CORRECT schema)
-action: z.enum(["user", "executions", "execution_context", "current_step", "update-note"]);
+const baseUrl = getTestBaseUrl();
+let cookie: string;
+beforeAll(async () => {
+  cookie = formatSessionCookie(baseUrl, await getAdminSessionCookie(baseUrl));
+});
 
-// Integration test (PASSES - bypasses MCP)
-await executor.updateNote(executionId, "new note"); // Works!
-
-// Real MCP call (FAILS - schema mismatch)
-session({ action: "update-note" }); // Error: Invalid enum value
+test("an administrator reads workflows", async () => {
+  const response = await fetch(`${baseUrl}/api/workflows`, { headers: { Cookie: cookie } });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.success).toBe(true);
+  expect(Array.isArray(body.data.workflows)).toBe(true);
+});
 ```
 
----
+Use owned records and dedicated accounts for destructive cases. Assert authorization refusal and
+unchanged persisted state where those are the contract. Direct Better Auth requests also need the
+configured public Origin; the API setup and shared signin helpers supply that boundary. Do not
+hard-code credentials or print environment values. Remote Node preparation can require
+`getTestFetchUrl()` rather than the browser URL; see the target resolver before adapting an example.
 
-## Authenticated MCP Client
+## Test recipients and delivery
 
-MCP tools require an authenticated session. Create a client with
-`createAuthenticatedMCPClient()`, then call tools with `callMCPTool(client, name, args)`:
+Use unique test-owned accounts rather than the configured administrator or another person's email.
+Recipient naming suppresses real delivery only when the **selected backend deployment** sets
+`EMAIL_TEST_RECIPIENTS=true`. Setting that variable on a browser-test command does not reconfigure
+an already running server. With `EMAIL_PROVIDER=test`, every message is logged without sending;
+with a real SMTP/Brevo provider and explicit recipient suppression, only recognized test addresses
+are redirected to the log-only sink. Other recipients still use the real provider.
+
+The [email owner](../../packages/shared/src/email/index.ts) recognizes addresses at `example.com`,
+the retained fixture domain `test.com`, `test.local`, `moira.local`,
+`load-testing-noverify.local`, and subdomains ending in `.test`. Prefer unique addresses such as
+`e2e-reset-<unique-id>@example.com`, and inspect the current source before adding a recipient pattern.
+Reuse the maintained signup/session helpers above for account preparation.
+
+Assert the observed delivery result: `delivery: logged` and the corresponding durable email log
+establish log-only handling, not a sent message. A deployment can retain real-provider capability
+while a particular test recipient is suppressed. Do not run mail-producing tests against an
+uncontrolled deployment or infer suppression from the email address alone.
+
+## Authenticated SDK client
+
+For a file directly under `tests/mcp-tools/`:
 
 ```typescript
-import {
-  createAuthenticatedMCPClient,
-  callMCPTool,
-  startWorkflowExecutionState,
-} from "../utils/mcp-auth.js";
+import { afterAll, beforeAll, expect, test } from "@jest/globals";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { createAuthenticatedMCPClient, callMCPTool } from "../utils/mcp-auth.js";
 
 let client: Client;
-let cleanup: () => Promise<void>;
-
+let cleanup: (() => Promise<void>) | undefined;
 beforeAll(async () => {
-  const mcpClient = await createAuthenticatedMCPClient();
-  client = mcpClient.client;
-  cleanup = mcpClient.cleanup;
+  const authenticated = await createAuthenticatedMCPClient();
+  client = authenticated.client;
+  cleanup = authenticated.cleanup;
 });
-
 afterAll(async () => {
-  await cleanup();
+  await cleanup?.();
 });
 
-const result = await callMCPTool<{ workflows: unknown[] }>(client, "list", {});
-expect(result.workflows).toBeDefined();
-```
-
-### How the helpers work
-
-1. `createAuthenticatedMCPClient()` signs in with admin credentials and returns a
-   connected `Client` plus a `cleanup` function.
-2. `callMCPTool(client, toolName, args)` calls the tool over the MCP transport,
-   extracts the text content, and JSON-parses it (falling back to the raw text if
-   it is not JSON).
-3. `callMCPToolRaw()` returns the raw text response (used for output-format checks).
-4. `startWorkflowExecutionState()` performs replay-safe `prepare` and `execute`
-   calls and returns the process and current step-attempt IDs.
-
----
-
-## Testing New Node Handlers
-
-```typescript
-test("expression node executes through MCP workflow", async () => {
-  // 1. Start workflow with expression node via MCP
-  const execution = await startWorkflowExecutionState(client, "test-expression");
-
-  // 2. Execute step via MCP
-  const stepResult = await callMCPTool(client, "step", {
-    processId: execution.processId,
-    attemptId: execution.attemptId,
-    input: {},
-  });
-
-  // 3. Verify expression evaluated and context updated
-  expect(stepResult.directive).toContain("counter is now 1");
+test("list returns workflows", async () => {
+  const result = await callMCPTool<{ workflows: unknown[] }>(client, "list", {});
+  expect(Array.isArray(result.workflows)).toBe(true);
 });
 ```
 
----
+The helper performs OAuth client registration, user signin, authorization-code exchange and an SDK
+connection using the Node fetch target. Cleanup closes the SDK client. Custom account credentials
+can be supplied; prepare its admission separately where required.
 
-## API Tests
+`callMCPTool` parses the first text block as JSON, falling back to text. `callMCPToolRaw` returns
+that text. Neither is a substitute for inspecting the complete SDK result when asserting `isError`,
+native image content or block identity. Use `client.callTool` for those contracts and assert the
+actual error/result shape; do not assume all application refusals throw exceptions.
 
-**Location:** `tests/api/`
-**Database:** `./data/moira.db` (Docker)
+## Account admission and retirement
+
+Test the actual protected route and registered MCP transport, rather than accepting an unknown
+endpoint's 404 as evidence that authorization worked. Establish that each owned credential works
+before changing the account, then observe its refusal afterward. [Shared account admission](../../packages/shared/src/auth/account-admission.ts),
+[HTTP middleware](../../packages/web-backend/src/middleware/auth-middleware.ts) and the
+[MCP server](../../packages/mcp-server/src/server.ts) enforce distinct stages:
+
+- A pending self-host account can read `/api/user/me` and sign out, while product/token/OAuth/MCP
+  access returns `ACCOUNT_APPROVAL_REQUIRED`. Approval and email verification are independent.
+- SaaS sensitive admission applies its email-verification gate. Do not infer universal verification
+  from an ordinary route that intentionally requires only session admission.
+- Blocking refuses new sign-in and use of existing credentials. Exercise browser session, OAuth
+  issuance/refresh or access, and persistent-token use when those are the changed boundary; a
+  successful session-revocation test alone proves none of the other paths.
+- Assert the expected status/code at the actual stage. Invalid/revoked credentials can fail before
+  account lookup, whereas a still-valid persistent credential reaches the blocked-account gate.
+  Blocking need not delete every API-token row to refuse that credential.
+- The block route can return `503 SCOPED_CREDENTIAL_DISPOSAL_PENDING` after the block is committed.
+  Verify blocked state and retained custody rather than treating it as rollback. Account deletion
+  has a separate pending-resource/credential `409` contract; refusal is not completed erasure.
+
+Use a non-admin credential for direct administrator API refusal, and inspect unchanged owned state
+when an unauthorized mutation is attempted. Deployment capability refusal and resource owner-use
+authority are separate from administrator role. Reuse [HTTP contracts](../../docs/reference/http-api.md)
+and [account operations](../../docs/operator/accounts.md), not a universal 401/403 rule for every
+endpoint.
+
+## Real MCP client acceptance
+
+The SDK helper proves its own registration, authorization and transport flow. Compatibility with
+an installed client requires explicitly authorized use of that actual client, current configuration,
+browser login/consent and a harmless tool call whose full result is inspected. A client reconnect
+must satisfy current catalog initialization and account admission; neither a visible tool list nor
+a stale cached result proves a request succeeded. Use the maintained client setup documentation
+instead of copying installation-specific configuration paths into this guide. Record the tested
+client and unresolved prerequisites without promoting a simulated or skipped provider flow to a
+pass. Native attachments additionally require exact bytes/metadata and their owner/lifetime
+boundary; text-only SDK results do not establish native delivery.
+
+## Workflow execution
+
+Reuse `startWorkflowExecutionState(client, workflowId, options)` for public prepare/execute start.
+It returns process ID, current Step attempt ID and response. Use
+`advanceWorkflowExecution(client, execution, input)` to submit the current attempt and retain any
+successor attempt identity in that execution object. Supply the actual workflow schema's input.
+For intentional parent linkage, pass the parent option explicitly.
+
+Do not extract only a process ID and omit the required Step attempt. Replay, conflicting attempts,
+unknown outcomes and stale-presentation recovery need their own explicit assertions at the public
+boundary. A deliberate new start is a separate intention; collecting an uncertain original is not
+permission to resubmit an effect.
 
 ```bash
-npm run test:api              # Local Docker
-npm run test:api:remote       # Remote server
+npm run test:api -- --file tests/api/workflow-update.test.ts
+npm run test:mcp-tools -- --file tests/mcp-tools/workflow-execution.test.ts
 ```
 
-### Standards
-
-- Real HTTP requests
-- Test auth/authorization
-- Verify status codes
-- Test error responses
-
-### Example API Test
-
-```typescript
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
-
-const BASE_URL = getTestBaseUrl();
-
-describe("Workflow API", () => {
-  let sessionCookie: string;
-
-  beforeAll(async () => {
-    const loginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(getAdminCredentials()),
-    });
-    sessionCookie = loginRes.headers.get("set-cookie") || "";
-  });
-
-  test("GET /api/workflows returns list", async () => {
-    const response = await fetch(`${BASE_URL}/api/workflows`, {
-      headers: { Cookie: sessionCookie },
-    });
-
-    expect(response.status).toBe(200);
-    const data = await response.json();
-    expect(Array.isArray(data.workflows)).toBe(true);
-  });
-
-  test("POST /api/workflows requires auth", async () => {
-    const response = await fetch(`${BASE_URL}/api/workflows`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "test" }),
-    });
-
-    expect(response.status).toBe(401);
-  });
-});
-```
-
----
-
-### Environment Helpers
-
-```typescript
-import { getTestEnvironment, isExternalTarget } from "../utils/test-config.js";
-
-// Check environment
-if (isExternalTarget()) {
-  // Skip destructive tests on a remote target
-}
-
-const env = getTestEnvironment(); // "local" | "production"
-```
+Keep test-owned workflows, users, streams and clients in cleanup, including when setup only
+partially succeeds. Existing [workflow fixtures](../fixtures/mcp-workflows.ts) and
+[test data](../fixtures/mcp-test-data.ts) can supply inputs; inspect their current schema rather than
+copying a fixture catalogue into a guide. HTTP publication/upload tests verify actual bytes,
+authorization and lifetime separately from a tool's text response.

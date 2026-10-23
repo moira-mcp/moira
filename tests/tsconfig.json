@@ -5,11 +5,11 @@
     "target": "ES2022",
     "moduleResolution": "Node16",
     // No rootDir: the suites import package sources from outside tests/, and with
-    // noEmit there is nothing for a root to anchor. ts-jest compiles in memory.
+    // noEmit there is nothing for a root to anchor. SWC transforms tests in memory.
     "noEmit": true,
     "skipLibCheck": true,
     "jsx": "react-jsx",
-    // The tests reach two plain-JavaScript helpers under tests/scripts, typed by JSDoc.
+    // Tests also import plain-JavaScript script helpers, typed by JSDoc.
     "allowJs": true
   },
   "include": ["**/*.ts", "**/*.tsx"],

@@ -1,8 +1,8 @@
 /**
  * registry-converter — pure conversion of a workflow's legacy start-node
- * `initialData.variables` into the new global `variableRegistry`.
+ * `initialData.variables` into the global `variableRegistry`.
  *
- * Used by the production-workflow migration (Step 5) and reusable by tooling.
+ * Reusable by migration and workflow tooling.
  * The conversion is idempotent: a workflow that already has a `variableRegistry`
  * is returned unchanged.
  */
@@ -55,8 +55,8 @@ export interface ConvertResult<T> {
  *   (changed=false).
  * - Missing-tolerant: a workflow without a start node or without initialData.variables
  *   yields an empty registry (changed=true only if a registry field is added).
- * - The original `initialData.variables` are left intact (the engine still reads them
- *   during the transition; final cleanup happens in a later step).
+ * - The original `initialData.variables` are left intact; the start handler reads
+ *   their values when initializing an execution.
  */
 export function convertWorkflowToRegistry<T extends WorkflowLike>(workflow: T): ConvertResult<T> {
   if (!workflow || typeof workflow !== "object") {

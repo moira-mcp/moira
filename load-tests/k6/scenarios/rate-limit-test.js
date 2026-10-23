@@ -8,10 +8,8 @@
  *   1. Target server has rate limiting ENABLED (DISABLE_RATE_LIMIT != true)
  *   2. k6 client has DISABLE_RATE_BYPASS=true to prevent bypass header
  *
- * Rate limits (per IP, per minute):
- *   - API endpoints (/api/*): 100 requests/min
- *   - Auth endpoints (/api/auth/*): 1000 requests/min
- *   - MCP endpoints (/mcp): 30 requests/min (web-backend)
+ * The public /api/features route is mounted with the ordinary API limiter:
+ * 100 requests per client address per minute. Health is a separate unlimited probe.
  *
  * Usage (against staging with rate limiting enabled):
  *   docker compose -f docker-compose.k6.yml --profile run run --rm \
@@ -19,8 +17,8 @@
  *     -e DISABLE_RATE_BYPASS=true \
  *     k6 run /scripts/scenarios/rate-limit-test.js
  *
- * Note: Local dev container (localhost:3032) has DISABLE_RATE_LIMIT=true
- * which disables rate limiting. Use staging/production for this test.
+ * Use an explicitly selected test target with rate limiting enabled and no
+ * whitelist/test-mode bypass for the requesting address.
  *
  * Environment variables:
  *   TARGET_BASE_URL - Base URL of target system (with rate limiting enabled)
@@ -55,6 +53,7 @@ export const options = {
     },
   },
   thresholds: {
+    checks: ["rate==1"], // Unexpected statuses or malformed 429 responses fail the run.
     // We EXPECT rate limits to be hit - this is the test
     rate_limit_hits: ["count>=1"], // Must hit at least 1 rate limit
     rate_limit_rate: ["rate>0"], // Must have some rate limited requests
@@ -64,13 +63,6 @@ export const options = {
   tags: {
     scenario: "rate_limit_test",
   },
-};
-
-// Expected rate limits (requests per minute)
-var RATE_LIMITS = {
-  api: 100,
-  auth: 1000,
-  mcp: 30,
 };
 
 /**
@@ -102,11 +94,7 @@ export function setup() {
   console.log("Target is reachable");
   console.log("");
 
-  // Document expected rate limits
-  console.log("Expected rate limits (per IP, per minute):");
-  console.log("  - API endpoints: " + RATE_LIMITS.api + " req/min");
-  console.log("  - Auth endpoints: " + RATE_LIMITS.auth + " req/min");
-  console.log("  - MCP endpoints: " + RATE_LIMITS.mcp + " req/min");
+  console.log("Expected /api/features limit: 100 requests per client address per minute");
   console.log("");
   console.log("This test will exceed API limit to verify 429 responses.");
 
@@ -117,19 +105,19 @@ export function setup() {
 }
 
 /**
- * Test API rate limit by hitting /api/health endpoint
- * No authentication needed for health check
+ * Test the mounted API limiter through the public features route.
+ * No authentication is needed; a health response cannot establish this quota.
  */
 export function testApiRateLimit(data) {
   var apiUrl = data.apiUrl;
 
   // Make request WITHOUT bypass header
-  var res = http.get(apiUrl + "/health", {
+  var res = http.get(apiUrl + "/features", {
     headers: {
       Accept: "application/json",
       // Intentionally NO X-Load-Test header (testing rate limit enforcement)
     },
-    tags: { name: "api_health" },
+    tags: { name: "api_features" },
   });
 
   requestDuration.add(res.timings.duration);
@@ -171,7 +159,7 @@ export function testApiRateLimit(data) {
  * Default function - required by k6 but not used with named scenarios
  */
 export default function () {
-  // This scenario uses named exec functions (testApiRateLimit, testHealthRateLimit)
+  // The scenario selects the named testApiRateLimit function.
   // The default function is not used but k6 requires it to exist
 }
 
@@ -190,5 +178,5 @@ export function teardown(data) {
   console.log("  - rate_limit_rate: Percentage of requests that were rate limited");
   console.log("");
   console.log("SUCCESS criteria: rate_limit_hits >= 1");
-  console.log("This confirms rate limiting is working correctly.");
+  console.log("Acceptance is determined by the actual k6 checks and thresholds above.");
 }

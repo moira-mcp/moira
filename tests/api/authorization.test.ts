@@ -3,8 +3,6 @@
  * Verifies that protected endpoints return 401 without authentication
  * and public endpoints are accessible without authentication.
  *
- * Step 2 of audit-completion: Audit all API endpoints for authorization
- *
  * IMPORTANT: Tests run against Docker by default (localhost:DOCKER_PORT from .env)
  */
 
@@ -57,17 +55,13 @@ describe("API Authorization", () => {
       expect(response.status).toBe(401);
     });
 
-    test("POST /api/executions/start returns 401 without auth", async () => {
-      const response = await fetch(`${BASE_URL}/api/executions/start`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workflowId: "test" }),
-      });
+    test("GET /api/executions/:id returns 401 without auth", async () => {
+      const response = await fetch(`${BASE_URL}/api/executions/test-id`);
       expect(response.status).toBe(401);
     });
 
-    test("POST /api/executions/:id/step returns 401 without auth", async () => {
-      const response = await fetch(`${BASE_URL}/api/executions/test-id/step`, {
+    test("POST /api/executions/:id/stop returns 401 without auth", async () => {
+      const response = await fetch(`${BASE_URL}/api/executions/test-id/stop`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
@@ -126,13 +120,8 @@ describe("API Authorization", () => {
     });
 
     // Stats API
-    test("GET /api/stats/workflows returns 401 without auth", async () => {
-      const response = await fetch(`${BASE_URL}/api/stats/workflows`);
-      expect(response.status).toBe(401);
-    });
-
-    test("GET /api/stats/executions returns 401 without auth", async () => {
-      const response = await fetch(`${BASE_URL}/api/stats/executions`);
+    test("GET /api/stats/summary returns 401 without auth", async () => {
+      const response = await fetch(`${BASE_URL}/api/stats/summary`);
       expect(response.status).toBe(401);
     });
 
@@ -177,8 +166,8 @@ describe("API Authorization", () => {
     });
 
     // Notifications API
-    test("POST /api/notifications/test returns 401 without auth", async () => {
-      const response = await fetch(`${BASE_URL}/api/notifications/test`, {
+    test("POST /api/notifications/channels/:channelId/test returns 401 without auth", async () => {
+      const response = await fetch(`${BASE_URL}/api/notifications/channels/test-channel/test`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ botToken: "test", chatId: "test" }),
@@ -212,7 +201,7 @@ describe("API Authorization", () => {
     });
 
     // Auth endpoints - return validation errors, not session required errors
-    test("POST /api/auth/sign-in/email returns non-401 session error without auth", async () => {
+    test("POST /api/auth/sign-in/email rejects invalid credentials", async () => {
       const response = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -224,10 +213,10 @@ describe("API Authorization", () => {
       expect(json.code).toBe("INVALID_EMAIL_OR_PASSWORD");
     });
 
-    test("GET /api/auth/session is accessible without auth", async () => {
-      const response = await fetch(`${BASE_URL}/api/auth/session`);
-      // Better Auth manages this endpoint — should not return 401
-      expect(response.status).not.toBe(401);
+    test("GET /api/auth/get-session returns no session without cookies", async () => {
+      const response = await fetch(`${BASE_URL}/api/auth/get-session`);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toBeNull();
     });
 
     test("POST /api/auth/sign-up/email is accessible without auth", async () => {
@@ -240,8 +229,18 @@ describe("API Authorization", () => {
           name: "Test",
         }),
       });
-      // Should return 400 (validation) or 422, not 401 (auth required)
-      expect(response.status).not.toBe(401);
+      const body = (await response.json()) as { code?: string };
+      if (response.status === 403) {
+        expect(body.code).toBe("REGISTRATION_DISABLED");
+      } else {
+        expect(response.status).toBe(400);
+        expect([
+          "INVALID_EMAIL",
+          "VALIDATION_ERROR",
+          "TERMS_NOT_ACCEPTED",
+          "RESIDENCY_NOT_CONFIRMED",
+        ]).toContain(body.code);
+      }
     });
 
     // Token-based workflow access

@@ -1,11 +1,10 @@
+import { createLogger, type WorkflowLogger } from "@mcp-moira/shared/logging/logger";
+import { InternalError } from "@mcp-moira/shared/errors";
+import { metadataRevision } from "@mcp-moira/shared/metadata-revision";
 import {
-  createLogger,
-  InternalError,
-  metadataRevision,
   communicationOwnerReceiptSchema,
   type CommunicationOwnerSubmit,
-  type WorkflowLogger,
-} from "@mcp-moira/shared";
+} from "@mcp-moira/shared/communication-owner-protocol";
 import type { INodeHandler } from "../interfaces/core-interfaces.js";
 import type { IDataRepository } from "../interfaces/data-repository.js";
 import type { IGraphExecutionEngine } from "../interfaces/graph-execution-engine.js";

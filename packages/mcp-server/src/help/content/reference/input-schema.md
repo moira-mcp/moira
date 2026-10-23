@@ -114,8 +114,7 @@ For Russian responses:
 ```
 
 :::tip
-Use string enums for yes/no instead of booleans. This makes agent responses more explicit and
-consistent.
+Choose boolean or a string enum according to the actual answer contract. Strings `"да"` and `"нет"` are both truthy in template conditionals: compare the selected enum value explicitly instead of treating it as a boolean.
 :::
 
 ## Optional vs Required
@@ -138,6 +137,8 @@ consistent.
 }
 ```
 
+`default` above is a schema annotation; response validation does not fill an omitted value. Registry defaults have a separate initialization contract.
+
 ### Optional Skip Pattern
 
 ```json
@@ -145,7 +146,8 @@ consistent.
   "properties": {
     "result": { "type": "string" },
     "skip": { "type": "string", "enum": ["yes"] }
-  }
+  },
+  "oneOf": [{ "required": ["result"] }, { "required": ["skip"] }]
 }
 ```
 
@@ -165,6 +167,8 @@ Agent provides either `result` or `skip`, not both.
   }
 }
 ```
+
+The preceding path regex is an illustrative format restriction, not filesystem authorization or traversal protection; it also excludes spaces and Unicode paths. Use the actual storage/materialize boundary for path safety.
 
 ### Email Pattern
 

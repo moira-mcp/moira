@@ -1,0 +1,865 @@
+/**
+ * Tests for workflow-tool variables command
+ * Tests variable extraction from workflows
+ */
+
+import path from "path";
+import fs from "fs";
+import { randomUUID } from "crypto";
+import { createWorkflowCliFixture } from "../../helpers/workflow-cli-fixture.js";
+
+let cli: ReturnType<typeof createWorkflowCliFixture>;
+
+beforeEach(() => {
+  cli = createWorkflowCliFixture("workflow-variables-");
+});
+
+afterEach(() => {
+  cli.cleanup();
+});
+
+function runWorkflowTool(args: string[]): string {
+  return cli.run(args);
+}
+
+function createTempWorkflow(workflow: object): string {
+  const tmpFile = cli.path(`test-workflow-${randomUUID()}.json`);
+  fs.writeFileSync(tmpFile, JSON.stringify(workflow, null, 2));
+  return tmpFile;
+}
+
+describe("agent-facing CLI diagnostics", () => {
+  test("--version identifies both the package version and exact source checkout", () => {
+    const output = runWorkflowTool(["--version"]);
+
+    expect(output).toContain("@mcp-moira/workflow-cli 0.6.0");
+    expect(output).toContain(path.normalize("packages/workflow-cli/src/workflow-tool.ts"));
+  });
+
+  test("validate exits unsuccessfully when the workflow is invalid", () => {
+    const tmpFile = createTempWorkflow({
+      id: "invalid-workflow",
+      metadata: { name: "Invalid", version: "1.0.0", description: "Invalid" },
+      nodes: [{ id: "start", type: "start", connections: { default: "missing-node" } }],
+    });
+    try {
+      expect(() => runWorkflowTool([tmpFile, "validate"])).toThrow();
+    } finally {
+      fs.unlinkSync(tmpFile);
+    }
+  });
+
+  test("validate accepts catalog migration aliases while keeping executable validation strict", () => {
+    const tmpFile = createTempWorkflow({
+      id: "renamed-workflow",
+      slug: "current-workflow",
+      previousSlugs: ["legacy-workflow"],
+      owner: "system-moira",
+      visibility: "public",
+      metadata: { name: "Renamed", version: "1.0.0", description: "Renamed workflow" },
+      nodes: [
+        { id: "start", type: "start", connections: { default: "end" } },
+        { id: "end", type: "end" },
+      ],
+    });
+    try {
+      expect(runWorkflowTool([tmpFile, "validate"])).toContain("Workflow is valid");
+    } finally {
+      fs.unlinkSync(tmpFile);
+    }
+  });
+
+  test.each([
+    ["non-array", "legacy-workflow"],
+    ["duplicate", ["legacy-workflow", "legacy-workflow"]],
+    ["current slug", ["current-workflow"]],
+  ])("validate rejects %s catalog migration aliases", (_name, previousSlugs) => {
+    const tmpFile = createTempWorkflow({
+      id: "renamed-workflow",
+      slug: "current-workflow",
+      previousSlugs,
+      owner: "system-moira",
+      visibility: "public",
+      metadata: { name: "Renamed", version: "1.0.0", description: "Renamed workflow" },
+      nodes: [
+        { id: "start", type: "start", connections: { default: "end" } },
+        { id: "end", type: "end" },
+      ],
+    });
+    try {
+      expect(() => runWorkflowTool([tmpFile, "validate"])).toThrow();
+    } finally {
+      fs.unlinkSync(tmpFile);
+    }
+  });
+});
+
+describe("workflow-tool variables command", () => {
+  test("list-variables reports filters, unknown names and external policy deterministically", () => {
+    const tmpFile = createTempWorkflow({
+      metadata: { name: "Filtered", version: "1.0.0", description: "Filtered" },
+      variableRegistry: {
+        alpha: { type: "string", description: "Alpha", default: "a" },
+        beta: { type: "number", description: "Beta" },
+      },
+      runtimePolicy: { externalVariableWrites: { alpha: { allowedNodeIds: ["task"] } } },
+      nodes: [
+        { id: "start", type: "start", connections: { default: "task" } },
+        {
+          id: "task",
+          type: "agent-directive",
+          directive: "Task",
+          completionCondition: "Done",
+          connections: { success: "end" },
+        },
+        { id: "end", type: "end" },
+      ],
+    });
+    try {
+      const output = runWorkflowTool([
+        tmpFile,
+        "list-variables",
+        "alpha",
+        "--names",
+        "alpha,missing",
+        "--types",
+        "string",
+        "--has-default",
+        "true",
+        "--externally-writable",
+        "true",
+      ]);
+      expect(output).toContain("Unknown names: missing");
+      expect(output).toContain('"allowedNodeIds":["task"]');
+      expect(output).toContain("Applied filters:");
+      expect(output).not.toContain("beta:");
+
+      const falseOutput = runWorkflowTool([
+        tmpFile,
+        "list-variables",
+        "--names",
+        "alpha,beta",
+        "--has-default",
+        "false",
+        "--externally-writable",
+        "false",
+      ]);
+      expect(falseOutput).toContain("beta:");
+      expect(falseOutput).not.toContain("alpha:");
+      expect(falseOutput).toContain(
+        'Applied filters: {"names":["alpha","beta"],"hasDefault":false,"externallyWritable":false}',
+      );
+    } finally {
+      fs.unlinkSync(tmpFile);
+    }
+  });
+
+  test("set-variable-write-policy authors scoped, all-node and default-deny policies", () => {
+    const tmpFile = createTempWorkflow({
+      metadata: { name: "Policy", version: "1.0.0", description: "Policy" },
+      variableRegistry: { alpha: { type: "string", description: "Alpha" } },
+      nodes: [
+        { id: "start", type: "start", connections: { default: "task" } },
+        {
+          id: "task",
+          type: "agent-directive",
+          directive: "Task",
+          completionCondition: "Done",
+          connections: { success: "end" },
+        },
+        { id: "end", type: "end" },
+      ],
+    });
+    try {
+      runWorkflowTool([tmpFile, "set-variable-write-policy", "alpha", "task"]);
+      expect(JSON.parse(fs.readFileSync(tmpFile, "utf8")).runtimePolicy).toEqual({
+        externalVariableWrites: { alpha: { allowedNodeIds: ["task"] } },
+      });
+
+      runWorkflowTool([tmpFile, "set-variable-write-policy", "alpha", "all"]);
+      expect(JSON.parse(fs.readFileSync(tmpFile, "utf8")).runtimePolicy).toEqual({
+        externalVariableWrites: { alpha: {} },
+      });
+
+      runWorkflowTool([tmpFile, "set-variable-write-policy", "alpha", "none"]);
+      expect(JSON.parse(fs.readFileSync(tmpFile, "utf8")).runtimePolicy).toEqual({
+        externalVariableWrites: {},
+      });
+    } finally {
+      fs.unlinkSync(tmpFile);
+    }
+  });
+  describe("initialData extraction", () => {
+    test("extracts variables from initialData", () => {
+      const workflow = {
+        metadata: { name: "Test", version: "1.0.0", description: "Test" },
+        nodes: [
+          {
+            id: "start",
+            type: "start",
+            initialData: {
+              variables: {
+                project_name: { description: "Project name", value: "My Project" },
+                feature_branch: { description: "Feature branch", value: "feature/test" },
+              },
+            },
+          },
+        ],
+      };
+      const tmpFile = createTempWorkflow(workflow);
+      try {
+        const output = runWorkflowTool([tmpFile, "variables"]);
+        expect(output).toContain("project_name");
+        expect(output).toContain("feature_branch");
+        expect(output).toContain("[initial]");
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+  });
+
+  describe("inputSchema extraction", () => {
+    test("extracts variables from inputSchema properties", () => {
+      const workflow = {
+        metadata: { name: "Test", version: "1.0.0", description: "Test" },
+        nodes: [
+          {
+            id: "input-node",
+            type: "directive",
+            directive: "Get input",
+            inputSchema: {
+              type: "object",
+              properties: {
+                user_choice: { type: "string", description: "User selection" },
+                confirm: { type: "boolean" },
+              },
+            },
+          },
+        ],
+      };
+      const tmpFile = createTempWorkflow(workflow);
+      try {
+        const output = runWorkflowTool([tmpFile, "variables"]);
+        expect(output).toContain("user_choice");
+        expect(output).toContain("confirm");
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+  });
+
+  describe("template extraction", () => {
+    test("extracts variables from {{var}} templates", () => {
+      const workflow = {
+        metadata: { name: "Test", version: "1.0.0", description: "Test" },
+        nodes: [
+          {
+            id: "directive-node",
+            type: "directive",
+            directive: "Create file in {{workspace_path}} for {{feature_name}}",
+          },
+        ],
+      };
+      const tmpFile = createTempWorkflow(workflow);
+      try {
+        const output = runWorkflowTool([tmpFile, "variables"]);
+        expect(output).toContain("workspace_path");
+        expect(output).toContain("feature_name");
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+
+    test("extracts variables from {{#if var}} conditionals", () => {
+      const workflow = {
+        metadata: { name: "Test", version: "1.0.0", description: "Test" },
+        nodes: [
+          {
+            id: "directive-node",
+            type: "directive",
+            directive: "{{#if has_tests}}Run tests{{/if}}",
+          },
+        ],
+      };
+      const tmpFile = createTempWorkflow(workflow);
+      try {
+        const output = runWorkflowTool([tmpFile, "variables"]);
+        expect(output).toContain("has_tests");
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+
+    test("extracts nested field access {{var.field}}", () => {
+      const workflow = {
+        metadata: { name: "Test", version: "1.0.0", description: "Test" },
+        nodes: [
+          {
+            id: "directive-node",
+            type: "directive",
+            directive: "User email: {{user.email}}, name: {{user.name}}",
+          },
+        ],
+      };
+      const tmpFile = createTempWorkflow(workflow);
+      try {
+        const output = runWorkflowTool([tmpFile, "variables"]);
+        // Output shows the full path like user.email
+        expect(output).toContain("user");
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+  });
+
+  describe("condition expression extraction", () => {
+    test("extracts variables from condition object format", () => {
+      const workflow = {
+        metadata: { name: "Test", version: "1.0.0", description: "Test" },
+        nodes: [
+          {
+            id: "condition-node",
+            type: "condition",
+            cases: [
+              {
+                when: {
+                  operator: "gt",
+                  left: { contextPath: "step_count" },
+                  right: 0,
+                },
+                output: "true",
+              },
+            ],
+            connections: { true: "next", default: "other" },
+          },
+        ],
+      };
+      const tmpFile = createTempWorkflow(workflow);
+      try {
+        const output = runWorkflowTool([tmpFile, "variables"]);
+        expect(output).toContain("step_count");
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+  });
+
+  describe("expression node extraction", () => {
+    test("extracts variables from expression nodes", () => {
+      const workflow = {
+        metadata: { name: "Test", version: "1.0.0", description: "Test" },
+        nodes: [
+          {
+            id: "expr-node",
+            type: "expression",
+            value: "counter + offset",
+            outputVariable: "result",
+          },
+        ],
+      };
+      const tmpFile = createTempWorkflow(workflow);
+      try {
+        const output = runWorkflowTool([tmpFile, "variables"]);
+        expect(output).toContain("counter");
+        expect(output).toContain("offset");
+        expect(output).toContain("result");
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+
+    test("filters JavaScript keywords from expression nodes", () => {
+      const workflow = {
+        metadata: { name: "Test", version: "1.0.0", description: "Test" },
+        nodes: [
+          {
+            id: "expr-node",
+            type: "expression",
+            value: "counter > 0 ? true : false",
+            outputVariable: "is_positive",
+          },
+        ],
+      };
+      const tmpFile = createTempWorkflow(workflow);
+      try {
+        const output = runWorkflowTool([tmpFile, "variables"]);
+        expect(output).toContain("counter");
+        expect(output).toContain("is_positive");
+        // Should NOT contain JS keywords as variables (true/false are keywords)
+        // The output format is "● var_name [type] used Nx"
+        // If true/false were captured they'd appear as "● true" or "● false"
+        const lines = output.split("\n");
+        const varLines = lines.filter((l) => l.startsWith("●"));
+        const hasTrue = varLines.some((l) => l.includes("● true"));
+        const hasFalse = varLines.some((l) => l.includes("● false"));
+        expect(hasTrue).toBe(false);
+        expect(hasFalse).toBe(false);
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+  });
+
+  describe("--usage flag", () => {
+    test("shows usage locations with --usage flag", () => {
+      const workflow = {
+        metadata: { name: "Test", version: "1.0.0", description: "Test" },
+        nodes: [
+          {
+            id: "start",
+            type: "start",
+            initialData: {
+              variables: {
+                my_var: { description: "Test variable", value: "value" },
+              },
+            },
+          },
+          {
+            id: "use-var",
+            type: "directive",
+            directive: "Use {{my_var}} here",
+          },
+        ],
+      };
+      const tmpFile = createTempWorkflow(workflow);
+      try {
+        const output = runWorkflowTool([tmpFile, "variables", "--usage"]);
+        expect(output).toContain("my_var");
+        // With --usage flag, should show node ID and field where variable is used
+        expect(output).toContain("use-var");
+        // Note: "Used in:" shows where variable is USED, not where defined
+        // The start node defines it via initialData, but --usage shows usage locations
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+  });
+
+  describe("registry-backed get/set/delete-variable", () => {
+    // The get/set/delete-variable commands operate on variableRegistry (the single source of
+    // truth for declared globals), NOT the removed start-node initialData.variables.
+    function registryWorkflow() {
+      return {
+        metadata: { name: "Test", version: "1.0.0", description: "Test" },
+        variableRegistry: {
+          report_template: { type: "string", description: "HTML report template", default: "<x/>" },
+        },
+        nodes: [
+          { id: "start", type: "start", connections: { default: "end" } },
+          { id: "end", type: "end" },
+        ],
+      };
+    }
+
+    test("get-variable reads a declared global from variableRegistry", () => {
+      const tmpFile = createTempWorkflow(registryWorkflow());
+      try {
+        const output = runWorkflowTool([tmpFile, "get-variable", "report_template"]);
+        expect(output).toContain("report_template");
+        expect(output).toContain("HTML report template");
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+
+    test("set-variable creates a new global in variableRegistry (not initialData)", () => {
+      const tmpFile = createTempWorkflow(registryWorkflow());
+      try {
+        runWorkflowTool([tmpFile, "set-variable", "new_flag", "true value"]);
+        const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect(saved.variableRegistry.new_flag).toBeDefined();
+        expect(saved.variableRegistry.new_flag.default).toBe("true value");
+        // The removed model must not reappear
+        const startNode = saved.nodes.find((n: any) => n.type === "start");
+        expect(startNode.initialData).toBeUndefined();
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+
+    test("set-variable preserves description/type of an existing global", () => {
+      const tmpFile = createTempWorkflow(registryWorkflow());
+      try {
+        runWorkflowTool([tmpFile, "set-variable", "report_template", "<new/>"]);
+        const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect(saved.variableRegistry.report_template.default).toBe("<new/>");
+        expect(saved.variableRegistry.report_template.description).toBe("HTML report template");
+        expect(saved.variableRegistry.report_template.type).toBe("string");
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+
+    test("set-variable-schema accepts --force without including it in JSON", () => {
+      const tmpFile = createTempWorkflow(registryWorkflow());
+      try {
+        runWorkflowTool([
+          tmpFile,
+          "set-variable-schema",
+          "result",
+          '{"type":"array","description":"Result history","items":{"type":"string"},"default":[]}',
+          "--force",
+        ]);
+        const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect(saved.variableRegistry.result).toEqual({
+          type: "array",
+          description: "Result history",
+          items: { type: "string" },
+          default: [],
+        });
+        expect(saved.metadata.version).toBe("1.0.0");
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+
+    test("set-variable-schema reads complex JSON Schema from a file", () => {
+      const tmpFile = createTempWorkflow(registryWorkflow());
+      const schemaFile = cli.path(`variable-schema-${randomUUID()}.json`);
+      const schema = {
+        type: "object",
+        description: "Structured result",
+        properties: {
+          status: { type: "string", enum: ["complete", "limited"] },
+          findings: { type: "array", items: { type: "string" } },
+        },
+        required: ["status", "findings"],
+        additionalProperties: false,
+        default: { status: "complete", findings: [] },
+      };
+      fs.writeFileSync(schemaFile, JSON.stringify(schema, null, 2));
+      try {
+        runWorkflowTool([
+          tmpFile,
+          "set-variable-schema",
+          "result",
+          "--file",
+          schemaFile,
+          "--force",
+        ]);
+        const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect(saved.variableRegistry.result).toEqual(schema);
+        expect(saved.metadata.version).toBe("1.0.0");
+      } finally {
+        fs.unlinkSync(tmpFile);
+        fs.unlinkSync(schemaFile);
+      }
+    });
+
+    test("delete-variable removes a global from variableRegistry", () => {
+      const tmpFile = createTempWorkflow(registryWorkflow());
+      try {
+        runWorkflowTool([tmpFile, "delete-variable", "report_template"]);
+        const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect(saved.variableRegistry.report_template).toBeUndefined();
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+  });
+
+  describe("workflow metadata commands", () => {
+    test("set-description updates the package CLI target without storing --force", () => {
+      const workflow = {
+        metadata: { name: "Test", version: "1.0.0", description: "Old description" },
+        nodes: [
+          { id: "start", type: "start", connections: { default: "end" } },
+          { id: "end", type: "end" },
+        ],
+      };
+      const tmpFile = createTempWorkflow(workflow);
+      try {
+        runWorkflowTool([tmpFile, "set-description", "New workflow description", "--force"]);
+        const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect(saved.metadata.description).toBe("New workflow description");
+        expect(saved.metadata.version).toBe("1.0.0");
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+
+    test("set-description reads a multiline description from a file", () => {
+      const workflow = {
+        metadata: { name: "Test", version: "1.0.0", description: "Old description" },
+        nodes: [
+          { id: "start", type: "start", connections: { default: "end" } },
+          { id: "end", type: "end" },
+        ],
+      };
+      const tmpFile = createTempWorkflow(workflow);
+      const descriptionFile = cli.path(`workflow-description-${randomUUID()}.txt`);
+      fs.writeFileSync(descriptionFile, "First paragraph.\n\nSecond paragraph.\n");
+      try {
+        runWorkflowTool([tmpFile, "set-description", "--file", descriptionFile, "--force"]);
+        const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect(saved.metadata.description).toBe("First paragraph.\n\nSecond paragraph.");
+        expect(saved.metadata.version).toBe("1.0.0");
+      } finally {
+        fs.unlinkSync(tmpFile);
+        fs.unlinkSync(descriptionFile);
+      }
+    });
+
+    test("set-system-reminder replaces the reminder from a file and none removes it", () => {
+      const workflow = {
+        metadata: { name: "Test", version: "1.0.0", description: "Description" },
+        systemReminder: "Follow the steps strictly in order.",
+        nodes: [
+          { id: "start", type: "start", connections: { default: "end" } },
+          { id: "end", type: "end" },
+        ],
+      };
+      const tmpFile = createTempWorkflow(workflow);
+      const reminderFile = cli.path(`workflow-reminder-${randomUUID()}.txt`);
+      fs.writeFileSync(reminderFile, "One step at a time.\n\nName the outcome explicitly.\n");
+      try {
+        runWorkflowTool([tmpFile, "set-system-reminder", "--file", reminderFile, "--force"]);
+        const updated = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect(updated.systemReminder).toBe("One step at a time.\n\nName the outcome explicitly.");
+        expect(updated.metadata.version).toBe("1.0.0");
+
+        runWorkflowTool([tmpFile, "set-system-reminder", "none", "--force"]);
+        const removed = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect("systemReminder" in removed).toBe(false);
+      } finally {
+        fs.unlinkSync(tmpFile);
+        fs.unlinkSync(reminderFile);
+      }
+    });
+
+    test("set-owner accepts the system owner matching visibility and refuses the rest", () => {
+      const workflow = {
+        metadata: { name: "Test", version: "1.0.0", description: "Description" },
+        slug: "a-flow",
+        owner: "admin",
+        visibility: "private",
+        nodes: [
+          { id: "start", type: "start", connections: { default: "end" } },
+          { id: "end", type: "end" },
+        ],
+      };
+      const tmpFile = createTempWorkflow(workflow);
+      try {
+        expect(() => runWorkflowTool([tmpFile, "set-owner", "admin", "--force"])).toThrow();
+        expect(() => runWorkflowTool([tmpFile, "set-owner", "system-moira", "--force"])).toThrow();
+        expect(JSON.parse(fs.readFileSync(tmpFile, "utf-8")).owner).toBe("admin");
+
+        runWorkflowTool([tmpFile, "set-owner", "system-admin", "--force"]);
+        const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect(saved.owner).toBe("system-admin");
+        expect(saved.visibility).toBe("private");
+        expect(saved.slug).toBe("a-flow");
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+
+    test("set-tags splits a comma list and none clears it", () => {
+      const workflow = {
+        metadata: { name: "Test", version: "1.0.0", description: "Description" },
+        nodes: [
+          { id: "start", type: "start", connections: { default: "end" } },
+          { id: "end", type: "end" },
+        ],
+      };
+      const tmpFile = createTempWorkflow(workflow);
+      try {
+        runWorkflowTool([tmpFile, "set-tags", "audio, tts,script", "--force"]);
+        const tagged = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect(tagged.metadata.tags).toEqual(["audio", "tts", "script"]);
+        expect(tagged.metadata.version).toBe("1.0.0");
+
+        runWorkflowTool([tmpFile, "set-tags", "none", "--force"]);
+        const cleared = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect("tags" in cleared.metadata).toBe(false);
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+  });
+
+  describe("workflow migration commands", () => {
+    function migrationWorkflow() {
+      return {
+        id: "migration-flow",
+        metadata: { name: "Migration", version: "2.0.0", description: "Test" },
+        variableRegistry: {
+          global_result: { type: "string", description: "Global result", default: "" },
+        },
+        nodes: [
+          { id: "start", type: "start", connections: { default: "produce" } },
+          {
+            id: "produce",
+            type: "agent-directive",
+            directive: "Produce",
+            completionCondition: "Produced",
+            inputSchema: {
+              type: "object",
+              properties: { local_result: { type: "string" } },
+              required: ["local_result"],
+            },
+            maxRetries: 3,
+            retryMessage: "legacy",
+            currentRetries: 1,
+            connections: { success: "end" },
+          },
+          { id: "end", type: "end", finalOutput: ["local_result", "global_result"] },
+        ],
+      };
+    }
+
+    test("replace preserves node position and requires the same id", () => {
+      const tmpFile = createTempWorkflow(migrationWorkflow());
+      const replacementFile = cli.path(`replacement-${Date.now()}.json`);
+      fs.writeFileSync(
+        replacementFile,
+        JSON.stringify({
+          id: "produce",
+          type: "expression",
+          expressions: ["global_result = 1"],
+          connections: { default: "end" },
+        }),
+      );
+      try {
+        runWorkflowTool([tmpFile, "replace", "produce", replacementFile, "--force"]);
+        const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect(saved.nodes.map((node: { id: string }) => node.id)).toEqual([
+          "start",
+          "produce",
+          "end",
+        ]);
+        expect(saved.nodes[1].type).toBe("expression");
+      } finally {
+        fs.unlinkSync(tmpFile);
+        fs.unlinkSync(replacementFile);
+      }
+    });
+
+    test("update --final-output configures an End projection", () => {
+      const tmpFile = createTempWorkflow(migrationWorkflow());
+      try {
+        runWorkflowTool([tmpFile, "update", "end", "--final-output", '["global_result"]']);
+        const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect(saved.nodes[2].finalOutput).toEqual(["global_result"]);
+        expect(saved.metadata.version).toBe("2.0.1");
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+
+    test("sync replaces content while preserving the destination identity", () => {
+      const sourceWorkflow = {
+        ...migrationWorkflow(),
+        id: "workspace-copy",
+      };
+      const source = createTempWorkflow(sourceWorkflow);
+      const destination = createTempWorkflow({
+        ...migrationWorkflow(),
+        id: "catalog-workflow",
+        slug: "catalog-slug",
+        previousSlugs: ["legacy-catalog-slug"],
+        owner: "catalog-owner",
+        visibility: "public",
+        metadata: {
+          name: "Old",
+          version: "1.0.0",
+          description: "Old",
+          author: "catalog-author",
+          tags: ["catalog-tag"],
+        },
+      });
+      try {
+        runWorkflowTool([source, "sync", destination]);
+        const saved = JSON.parse(fs.readFileSync(destination, "utf-8"));
+        expect(saved).toEqual({
+          ...sourceWorkflow,
+          id: "catalog-workflow",
+          slug: "catalog-slug",
+          previousSlugs: ["legacy-catalog-slug"],
+          owner: "catalog-owner",
+          visibility: "public",
+          metadata: {
+            ...sourceWorkflow.metadata,
+            author: "catalog-author",
+            tags: ["catalog-tag"],
+          },
+        });
+      } finally {
+        fs.unlinkSync(source);
+        fs.unlinkSync(destination);
+      }
+    });
+
+    test("sync leaves the destination byte-for-byte unchanged when the result is invalid", () => {
+      const source = createTempWorkflow({
+        ...migrationWorkflow(),
+        id: "invalid-source",
+        nodes: [
+          { id: "start", type: "start", connections: { default: "missing-node" } },
+          { id: "end", type: "end" },
+        ],
+      });
+      const destination = createTempWorkflow({
+        ...migrationWorkflow(),
+        id: "catalog-workflow",
+        slug: "catalog-slug",
+        owner: "catalog-owner",
+        visibility: "public",
+      });
+      const before = fs.readFileSync(destination);
+      try {
+        expect(() => runWorkflowTool([source, "sync", destination])).toThrow();
+        expect(fs.readFileSync(destination)).toEqual(before);
+      } finally {
+        fs.unlinkSync(source);
+        fs.unlinkSync(destination);
+      }
+    });
+  });
+
+  describe("empty/null handling", () => {
+    test("handles workflow with no variables", () => {
+      const workflow = {
+        metadata: { name: "Test", version: "1.0.0", description: "Test" },
+        nodes: [
+          {
+            id: "simple",
+            type: "directive",
+            directive: "Do something without variables",
+          },
+        ],
+      };
+      const tmpFile = createTempWorkflow(workflow);
+      try {
+        const output = runWorkflowTool([tmpFile, "variables"]);
+        // Output has ANSI codes, so check parts separately
+        expect(output).toContain("Total:");
+        expect(output).toContain("0");
+        expect(output).toContain("variable(s)");
+        // Ensure no variable bullets appear
+        expect(output).not.toContain("●");
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+
+    test("handles empty nodes array", () => {
+      const workflow = {
+        metadata: { name: "Test", version: "1.0.0", description: "Test" },
+        nodes: [],
+      };
+      const tmpFile = createTempWorkflow(workflow);
+      try {
+        const output = runWorkflowTool([tmpFile, "variables"]);
+        // Output has ANSI codes, so check parts separately
+        expect(output).toContain("Total:");
+        expect(output).toContain("0");
+        expect(output).toContain("variable(s)");
+        // Ensure no variable bullets appear
+        expect(output).not.toContain("●");
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+  });
+});

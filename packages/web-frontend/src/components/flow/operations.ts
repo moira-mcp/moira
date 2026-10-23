@@ -31,6 +31,7 @@ import {
   type ReferenceLocation,
 } from "@mcp-moira/workflow-engine/authoring";
 import type {
+  AuthoredWorkflowGraph,
   ConnectionLabel,
   RegistryVariable,
   WorkflowGraph,
@@ -80,13 +81,10 @@ export type StructuralOperation =
 
 export type Operation = ContentOperation | StructuralOperation;
 
-// The engine's authoring functions and the page describe the same JSON with two type
-// declarations; the conversion is a cast in both directions.
-type EngineGraph = Parameters<typeof addNode>[0];
-type EngineNode = Parameters<typeof addNode>[1];
-const toEngine = (graph: WorkflowGraph): EngineGraph => graph as unknown as EngineGraph;
-const fromEngine = (graph: EngineGraph): WorkflowGraph => graph as unknown as WorkflowGraph;
-const engineNode = (node: WorkflowNode): EngineNode => node as unknown as EngineNode;
+/** Authoring accepts unsaved definitions; editing retains the loaded graph's server identity. */
+function loadedGraph(graph: AuthoredWorkflowGraph, id: string): WorkflowGraph {
+  return { ...graph, id };
+}
 
 function mapNodes(
   workflow: WorkflowGraph,
@@ -151,46 +149,42 @@ interface Applied {
 }
 
 function applyStructural(workflow: WorkflowGraph, op: StructuralOperation): Applied {
-  const graph = toEngine(workflow);
+  const graph = workflow;
+  const loaded = (result: AuthoredWorkflowGraph) => loadedGraph(result, workflow.id);
   const block = (blockId?: string) => (blockId ? { blockId } : {});
   switch (op.kind) {
     case "add-node":
-      return { workflow: fromEngine(addNode(graph, engineNode(op.node), block(op.blockId))) };
+      return { workflow: loaded(addNode(graph, op.node, block(op.blockId))) };
     case "add-connected-node": {
-      const added = addNode(graph, engineNode(op.node), block(op.blockId));
-      return { workflow: fromEngine(setConnection(added, op.source, op.key, op.node.id)) };
+      const added = addNode(graph, op.node, block(op.blockId));
+      return { workflow: loaded(setConnection(added, op.source, op.key, op.node.id)) };
     }
     case "insert-on-edge":
       return {
-        workflow: fromEngine(
-          insertNodeOnEdge(
-            graph,
-            { source: op.source, key: op.key },
-            engineNode(op.node),
-            block(op.blockId),
-          ),
+        workflow: loaded(
+          insertNodeOnEdge(graph, { source: op.source, key: op.key }, op.node, block(op.blockId)),
         ),
       };
     case "remove-node":
-      return { workflow: fromEngine(removeNode(graph, op.nodeId, op.decisions)) };
+      return { workflow: loaded(removeNode(graph, op.nodeId, op.decisions)) };
     case "rename-node": {
       const renamed = renameNode(graph, op.from, op.to);
-      return { workflow: fromEngine(renamed.workflow), rewritten: renamed.rewritten };
+      return { workflow: loaded(renamed.workflow), rewritten: renamed.rewritten };
     }
     case "set-connection":
-      return { workflow: fromEngine(setConnection(graph, op.source, op.key, op.target)) };
+      return { workflow: loaded(setConnection(graph, op.source, op.key, op.target)) };
     case "remove-connection":
-      return { workflow: fromEngine(removeConnection(graph, op.source, op.key)) };
+      return { workflow: loaded(removeConnection(graph, op.source, op.key)) };
     case "add-block":
-      return { workflow: fromEngine(addBlock(graph, op.block, op.after)) };
+      return { workflow: loaded(addBlock(graph, op.block, op.after)) };
     case "remove-block":
-      return { workflow: fromEngine(removeBlock(graph, op.blockId)) };
+      return { workflow: loaded(removeBlock(graph, op.blockId)) };
     case "set-choice": {
-      const withSteps = (op.newNodes ?? []).reduce(
-        (next, added) => addNode(next, engineNode(added.node), block(added.blockId)),
+      const withSteps = (op.newNodes ?? []).reduce<AuthoredWorkflowGraph>(
+        (next, added) => addNode(next, added.node, block(added.blockId)),
         graph,
       );
-      return { workflow: fromEngine(setChoice(withSteps, op.nodeId, op.choice)) };
+      return { workflow: loaded(setChoice(withSteps, op.nodeId, op.choice)) };
     }
   }
 }
@@ -342,7 +336,7 @@ function lineageOf(saved: WorkflowGraph, ops: readonly Operation[]): Lineage {
     // The baseline follows the rename where it can; a rename it cannot replay (its new id is
     // still taken there by a node the draft removed) leaves the node compared as it was saved.
     if (baselineIds.get(source) === op.from && !baseline.nodes.some((n) => n.id === op.to)) {
-      baseline = fromEngine(renameNode(toEngine(baseline), op.from, op.to).workflow);
+      baseline = loadedGraph(renameNode(baseline, op.from, op.to).workflow, baseline.id);
       baselineIds.set(source, op.to);
     }
   }
@@ -350,21 +344,22 @@ function lineageOf(saved: WorkflowGraph, ops: readonly Operation[]): Lineage {
 }
 
 /** The per-entry comparison of two maps (`connections`, `connectionLabels`, block `content`). */
-function compareMap(
+function compareMap<T extends object>(
   out: ExportEntry[],
   path: string,
-  base: Record<string, unknown> | undefined,
-  draft: Record<string, unknown> | undefined,
-  saved: Record<string, unknown> | undefined,
+  base: T | undefined,
+  draft: T | undefined,
+  saved: T | undefined,
 ): void {
   const keys = new Set([...Object.keys(base ?? {}), ...Object.keys(draft ?? {})]);
   for (const key of keys) {
-    if (!same(base?.[key], draft?.[key])) {
+    const field = key as keyof T;
+    if (!same(base?.[field], draft?.[field])) {
       out.push({
         kind: "change",
         path: `${path}.${key}`,
-        before: saved?.[key],
-        after: draft?.[key],
+        before: saved?.[field],
+        after: draft?.[field],
       });
     }
   }

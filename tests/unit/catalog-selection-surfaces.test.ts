@@ -188,14 +188,10 @@ describe("public workflow selection surfaces", () => {
     expect(help).toContain("start with `skipNotificationCheck: true`");
   });
 
-  it("keeps runtime English prompts identical and selection dynamic in both languages", () => {
+  it("keeps canonical prompt selection dynamic in both languages", () => {
     const configPrompt = read("config/prompts/systemPrompt.md");
-    const rootPrompt = read("docs/SYSTEM-PROMPT.md");
-    const packagedPrompt = read("packages/docs/src/content/docs/docs/SYSTEM-PROMPT.md");
     const russianPrompt = read("packages/docs/src/content/docs/docs/SYSTEM-PROMPT-RU.md");
 
-    expect(rootPrompt).toBe(configPrompt);
-    expect(packagedPrompt).toBe(configPrompt);
     expect(configPrompt).toContain("complete current `list()` result");
     expect(configPrompt).toContain('session({ action: "add-reminder", ... })');
     expect(configPrompt).toContain(
@@ -217,11 +213,7 @@ describe("public workflow selection surfaces", () => {
 
   it("does not make plan approval a fixed Quick Task stage, which autonomous runs do not have", () => {
     // An agent told that approval is a required stage waits for a person an autonomous run never asks
-    const english = [
-      read("config/prompts/systemPrompt.md"),
-      read("docs/SYSTEM-PROMPT.md"),
-      read("packages/docs/src/content/docs/docs/SYSTEM-PROMPT.md"),
-    ];
+    const english = [read("config/prompts/systemPrompt.md")];
     const russian = read("packages/docs/src/content/docs/docs/SYSTEM-PROMPT-RU.md");
     for (const prompt of english) {
       expect(prompt).not.toMatch(/quick-task[^\n]*→ approval/);
@@ -236,9 +228,7 @@ describe("public workflow selection surfaces", () => {
   it("does not advertise removed identities on live selection surfaces", () => {
     const liveSelectionText = [
       read("config/prompts/systemPrompt.md"),
-      read("docs/SYSTEM-PROMPT.md"),
-      read("docs/WORKFLOWS.md"),
-      read("packages/docs/src/content/docs/docs/SYSTEM-PROMPT.md"),
+      read("docs/reference/bundled-catalog.md"),
       read("packages/docs/src/content/docs/docs/SYSTEM-PROMPT-RU.md"),
       read("packages/docs/src/content/docs/docs/reference/workflows/index.mdx"),
       read("packages/docs/src/content/docs/ru/docs/reference/workflows/index.mdx"),
@@ -249,7 +239,9 @@ describe("public workflow selection surfaces", () => {
     for (const slug of removedPublicSlugs) {
       expect(liveSelectionText).not.toContain(`moira/${slug}`);
     }
-    expect(read("docs/WORKFLOWS.md")).toContain("Do not maintain a copied catalog");
+    expect(read("docs/reference/bundled-catalog.md")).toContain(
+      "current authorized MCP discovery, not a copied list here",
+    );
   });
 
   it("keeps the workflow-template guide dynamic and its examples qualified", () => {

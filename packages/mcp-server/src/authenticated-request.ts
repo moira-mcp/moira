@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { isJsonContentType } from "@modelcontextprotocol/sdk/shared/mediaType.js";
-import { readJsonBody } from "../../workspace-service/src/request-body.mjs";
-import { settleOwnerFrame } from "../../workspace-service/src/stream-frame.mjs";
+import { readJsonBody } from "@mcp-moira/shared/http/request-body";
+import { settleOwnerFrame } from "@mcp-moira/shared/http/owner-stream-frame";
 
 /** Authenticate before reading controls; the SDK retains media-type and JSON-RPC validation. */
 export async function readAuthenticatedMcpRequest<Principal>(

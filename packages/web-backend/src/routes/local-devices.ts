@@ -24,8 +24,8 @@ import { issueWorkspaceAgentCredential } from "../services/workspace-services.js
 import { getSqliteInstance } from "@mcp-moira/shared";
 import { getCodespaceProviderServices } from "../services/codespace-services.js";
 import { LocalCodespaceResourceService } from "../services/local-codespace-resource-service.js";
-import { readOwnerJsonBody } from "../../../workspace-service/src/request-body.mjs";
-import { settleOwnerFrame } from "../../../workspace-service/src/stream-frame.mjs";
+import { readOwnerJsonBody } from "@mcp-moira/shared/http/request-body";
+import { settleOwnerFrame } from "@mcp-moira/shared/http/owner-stream-frame";
 
 type Handler = (req: Request, res: Response, next: NextFunction) => unknown | Promise<unknown>;
 function endpoint(handler: Handler) {

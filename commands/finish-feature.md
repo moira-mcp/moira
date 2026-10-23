@@ -1,49 +1,24 @@
 ---
-description: "Start feature completion workflow in Moira"
+description: "Start an authorized, available feature-completion workflow"
 ---
 
-# Finish Feature Workflow
+# Finish feature
 
-<finish-feature>
-<description>Find and start feature completion workflow in Moira</description>
+Check whether the current development workflow already owns the requested remaining work.
+Continue that lifecycle when applicable; do not split implementation, tests, documentation or
+review into another run merely because this command exists.
 
-<workflow-stages>
+For an intended separate completion task, discover available workflows through the configured
+Moira `list` tool and select the exact authorized completion identity. The completion catalog can
+be private; this public command does not install it or grant access. If no matching flow exists,
+report the available choices without substituting an unrelated workflow or inventing an owner.
 
-<stage-1>
-<name>Workflow Discovery</name>
-<actions>
-  <list-workflows>Use mcp__moira__list_workflows to get available workflows</list-workflows>
-  <find-completion>Find feature completion/finish workflow</find-completion>
-  <validate>Ensure workflow exists and is executable</validate>
-</actions>
-</stage-1>
+Follow the [Agent Guide](../packages/mcp-server/src/help/content/integration/agent-guide.md):
+`start` first prepares the selected workflow and explicit intended parent (or `"none"`), then
+executes the exact returned `startAttemptId`. Collect the same attempt after a lost execute reply;
+do not prepare a replacement. Preserve the process identity in the project's locally ignored
+agent workspace and continue with each current Step attempt only after completing its real work.
 
-<stage-2>
-<name>Start Workflow</name>
-<actions>
-  <start-process>Use mcp__moira__start_workflow with found workflow ID</start-process>
-  <get-process-id>Capture returned process ID</get-process-id>
-  <report>Report process ID and initial step to user</report>
-</actions>
-</stage-2>
-
-<stage-3>
-<name>Begin Execution</name>
-<actions>
-  <execute-first-step>Execute first workflow step as instructed by Moira</execute-first-step>
-  <follow-workflow>Continue following workflow instructions for feature completion</follow-workflow>
-</actions>
-</stage-3>
-
-</workflow-stages>
-
-<error-handling>
-<no-workflow>If completion workflow not found: report error with available workflows</no-workflow>
-<start-failed>If workflow start fails: report error and suggest checking Moira status</start-failed>
-</error-handling>
-
-<arguments>
-<input>$ARGUMENTS - optional: feature name or additional parameters</input>
-</arguments>
-
-</finish-feature>
+Use current exposed tool names, not retired aliases. `$ARGUMENTS` provides the feature/task context.
+The selected workflow and user's authorization determine Git, publication and deployment effects;
+this prompt grants no additional effects or permission to bypass repository protection.

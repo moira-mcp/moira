@@ -22,6 +22,7 @@ Collect information about agent environment, user preferences, or project config
   "type": "agent-directive",
   "id": "collect-info",
   "directive": "Determine agent capabilities:\n- File system access?\n- Web fetch access?\n- Test framework?",
+  "completionCondition": "Relevant capabilities checked in the current environment; unavailable access reported honestly",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -45,7 +46,7 @@ Collect information about agent environment, user preferences, or project config
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "has_file_access" },
+        "left": { "contextPath": "collect-info.has_file_access" },
         "right": true
       },
       "output": "has-file-access"
@@ -60,23 +61,25 @@ Collect information about agent environment, user preferences, or project config
 
 ## Using Collected Values
 
-After collection, values are in context. Use them with conditional templates:
+Values are node-local. These are node/configuration fragments; their connection targets must exist in the containing workflow. Use the producer ID in later templates:
 
 ```json
 {
-  "directive": "{{#if has_file_access}}Save to {{output_path}}{{else}}Store in context variable{{/if}}"
+  "directive": "{{#if collect-info.has_file_access}}Discover an authorized output path and save the result there{{else}}Return the result in the workflow answer{{/if}}"
 }
 ```
 
 ## Real Example
 
-From `development-flow.json`:
+Configuration fragment for a project collector (add its connections and completion condition when making a node):
 
 ```json
 {
   "type": "agent-directive",
   "id": "get-initial-requirements",
-  "directive": "Study project and collect ALL information for development.\n\n1) Find CLAUDE.md or similar agent instructions\n2) Determine test command (npm test, pytest, etc.)\n3) Check for project checklist\n4) Check for agent onboarding document\n...",
+  "completionCondition": "Relevant project rules and validation entries identified from actual sources",
+  "connections": { "success": "next-step" },
+  "directive": "Read applicable project instructions and identify the validation entry relevant to the requested change. Record discovered paths and report unavailable commands rather than guessing.",
   "inputSchema": {
     "properties": {
       "test_command": { "type": "string" },
@@ -86,14 +89,18 @@ From `development-flow.json`:
       "has_checklist": { "type": "string", "enum": ["yes", "no"] },
       "has_browser_ui": { "type": "string", "enum": ["yes", "no"] }
     },
-    "required": ["test_command", "has_tests", "build_command", "has_checklist"]
+    "required": ["has_tests", "has_checklist"],
+    "if": { "properties": { "has_tests": { "const": "yes" } }, "required": ["has_tests"] },
+    "then": {
+      "required": ["test_command"],
+      "properties": { "test_command": { "type": "string", "minLength": 1 } }
+    }
   }
 }
 ```
 
 :::tip
-Collect all configuration upfront rather than asking throughout the workflow. This improves user
-experience and allows conditional branching.
+Collect information when its consumer needs it. Resolve available project facts yourself; ask only for decisions or access that cannot be established from authorized context. A capability flag does not grant permission to use that capability.
 :::
 
 ## Related Patterns

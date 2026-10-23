@@ -27,7 +27,7 @@ flowchart LR
 ## 1. The repair owner states the reach after the repair
 
 The value is a node-local property — declared in the node's `inputSchema` but not in `globalInputs`,
-so it is read as `node-id.field` and cannot outlive the transition that routes on it. A registry
+so it is read as `node-id.field`. It remains in persisted execution context; node scoping identifies its producer, not its lifetime. A registry
 global would be wrong here: one shared name would keep the last answer written to it, and the
 condition after another gate's repair could route on a value that repair never produced.
 
@@ -81,8 +81,7 @@ picks a route deliberately.
 Write the single case so it names `contained`; the full chain is then what `default` takes, which is
 every answer other than `contained`. The conservative direction is the default output.
 
-The spreading branch does not enter the chain directly: it goes through the expression node that
-opens the next round, and the chain follows from there.
+If the workflow already uses numbered evidence directories, declare `current_iteration` as a numeric registry entry with an initial default. The spreading branch can then advance that real consumer's round before entering the chain. Do not add a counter only to record that a repair happened.
 
 ```json
 {

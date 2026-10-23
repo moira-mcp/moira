@@ -2,11 +2,11 @@
  * Scenario-based Workflow Test Runner
  * Uses GraphExecutionEngine directly for accurate node tracking
  *
- * ## Directive Validation (Issue #449)
+ * ## Directive Validation
  *
  * After each step execution, validates rendered directives for:
  * - **Unrendered templates**: `{{variable}}`, `{{#if}}`, `{{/if}}` remaining in output
- * - **Null values**: Literal "null" string indicating undefined variable
+ * - **Missing values**: GraphTemplateProcessor.UNDEFINED_PLACEHOLDER in rendered text
  *
  * This catches workflow design errors at test time:
  * - Missing variables in initialData
@@ -17,7 +17,7 @@
  * Example failures:
  * ```
  * Error: Unrendered template in node 'task' directive: {{undefined_var}}
- * Error: Suspicious 'null' value in node 'task' directive: "...value is null..."
+ * Error: Undefined variable in node 'task' directive
  * ```
  *
  * ## Input Validation (Fail-Fast)
@@ -58,6 +58,7 @@ import {
   type WorkflowGraph,
   type ExecutionContext,
   type DirectiveMessage,
+  type EngineVisit,
 } from "@mcp-moira/workflow-engine";
 import { randomUUID } from "crypto";
 import { migrateWorkflowGraph } from "@mcp-moira/workflow-engine/migration";
@@ -130,6 +131,8 @@ export interface ScenarioResult {
   scenario: string;
   passed: boolean;
   visitedNodes: string[];
+  /** Raw chronological observations returned by engine cycles, including open waits. */
+  visits: EngineVisit[];
   finalContext: Record<string, unknown>;
   stepCount: number;
   executionTime: number;
@@ -178,6 +181,7 @@ export async function runScenario(
 ): Promise<ScenarioResult> {
   const startTime = Date.now();
   const allVisitedNodes: string[] = [];
+  const visits: EngineVisit[] = [];
   const inputSubmissionCounts: Record<string, number> = {};
   const maxSteps = scenario.expect.maxSteps ?? MAX_STEPS_DEFAULT;
 
@@ -203,6 +207,7 @@ export async function runScenario(
       scenario: scenario.name,
       passed: false,
       visitedNodes: [],
+      visits,
       finalContext: {},
       stepCount: 0,
       executionTime: Date.now() - startTime,
@@ -264,6 +269,10 @@ export async function runScenario(
         mockInput,
       );
 
+      // Preserve executed observations even if runner diagnostics reject this cycle.
+      allVisitedNodes.push(...(result.visitedNodes ?? []));
+      visits.push(...(result.visits ?? []));
+
       // Check for input validation errors - fail fast instead of looping
       if (!scenario.allowValidationErrorsAt?.includes(currentNodeId)) {
         checkForValidationError(messageQueue, currentNodeId, mockInput);
@@ -283,19 +292,11 @@ export async function runScenario(
         }
       }
 
-      // Track visited nodes - include ALL visits to capture branch transitions
-      // Coverage calculator relies on consecutive node pairs to determine branches
-      if (result.visitedNodes) {
-        for (const nodeId of result.visitedNodes) {
-          allVisitedNodes.push(nodeId);
-        }
-      }
-
       // Update context
       context = result.context;
 
       // Handle result
-      // The engine reports only "pause" and "complete": since issue #386 an error is recorded on
+      // The engine reports only "pause" and "complete": an error is recorded on
       // the execution and the run stays alive for a retry, so there is no error action to handle.
       switch (result.action) {
         case "complete":
@@ -356,6 +357,7 @@ export async function runScenario(
       scenario: scenario.name,
       passed: failedExpectations.length === 0 && !loopError,
       visitedNodes: allVisitedNodes,
+      visits,
       finalContext,
       stepCount,
       executionTime: Date.now() - startTime,
@@ -373,6 +375,7 @@ export async function runScenario(
       scenario: scenario.name,
       passed: false,
       visitedNodes: allVisitedNodes,
+      visits,
       finalContext: {},
       stepCount: 0,
       executionTime: Date.now() - startTime,
@@ -385,7 +388,7 @@ export async function runScenario(
 
 /**
  * Resolve mock input based on type:
- * - undefined: return empty object (Issue #369: nodes without inputSchema accept only empty input)
+ * - undefined: return empty object (nodes without inputSchema accept only empty input)
  * - function: call with context
  * - array: return element by visit count (cycling if needed)
  * - object: return as-is
@@ -399,7 +402,7 @@ function resolveMockInput(
   directive?: string,
 ): Record<string, unknown> {
   // Default: empty object for nodes without mockInputs
-  // Issue #369: nodes without inputSchema only accept null or {}
+  // Nodes without inputSchema only accept null or {}.
   if (mockInput === undefined) {
     return {};
   }
@@ -651,9 +654,8 @@ function formatLoopError(diag: LoopDiagnostics, maxSteps: number): string {
  *    - `{{/if}}` - orphaned closing tag
  *    - `{{else}}` - orphaned else
  *
- * 2. **Null values**:
- *    - Literal "null" string indicates GraphTemplateProcessor couldn't find variable
- *    - Pattern matches standalone "null" not part of words like "nullable"
+ * 2. **Missing values**: GraphTemplateProcessor.UNDEFINED_PLACEHOLDER indicates
+ *    that template resolution could not supply a value.
  *
  * Skips system validation messages (contain "EXPECTED INPUT FORMAT:").
  *
@@ -696,7 +698,7 @@ function validateRenderedDirectives(messageQueue: AgentMessageQueue, nodeId: str
  * @param content - Rendered directive or completionCondition text
  * @param nodeId - Node ID for error reporting
  * @param fieldName - Field name ("directive" or "completionCondition")
- * @throws Error if unrendered templates or null values found
+ * @throws Error if unrendered templates or the undefined-value placeholder are found
  */
 function validateTemplateField(content: string, nodeId: string, fieldName: string): void {
   if (!content) return;

@@ -12,7 +12,10 @@ import { INodeHandler } from "../interfaces/core-interfaces.js";
 import { IDataRepository } from "../interfaces/data-repository.js";
 import { IGraphExecutionEngine } from "../interfaces/graph-execution-engine.js";
 import { AgentMessageQueue } from "../services/agent-message-queue.js";
-import { createLogger, InternalError, getNoteService, NoteService } from "@mcp-moira/shared";
+import { createLogger } from "@mcp-moira/shared/logging/logger";
+import { InternalError } from "@mcp-moira/shared/errors";
+import { getNoteService } from "@mcp-moira/shared/services";
+import type { NoteService } from "@mcp-moira/shared/services/note-service";
 import { GraphTemplateProcessor } from "../templates/graph-template-processor.js";
 
 export class ReadNoteHandler implements INodeHandler {

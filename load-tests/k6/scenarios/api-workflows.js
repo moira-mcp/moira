@@ -177,37 +177,39 @@ export default function (data) {
 
   sleep(0.2);
 
-  // Group 2: List public workflows
-  group("list_public_workflows", function () {
-    var response = authGet(apiUrl + "/workflows?visibility=public&limit=10", cookies, {
-      tags: { name: "workflow_list_public" },
+  // Supported query variants share the current REST list owner. Private can be empty.
+  var filteredLists = [
+    { name: "public", query: "visibility=public&limit=10" },
+    { name: "private", query: "visibility=private&limit=20" },
+    { name: "search", query: "search=test&limit=10" },
+  ];
+  filteredLists.forEach(function (selection) {
+    group("list_" + selection.name + "_workflows", function () {
+      var response = authGet(apiUrl + "/workflows?" + selection.query, cookies, {
+        tags: { name: "workflow_list_" + selection.name },
+      });
+
+      requestsTotal.add(1);
+      workflowListDuration.add(response.timings.duration);
+
+      var success = check(response, {
+        "filtered list status is 200": function (r) {
+          return r.status === 200;
+        },
+        "filtered list has workflows array": function (r) {
+          try {
+            var body = JSON.parse(r.body);
+            return body.success === true && body.data && Array.isArray(body.data.workflows);
+          } catch (_e) {
+            return false;
+          }
+        },
+      });
+
+      errors.add(!success);
     });
-
-    requestsTotal.add(1);
-    workflowListDuration.add(response.timings.duration);
-
-    var success = check(response, {
-      "public list status is 200": function (r) {
-        return r.status === 200;
-      },
-      "public list has data": function (r) {
-        try {
-          var body = JSON.parse(r.body);
-          return body.success === true;
-        } catch (_e) {
-          return false;
-        }
-      },
-    });
-
-    if (!success) {
-      errors.add(1);
-    } else {
-      errors.add(0);
-    }
+    sleep(0.2);
   });
-
-  sleep(0.2);
 
   // Group 3: Get specific workflow (if we have any workflow IDs)
   if (workflowIds.length > 0) {
@@ -229,7 +231,13 @@ export default function (data) {
         "get has workflow data": function (r) {
           try {
             var body = JSON.parse(r.body);
-            return body.success === true && body.data && body.data.id;
+            return (
+              body.success === true &&
+              body.data &&
+              body.data.fileInfo &&
+              body.data.fileInfo.id === workflowId &&
+              body.data.workflow
+            );
           } catch (_e) {
             return false;
           }

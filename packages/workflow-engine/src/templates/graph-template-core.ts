@@ -56,7 +56,7 @@ export class GraphTemplateProcessor {
   private static readonly ESCAPED_OPEN_BRACE = "\x00__ESCAPED_OPEN_BRACE__\x00";
 
   /**
-   * Template-injection protection (§14).
+   * Template-injection protection.
    *
    * A substituted VALUE that originates from untrusted data (agent step() input,
    * user free-text, node outputs) must NOT be re-interpreted as a template by a
@@ -108,7 +108,7 @@ export class GraphTemplateProcessor {
    *      by an upstream node, so it is absent from the (empty) default (e.g. sdf's
    *      validate_test_instruction = "{{#neq test_info_path 'skip'}}…").
    * Generic agent-output vars (steps/evidence/notes/…) match NEITHER signal, so their values
-   * are neutralized (§14 injection protection).
+   * are neutralized to prevent template injection.
    */
   private isTemplateFragmentVar(varName: string, context?: ExecutionContext): boolean {
     if (fragmentVarSet(context)?.has(varName)) return true;
@@ -161,9 +161,7 @@ export class GraphTemplateProcessor {
     // Step 2: Process templates
     const processed = this.processDirectiveInternal(escaped, context);
 
-    // §10 Fix B: runtime guard — if the rendered directive still contains the
-    // undefined-variable placeholder, surface it (was previously silent/debug-only)
-    // so the false-loop/undefined class is observable in logs.
+    // Surface residual undefined-variable placeholders in logs after rendering.
     this.warnOnResidualPlaceholder(processed, context);
 
     // Step 3: Restore escaped sequences to literal {{
@@ -171,7 +169,7 @@ export class GraphTemplateProcessor {
   }
 
   /**
-   * §10 Fix B — warn when a processed directive still contains UNDEFINED_PLACEHOLDER.
+   * Warn when a processed directive still contains UNDEFINED_PLACEHOLDER.
    * The placeholder carries no variable name, so we report the count + executionId.
    */
   protected warnOnResidualPlaceholder(processed: string, context: ExecutionContext): void {
@@ -885,7 +883,7 @@ export class GraphTemplateProcessor {
           serializedLength: serialized.length,
         });
 
-        // §14 injection protection: only author-controlled fragment vars may carry
+        // Only author-controlled fragment vars may carry
         // live template syntax; all other (data) values are neutralized so a later
         // pass cannot execute "{{context.variables}}" / "{{#each}}" injected via data.
         return this.isTemplateFragmentVar(varName, context)
@@ -916,7 +914,7 @@ export class GraphTemplateProcessor {
           serializedLength: serialized.length,
         });
 
-        // §14: the dumped variable bag is data — neutralize so embedded "{{…}}"
+        // The dumped variable bag is data — neutralize so embedded "{{…}}"
         // from variable values cannot be re-executed by a later pass.
         return this.neutralizeValueBraces(this.encodeValue(serialized));
       } catch (error) {
@@ -963,7 +961,7 @@ export class GraphTemplateProcessor {
           serializedLength: serialized.length,
         });
 
-        // §14 injection protection: node-path values are data — neutralize so
+        // Node-path values are data — neutralize so
         // an injected "{{context.variables}}"/"{{#each}}" cannot execute downstream.
         return this.neutralizeValueBraces(this.encodeValue(serialized));
       } catch (error) {

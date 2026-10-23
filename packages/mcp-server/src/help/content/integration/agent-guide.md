@@ -155,7 +155,7 @@ Valid response:
 }
 ```
 
-Submit a single flat object containing exactly the properties in `inputSchema` — one object per step, with every `required` property present. Keys not described in the schema are rejected. Some of a step's values are workflow-wide and some are local to the step, but the schema you receive already merges both into one ordinary object: you do not declare or distinguish them — just match the schema.
+Submit one object matching the presented schema, with every required property present. It may contain nested objects or arrays when declared. Response keys must be declared even when additionalProperties is true. Global and node-local fields are already combined in the presented schema; callers do not add a separate scope wrapper. Schema validity does not establish that an external action happened: inspect the evidence before reporting completion.
 
 ## Navigation Tools
 
@@ -218,7 +218,7 @@ start({ action: "prepare", workflowId: "dev-flow", note: "Feature: auth system",
 start({ action: "execute", startAttemptId: "start-attempt-123" })
 ```
 
-Update note during execution via `step()` input:
+Update note during execution via `step()` input only when that step's schema declares `execution_note`:
 
 ```json
 step({
@@ -309,6 +309,41 @@ list({ search: "test" })
 list({ visibility: "public", limit: 10 })
 ```
 
+## Reading and changing definitions
+
+For `list`, `total` counts the whole filtered query. Follow the returned `nextOffset` rather than
+inferring the next page from its length; `nextOffset: null` ends the listing. Filters apply together.
+
+`manage get` returns metadata, variable registry, runtime policy, progress and reminder definitions
+as well as structure. `includeNodes: false` omits only node definitions; `includeValidation: false`
+omits only validation results. Use `list-nodes`, `get-nodes` or `analyze-variables` for a focused read.
+Mutations validate the complete resulting graph before saving; a rejected mutation is not partly
+applied. Moving a node changes array order, not its connections. Cloning requires an existing source
+and an unused target ID. Node search supports bounded RE2-compatible expressions and falls back to
+case-insensitive literal matching for invalid or unsupported patterns. Visibility, access grants
+and invites require the appropriate owner authority.
+
+Reconciliation compares the previous bundled definition, current database definition and incoming
+image definition. Status is available to agents; full candidates and resolution require an
+administrator. Resolve semantic conflicts through Workflow Management Flow, not mechanical JSON merging.
+
+## Settings
+
+Read one exact `key`, one `category`, or all accessible settings; do not combine key and category.
+`list` returns currently available definitions, not stored values. Definitions come from the database
+and installed extension manifests. Administrator-only definitions and values remain hidden from
+other users. Database secrets return `[encrypted]`; extension secrets return a dotted mask with
+the last four characters. A mask is not a value to write back.
+
+Writing requires an existing definition and obeys its type, JSON Schema and built-in numeric bounds,
+administrator restrictions and encryption policy. Saving a Telegram bot token registers its webhook.
+Structured JSON must survive serialization and reading without data loss or coercion. Extension
+defaults pass the same type/schema checks before a manifest is accepted. Removing an extension
+hides its definitions but retains user values for reinstallation.
+
+For workflow JSON import/export use the short-lived `token` grants; upload uses multipart field
+`workflow`. Ordinary definition reads and mutations use `manage` instead.
+
 ## Common Patterns
 
 ### Start and Execute First Step
@@ -332,7 +367,7 @@ step({ processId: "xyz", attemptId: "attempt-1", input: { findings: "..." } })
 ```json
 // 1. Find your execution
 session({ action: "executions" })
-// → [{ executionId: "xyz", status: "waiting", ... }]
+// → a page of active executions; choose the exact original Process ID
 
 // 2. Get current step
 session({ action: "current_step", executionId: "xyz" })
@@ -354,8 +389,9 @@ If `step()` returns validation error, check:
 `ATTEMPT_PROCESSING` means another caller still owns this exact mutation; retry the same Process ID,
 Step attempt ID, and input, or the same Start attempt ID for `start({ action: "execute" })`.
 `ATTEMPT_STALE` was rejected before handler work. Automatically read
-`session({ action: "current_step", executionId })` and retry the intended submission once with the
-returned Step attempt ID; user guidance is not required.
+`session({ action: "current_step", executionId })` and reconcile its node, directive, schema and
+current intent before submitting with the returned Step attempt ID. Do not carry old input into
+another step or overwrite a newer user answer.
 `ATTEMPT_CONFLICT` means the attempt is already bound to different input. Automatically read
 `session({ action: "current_step", executionId })`, discard the conflicting attempt, and continue
 from the returned directive and input schema without replaying the rejected input; user guidance is
@@ -371,8 +407,8 @@ execution with its current revision through
 A write made on a revision that is no longer current — a reminder, parent, context or cancellation
 whose `expectedRevision` or target revision is older than the stored one, or a message that says
 "reload" or "is stale" — is rejected before anything is written. Re-read that state (`reminders`,
-`variables`, `execution_context`, or the workflow for a workflow revision) and retry with its
-current revisions; user guidance is not required.
+`variables`, `execution_context`, or the workflow for a workflow revision). Reconcile the intended
+change with the new state before using its revisions; stale guards do not authorize replacing concurrent work.
 
 When an error carries an `AGENT INSTRUCTIONS` section, follow it. It tells you to stop only where a
 person is needed: missing permission, an authentication or connection problem you cannot resolve, a
@@ -384,6 +420,6 @@ you cannot obtain yourself.
 
 ## Related Documentation
 
-- [MCP Tools Reference](/docs/docs/reference/tools) - Full tool documentation
-- [Agent Instructions](/docs/docs/integration/agent-instructions) - System prompt
-- [Troubleshooting](/docs/docs/integration/troubleshooting) - Common issues
+- [MCP Tools Reference](/docs/reference/tools/) - Full tool documentation
+- [Agent Instructions](/docs/integration/agent-instructions/) - System prompt
+- [Troubleshooting](/docs/integration/troubleshooting/) - Common issues

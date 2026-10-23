@@ -22,5 +22,4 @@ import {
 (global as any).TEST_WORKFLOWS_PATH = TEST_WORKFLOWS_PATH;
 (global as any).TestUtils = TestUtils;
 
-// tests/workflows/ directory already exists in repo
-// No beforeEach setup needed - removed per Stage 8 requirements
+// Shared JSON workflow fixtures live in tests/workflows/; suites own their per-test setup.

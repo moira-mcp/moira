@@ -3,11 +3,11 @@ title: Robust Task
 description: Durable execution of complex tasks with cause-aware independent reviews, bounded repair, recovery, and truthful delivery
 ---
 
-import { Aside, Steps } from '@astrojs/starlight/components';
+import { Steps } from '@astrojs/starlight/components';
 
 Robust Task runs complex multi-step work from a durable filesystem workspace. The executor owns a complete coherent result; independent reviewers classify blocking findings by their earliest cause and route them to repair or replanning. Immutable plans, attempts, decisions, and reviews make the run recoverable after context loss, while bounded repair prevents unresolved work from being reported as complete.
 
-The workflow requires an agent with filesystem access. For smaller bounded tasks, use [Quick Task](/docs/reference/workflows/quick-task/).
+The workflow requires an agent with filesystem access. For smaller bounded tasks, use [Quick Task](/docs/reference/workflows/quick-task/). For repository implementation or refactoring, use [Software Development Flow](/docs/reference/workflows/software-development-flow/), which owns the complete software lifecycle.
 
 ## Start
 
@@ -18,61 +18,13 @@ mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from p
 
 ## Process
 
-```mermaid
-flowchart LR
-    A[Create workspace] --> B[Create plan]
-    B --> C[Independent plan review]
-    C -->|artifact repair| D[New plan version]
-    C -->|plan or criterion defect| R[Replan from current cause]
-    D --> C
-    R --> C
-    C -->|pass| M{Operating mode}
-    M -->|interactive| E[User approval]
-    M -->|autonomous| F
-    E -->|rejected| D
-    E -->|approved| F[Execute one step]
-    F --> G[Independent step review]
-    G -->|result repair| Q[Repair result]
-    G -->|evidence repair| P[Repair evidence or projection]
-    Q --> G
-    P --> G
-    G -->|replan| R
-    G -->|pass| H{More steps?}
-    H -->|yes| F
-    H -->|no| J[Independent final review]
-    J -->|deliverable repair| L[Repair deliverable]
-    J -->|replan| R
-    L --> J
-    J -->|pass or accepted incomplete| K[Delivery]
-```
+Plan → independent plan review → approval (interactive) → step execution and independent review → independent final review → truthful delivery. Artifact-owned findings return to repair; invalid criteria or upstream causes return to planning.
 
 ## Durable workspace
 
-The first directive creates or resumes one workspace whose path matches:
+The first directive creates or resumes `./moira-ws/<task-name>-<YYYYMMDD>-<HHMM>/`. `process-id.txt` identifies the execution for `session({ action: "current_step", executionId })` recovery. Frozen requirements and the workflow guide, immutable plan versions and their reviews/decisions, plan-qualified attempts and their evidence/verdicts, repair reassessments, and final reviews/delivery remain on disk.
 
-```text
-./moira-ws/<task-name>-<YYYYMMDD>-<HHMM>/
-```
-
-The workspace is correlated with the execution by `process-id.txt`. It also contains:
-
-- `task-requirements.md` — the frozen active request;
-- `workflow-guide.md` — concise rules for recovery, planning, evidence, and review;
-- `plans/NNN/plan.md` — complete immutable plan versions;
-- `plans/NNN/review.md` — the independent review of that exact plan version;
-- `plans/NNN/repair.md` — a repair-owner reassessment when the reviewed cause is not locally repairable;
-- `plans/NNN/decision.md` — the user's exact approval or rejection;
-- `steps/<step>/plans/<plan-version>/attempts/<attempt>/evidence.md` — evidence for one exact execution attempt;
-- `verdict.md` beside each evidence file — its independent gate review;
-- `repair.md` beside a failed attempt — the exact repair or reassessment record;
-- `final/reviews/` — immutable final reviews, fix evidence, and reassessments;
-- `final/delivery.md` — the truthful final result.
-
-Directives pass paths and small routing values through workflow context. They do not relay file bodies that the agent can read from the workspace. When a directive refers to a file the agent just wrote, the path remains the authority; the agent can reuse its current context or read the file again after context recovery.
-
-<Aside type="tip">
-`process-id.txt` and the durable artifacts let a later agent session resume the same execution with `session({ action: "current_step", executionId })`.
-</Aside>
+Workflow context carries paths and small routing values, not copies of file bodies. An authoritative path remains the source after recovery; a just-written file need not be reread while its content is still known.
 
 ## Planning and approval
 
@@ -94,13 +46,7 @@ In `interactive` mode everything above is unchanged. In `autonomous` mode the pl
 
 ## Execution progress
 
-The execution card and exported progress image share one six-stage presentation: Intake → Plan → Execute → Step Review → Final Review → Deliver. Every node, including routing nodes, the jump-only replan entry and every repair, recovery, and replan role, belongs to one stage; every edge that leaves a stage is labelled and every return explains its cause and exit, so the process view is derived from the executable graph. The presentation adds no executable route, counter, authority decision, or proof mechanism.
-
-The Execute stage binds the plan itself — `plan_steps` as the items with each `title`, `current_step` as the step in progress, counted from `1`, and `total_steps` as the total — so the run and its notifications show every step, which ones are done and which one is in progress.
-
-Each stage shows its stable purpose, the exact current responsibility, the latest confirmed semantic outcome, and the next meaningful action. The role that owns a result replaces one bounded outcome instead of appending history: intake owns the resolved contract, plan roles own the current plan synopsis and disposition, execution owns the latest plan-qualified attempt, each review family owns its current disposition, and delivery owns the truthful terminal result. Active labels describe current work without hiding the last confirmed outcome.
-
-Every directive that reasons about a plan reads the authoritative path `{{workspace_path}}{{current_plan_file}}`. When repair, user revision, teleport, or a cause-specific replan creates a replacement plan, that writer atomically replaces Plan, Execute, Step Review, and Final Review projections with only the completed prefix that is still true or a pending state. This prevents outcomes from different plan revisions from being mixed. Progress values remain render-only; primary conditions, connections, retry budgets, the execution cursor, approvals, and side-effect authority continue to come from ordinary workflow state.
+The run page and progress image show current roles, confirmed outcomes and plan items. A replacement plan updates obsolete current/future projections while retaining only its still-valid completed prefix. Progress does not change routes, counters, approval or effect authority. See [Process view](/docs/concepts/process-view/).
 
 ## Step execution and review
 
@@ -152,29 +98,9 @@ The End node returns exactly:
 
 ## Notifications
 
-Robust Task notifies through the user's configured channels. Every message is headed by the flow
-name and the run's task, linked to the run page, and carries no image. Every line written from the
-run's own values comes from a one-sentence field the step writes for a person, without file names
-or internal values: the task's goal, why a review keeps failing, what was decided and why, and the
-result. The messages are in English.
+Configured channels receive English text with the flow/task heading and run link, without images or internal file/variable names. Interactive messages explain approval and bounded-review decisions; autonomous messages state the decision already made and why. Revised plans are announced again with completed steps preserved. Final messages distinguish complete delivery from open items and show no work still in progress.
 
-| When | Interactive | Autonomous |
-| --- | --- | --- |
-| The reviewed plan is ready | "Plan ready for your approval" with the goal, the whole plan and the choices: approve it and the work goes ahead, or reject it with feedback to have it revised | "Plan approved — the work goes ahead" with the goal and the whole plan |
-| A step exhausts its repairs | "Step needs your decision": the step's number and title, why its review keeps failing, and the choices — try it again, change the plan, or finish with the step incomplete | "Decided for you", sent after the decision: the step, what was decided and why |
-| The plan review reaches its bound | "The plan keeps failing review": why, and the choices — fix the plan once more, or finish with the plan incomplete | "Decided for you", sent after the decision: what was decided and why |
-| The final review reaches its bound | "The result keeps failing the final review": why, and the choices — fix the result once more, or accept it with its open items | "Decided for you", sent after the decision: what was decided and why |
-| The run finishes | "Completed", or "Completed with open items" when the delivery is incomplete: the result in one sentence and every step marked `✓` done or `○` open — the run has ended, so none reads as in progress | the same |
-
-The three reviews return `failure_summary` whenever they do not pass — what keeps the work from
-passing, in one sentence — and the message at a review bound quotes the latest one. Each of the
-three decisions returns `decision_summary`, what was decided and why in one sentence; the autonomous
-message carries it. The delivery returns `result_summary`, the result in one sentence, for the
-finish. A plan revised after a replan is announced again in its
-revised form, with the steps already done kept as done. Nothing sent in an autonomous run asks for a
-decision. Because the flow notifies, starting it for a user with no configured channel is refused
-with an instruction; an agent that wants to run without notifications prepares the start again with
-`skipNotificationCheck: true`. A failed notification does not stop the workflow.
+Notifications quote the current review's failure reason, the decision and its reason, or the final result. Missing channel configuration refuses start unless a new prepare explicitly uses `skipNotificationCheck: true`; a delivery failure does not stop the workflow.
 
 ### Waiting for you
 
@@ -187,7 +113,7 @@ takes the three decisions itself, so on those steps it is not shown as waiting f
 
 ## Use cases
 
-- complex implementation or refactoring with several dependent stages;
+- complex analysis, research or other general work with dependent stages;
 - work that must survive agent-context loss;
 - tasks requiring durable per-attempt evidence and independent gates;
 - critical work where unresolved obligations must not be silently treated as complete.

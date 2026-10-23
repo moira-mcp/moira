@@ -7,28 +7,30 @@ description: Пошаговое руководство по созданию wor
 
 ## Быстрый старт
 
-1. Определите цель workflow и основные этапы 2. Спроектируйте структуру графа узлов 3. Создайте
-   JSON с правильными определениями узлов 4. Проверьте связи и достижимость 5. Сохраните через MCP
-   tools
+1. Определите цель workflow и основные ответственности.
+2. Спроектируйте граф и границы решений.
+3. Создайте JSON с полными определениями нод.
+4. Проверьте связи, объявления и нужные маршруты.
+5. Сохраните через разрешённую операцию MCP.
 
 ## Структура Workflow
 
 Каждый workflow должен содержать:
 
-```json
+```jsonc
 {
   "id": "my-workflow",
   "metadata": {
     "name": "Читаемое название",
     "version": "1.0.0",
-    "description": "Что делает этот workflow"
+    "description": "Что делает этот workflow",
   },
   "nodes": [
     // start узел (ровно один)
     // action узлы — узел, у которого есть свидетельство, несёт case, маршрутизирующие его
     // condition узлы — для решения, общего нескольким узлам, или решения, стоящего отдельно
     // end узел (минимум один)
-  ]
+  ],
 }
 ```
 
@@ -37,63 +39,55 @@ description: Пошаговое руководство по созданию wor
 ### Цикл валидации
 
 Используйте когда нужно проверить результат и повторить при ошибке. Узел, который произвёл
-результат, сам сообщает, годится ли он, и маршрутизирует по этому ответу; узел исправления
-считает попытку по дороге назад:
+результат, сообщает, годится ли он, и маршрутизирует по этому ответу; владелец починки исправляет подтверждённые замечания перед следующей проверкой:
 
 ```mermaid
 flowchart LR
     A[do-work] -->|valid| B[next-step]
     A -->|success| C[fix-issues]
-    C -->|iteration + 1| A
+    C -->|починка завершена| A
 ```
 
 ```json
-{
-  "id": "do-work",
-  "type": "agent-directive",
-  "directive": "Выполни задачу",
-  "completionCondition": "Задача выполнена",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "result_valid": { "type": "string", "enum": ["yes", "no"] }
-    },
-    "required": ["result_valid"]
-  },
-  "cases": [
-    {
-      "when": {
-        "operator": "eq",
-        "left": { "contextPath": "do-work.result_valid" },
-        "right": "yes"
+[
+  {
+    "id": "do-work",
+    "type": "agent-directive",
+    "directive": "Выполни задачу",
+    "completionCondition": "Задача выполнена",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "result_valid": { "type": "string", "enum": ["yes", "no"] }
       },
-      "output": "valid"
+      "required": ["result_valid"]
+    },
+    "cases": [
+      {
+        "when": {
+          "operator": "eq",
+          "left": { "contextPath": "do-work.result_valid" },
+          "right": "yes"
+        },
+        "output": "valid"
+      }
+    ],
+    "connections": {
+      "success": "fix-issues",
+      "valid": "next-step"
     }
-  ],
-  "connections": {
-    "success": "fix-issues",
-    "valid": "next-step"
+  },
+  {
+    "id": "fix-issues",
+    "type": "agent-directive",
+    "directive": "Исправь найденные проблемы",
+    "completionCondition": "Все проблемы прошлой попытки исправлены",
+    "connections": { "success": "do-work" }
   }
-},
-{
-  "id": "fix-issues",
-  "type": "agent-directive",
-  "directive": "Исправь найденные проблемы",
-  "completionCondition": "Все проблемы прошлой попытки исправлены",
-  "expressions": ["iteration = iteration + 1"],
-  "connections": { "success": "do-work" }
-}
+]
 ```
 
-`iteration` объявлена в `variableRegistry` workflow: выражение может присваивать только объявленную
-глобальную переменную. Больше для счёта попыток ничего не нужно: узел, вся работа которого —
-`iteration + 1`, это лишний переход для читателя и лишнее место, где можно забыть.
-
-:::tip
-Разделяйте ответственность: action узлы ВЫПОЛНЯЮТ работу и сами сообщают свой вердикт, fix узлы
-ТОЛЬКО исправляют. Держите счётчик итераций на узле, через который цикл и так проходит, и
-маршрутизируйте по нему, чтобы предотвратить бесконечные циклы.
-:::
+Это фрагменты нод содержащего workflow, а не полный граф. Целевые ноды должны существовать. Перед повтором установите и исправьте причину; независимое ревью остаётся отдельной ответственностью, когда его требует контракт. Счётчик нужен только реальному бюджету или потребителю артефактов, объявляется числовой записью реестра с default и изменяется через expressions.
 
 ### Ветвление по типу действия
 
@@ -189,7 +183,12 @@ Case вычисляются по контексту, в который уже в
       "approved": { "type": "string", "enum": ["yes", "no"] },
       "feedback": { "type": "string" }
     },
-    "required": ["approved"]
+    "required": ["approved"],
+    "if": { "properties": { "approved": { "const": "no" } }, "required": ["approved"] },
+    "then": {
+      "required": ["feedback"],
+      "properties": { "feedback": { "type": "string", "minLength": 1 } }
+    }
   },
   "cases": [
     {
@@ -314,6 +313,8 @@ Case вычисляются по контексту, в который уже в
 
 ### Пример сложного условия
 
+Фрагмент предполагает, что prepare-items возвращает локальные status и count; целевые ноды существуют в содержащем workflow.
+
 ```json
 {
   "id": "check-ready",
@@ -325,12 +326,12 @@ Case вычисляются по контексту, в который уже в
         "conditions": [
           {
             "operator": "eq",
-            "left": { "contextPath": "status" },
+            "left": { "contextPath": "prepare-items.status" },
             "right": "ready"
           },
           {
             "operator": "gt",
-            "left": { "contextPath": "count" },
+            "left": { "contextPath": "prepare-items.count" },
             "right": 0
           }
         ]
@@ -375,7 +376,7 @@ Case вычисляются по контексту, в который уже в
 ```
 
 :::tip
-Это делает workflow самодокументируемым. Все знания встроены, внешняя документация не нужна.
+Default реестра подходит стабильному тексту самого workflow. Применимые правила проекта читайте у их владельца; общие playbooks и материализованные справочники сохраняют свои контракты. Доставка текста не доказывает его соблюдение.
 :::
 
 ## Чеклист валидации
@@ -389,9 +390,9 @@ Case вычисляются по контексту, в который уже в
    - Все connections указывают на существующие узлы
 
 2. **Достижимость**
-   - Все узлы достижимы от start
+   - Все обычные ноды достижимы от start; явные teleport-входы проверяются отдельно
    - Нет orphan узлов
-   - Все пути ведут к end
+   - Маршруты корректно заканчиваются либо переходят в предусмотренное ожидание, починку или эскалацию; нет слепого неизменённого повтора
 
 3. **Определения узлов**
    - `directive` не пустой
@@ -464,6 +465,7 @@ const { uploadUrl } = await mcp__moira__token({ action: "upload" });
 ```json
 {
   "id": "detect-capabilities",
+  "completionCondition": "Current capabilities checked honestly within host access policy",
   "type": "agent-directive",
   "directive": "Сообщи свои возможности: есть ли доступ к файловой системе? можешь ли получать URL?",
   "inputSchema": {
@@ -508,8 +510,7 @@ const { uploadUrl } = await mcp__moira__token({ action: "upload" });
 ```
 
 :::tip
-Всегда предоставляйте fallback пути для агентов с ограниченными возможностями. MCP tools доступны
-всегда.
+Предусматривайте только поддерживаемые fallback-маршруты. Доступность MCP зависит от настройки хоста и политики; если обязательная возможность недоступна, сообщите блокер.
 :::
 
 ## Паттерн планирования
@@ -560,7 +561,7 @@ flowchart LR
 | Полные пути к файлам            | Агент не должен угадывать                     | `/full/path/to/file.json`, не "в соответствующей папке"                    |
 | Избыточность там, где применима | Повторяйте то, что пункту действительно нужно | «Сделать коммит» — в пункте, который коммитом заканчивается, а не в каждом |
 
-### Атомарность пункта (S9)
+### Атомарность пункта
 
 Каждый пункт плана или задачи должен быть самодостаточным. Агент часто получает директиву ОДНОГО пункта изолированно — без остального плана — поэтому пункт должен нести всё необходимое для его выполнения:
 
@@ -568,7 +569,7 @@ flowchart LR
 - Повторить релевантное исходное требование внутри пункта.
 - Повторить сквозное действие (отчёт о прогрессе, запуск тестов, коммит) в тех пунктах, которым оно действительно нужно.
 
-Общего или глобального scope между пунктами нет, поэтому пункт, опирающийся на «как выше», невыполним. Ответ — то, что нужно исполнителю в одиночестве, и решается это по каждому пункту, а не безусловным дублированием: повторённый текст становится вторым источником правды и расходится, а пункт, обязанный нести всё, разрастается, пока не начинает нести сам результат. См. [Обязательная избыточность каждого пункта плана](/ru/docs/patterns/anti-patterns/).
+Не полагайтесь на память исполнителя о других пунктах, поэтому пункт, опирающийся на «как выше», невыполним. Ответ — то, что нужно исполнителю в одиночестве, и решается это по каждому пункту, а не безусловным дублированием: повторённый текст становится вторым источником правды и расходится, а пункт, обязанный нести всё, разрастается, пока не начинает нести сам результат. См. [Обязательная избыточность каждого пункта плана](/ru/docs/patterns/anti-patterns/).
 
 ```json
 {
@@ -589,77 +590,68 @@ Self-Review](/ru/docs/patterns/self-review/) проверяет каждое т�
 
 ### Пример реализации
 
+Полный workflow ниже охватывает только подготовку и одобрение плана. Исполнение и независимое ревью добавляются как отдельные предметные ответственности, когда их требует контракт задачи. Один владелец пересматривает канонический план по замечаниям. Пример не разрешает развёртывание или операции VCS.
+
 ```json
 {
+  "id": "c4786f09-0769-4437-84b7-b032eab5396f",
+  "metadata": {
+    "name": "Draft and approve a plan",
+    "version": "1.0.0",
+    "description": "Prepare a scoped plan and obtain the user's actual approval"
+  },
   "variableRegistry": {
-    "plan_writing_requirements": {
-      "type": "string",
-      "description": "Правила, которым агент следует при написании плана",
-      "default": "ТРЕБОВАНИЯ К НАПИСАНИЮ ПЛАНА:\n\n- Плоский линейный список — без иерархии, без вложенных подпунктов, просто 1, 2, 3...\n- Один пункт = одна задача — не микрошаг ('скачать файл'), а законченная задача ('обновить workflow до v2.1.0')\n- Полная самодостаточность — содержит ВСЁ для выполнения: зачем делать, что делать, какие файлы читать/менять, куда сохранять, что коммитить\n- НЕТ отдельных 'глобальных правил' — всё нужное для пункта должно быть В пункте\n- Явные действия — не 'как обычно', а конкретно: 'загрузить на moira-local через token', 'сделать коммит'\n- Избыточность разрешена — лучше повторить 'сделать коммит' в каждом пункте, чем забыть\n- Полные пути к файлам — не 'в соответствующей папке', а /full/path/to/file.json\n- Измеримый результат — легко проверить выполнение пункта"
-    }
+    "plan": { "type": "string", "description": "Current canonical plan" }
   },
   "nodes": [
+    { "id": "start", "type": "start", "connections": { "default": "prepare-plan" } },
     {
-      "type": "start",
-      "id": "start",
-      "connections": { "default": "analyze-task" }
-    },
-    {
-      "id": "decompose-into-steps",
+      "id": "prepare-plan",
       "type": "agent-directive",
-      "directive": "Создай план выполнения задачи.\n\nСледуй требованиям: {{plan_writing_requirements}}\n\nДля каждого шага укажи:\n- Что делать (action)\n- Ожидаемый результат (expected_output)",
+      "directive": "Read the actual requirements and applicable project instructions. Prepare a plan of verifiable outcomes with dependency order, source owners, relevant validation and authority limits. {{#if present-plan.user_feedback}}Revise the plan against the user's feedback: {{present-plan.user_feedback}}{{/if}}",
+      "completionCondition": "The current plan covers the requirements without claiming unperformed work or unauthorized effects",
       "inputSchema": {
         "type": "object",
-        "properties": {
-          "steps": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "action": { "type": "string" },
-                "expected_output": { "type": "string" }
-              },
-              "required": ["action", "expected_output"]
-            }
-          }
-        },
-        "required": ["steps"]
+        "globalInputs": ["plan"],
+        "properties": {},
+        "required": ["plan"]
       },
       "connections": { "success": "present-plan" }
     },
     {
       "id": "present-plan",
       "type": "agent-directive",
-      "directive": "Представь план и спроси, утверждён ли он. `approved` записывает собственный ответ пользователя; без ответа записывать нечего.",
+      "directive": "Present {{plan}} and wait for the user's actual answer. Record plan_approved=yes only for explicit approval of this version. Otherwise record no and the user's feedback; do not repair the plan at this gate.",
+      "completionCondition": "The user has actually approved this plan or supplied the feedback recorded for revision",
       "inputSchema": {
         "type": "object",
         "properties": {
-          "plan_approved": { "type": "string", "enum": ["да", "нет"] },
+          "plan_approved": { "type": "string", "enum": ["yes", "no"] },
           "user_feedback": { "type": "string" }
         },
-        "required": ["plan_approved"]
+        "required": ["plan_approved"],
+        "if": {
+          "properties": { "plan_approved": { "const": "no" } },
+          "required": ["plan_approved"]
+        },
+        "then": {
+          "required": ["user_feedback"],
+          "properties": { "user_feedback": { "type": "string", "minLength": 1 } }
+        }
       },
       "cases": [
         {
           "when": {
             "operator": "eq",
             "left": { "contextPath": "present-plan.plan_approved" },
-            "right": "да"
+            "right": "yes"
           },
           "output": "approved"
         }
       ],
-      "connections": {
-        "success": "revise-plan",
-        "approved": "execute-steps"
-      }
+      "connections": { "success": "prepare-plan", "approved": "end" }
     },
-    {
-      "id": "revise-plan",
-      "type": "agent-directive",
-      "directive": "Пользователь не одобрил план. Фидбек: {{present-plan.user_feedback}}\n\nДоработай план на основе фидбека.\nСледуй: {{plan_writing_requirements}}",
-      "connections": { "success": "present-plan" }
-    }
+    { "id": "end", "type": "end", "connections": {} }
   ]
 }
 ```
@@ -692,27 +684,7 @@ Self-Review](/ru/docs/patterns/self-review/) проверяет каждое т�
 
 ### Обновление плана по ходу выполнения
 
-Для длинных workflows добавьте возможность обновить план в процессе:
-
-```json
-{
-  "id": "update-plan-during-execution",
-  "type": "agent-directive",
-  "directive": "Обнови план по ходу выполнения.\n\nТекущий шаг: {{current_step_index}}\nПричина обновления: {{update_reason}}\n\n1. Проанализируй текущий прогресс\n2. Обнови оставшиеся шаги (не меняй завершённые)\n3. Сохрани историю в ./plan-changes-history.md\n\nСледуй: {{plan_writing_requirements}}",
-  "connections": { "success": "reinitialize-tracking" }
-},
-{
-  "id": "reinitialize-tracking",
-  "type": "agent-directive",
-  "directive": "Реинициализируй tracking после обновления плана.\n\n1. Обнови tracking.json с новым total_steps\n2. Скорректируй current_step_index если нужно\n3. Продолжи выполнение",
-  "connections": { "success": "execute-current-step" }
-}
-```
-
-:::tip
-Храните план в файле (например, `./plan.md`) вместо контекста для больших планов. Это
-предотвращает переполнение контекста и позволяет восстановиться после архивации сессии.
-:::
+Используйте [Пересмотр процесса](/ru/docs/patterns/process-revision/) и [Replan](/ru/docs/patterns/replan/): один разрешённый teleport ведёт к существующему владельцу пересмотра, а новая редакция проходит обычное ревью и необходимое одобрение. Сохраните позиции завершённых пунктов и их свидетельства; выведите зависимые итоги из реального плана, не обнуляя прогресс отдельным ручным шагом.
 
 ## Паттерн эскалации
 
@@ -754,91 +726,101 @@ flowchart TD
 
 ### Пример реализации
 
-Всё решение принадлежит шагу, который проверяет результат: он считает попытку в `expressions`, а его
+Следующий пример иллюстрирует явно выбранный бюджет: содержащий workflow объявляет step_retry числовой записью реестра с description и default: 0. Бюджет не универсален. Чистый результат проверяется до исчерпания бюджета; самостоятельный блокер требует эскалации, а не слепого повтора. Всё решение принадлежит шагу, который проверяет результат: он считает попытку в `expressions`, а его
 case отправляют чистый результат дальше, исчерпанный бюджет — на эскалацию, а всё остальное через
 `success` — на новую попытку.
 
 ```json
-{
-  "id": "validate-step",
-  "type": "agent-directive",
-  "directive": "ТОЛЬКО ПРОВЕРЬ результат шага. Подсчитай найденные проблемы. Попытка {{step_retry}}.",
-  "completionCondition": "Количество проблем сообщено",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "issues_count": { "type": "number", "minimum": 0 }
-    },
-    "required": ["issues_count"]
-  },
-  "expressions": ["step_retry = step_retry + 1"],
-  "cases": [
-    {
-      "when": {
-        "operator": "eq",
-        "left": { "contextPath": "validate-step.issues_count" },
-        "right": 0
+[
+  {
+    "id": "validate-step",
+    "type": "agent-directive",
+    "directive": "ТОЛЬКО ПРОВЕРЬ результат шага. Подсчитай найденные проблемы. Попытка {{step_retry}}.",
+    "completionCondition": "Количество проблем сообщено",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "issues_count": { "type": "number", "minimum": 0 }
       },
-      "output": "clean"
+      "required": ["issues_count"]
     },
-    {
-      "when": { "operator": "gte", "left": { "contextPath": "step_retry" }, "right": 3 },
-      "output": "exhausted"
+    "expressions": ["step_retry = step_retry + 1"],
+    "cases": [
+      {
+        "when": {
+          "operator": "eq",
+          "left": { "contextPath": "validate-step.issues_count" },
+          "right": 0
+        },
+        "output": "clean"
+      },
+      {
+        "when": { "operator": "gte", "left": { "contextPath": "step_retry" }, "right": 3 },
+        "output": "exhausted"
+      }
+    ],
+    "connections": {
+      "success": "retry-action",
+      "clean": "next-step",
+      "exhausted": "notify-escalation"
     }
-  ],
-  "connections": {
-    "success": "retry-action",
-    "clean": "next-step",
-    "exhausted": "notify-escalation"
-  }
-},
-{
-  "id": "notify-escalation",
-  "type": "user-notification",
-  "message": "⚠️ *Шаг снова не проходит проверку*\n\nВыберите: вернуться и пересмотреть план, попросить человека помочь с конкретной проблемой или пропустить шаг, если он необязателен.",
-  "format": "markdown",
-  "connections": { "default": "ask-escalation-decision", "error": "ask-escalation-decision" }
-},
-{
-  "id": "ask-escalation-decision",
-  "type": "agent-directive",
-  "directive": "Шаг не удался после {{step_retry}} попыток.\n\nСпроси пользователя:\n1. **revise_plan** — вернуться к планированию и пересмотреть подход\n2. **ask_user** — запросить помощь человека с конкретной проблемой\n3. **skip** — пропустить этот шаг и продолжить\n\n`decision` записывает собственный выбор пользователя: каждый из трёх вариантов ведёт в своё место, поэтому предположенный ответ выбирает маршрут за него.",
-  "completionCondition": "Пользователь выбрал один из трёх вариантов",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "escalation_decision": {
-        "type": "string",
-        "enum": ["revise_plan", "ask_user", "skip"]
-      },
-      "user_input": { "type": "string" }
-    },
-    "required": ["escalation_decision"]
   },
-  "cases": [
-    {
-      "when": {
-        "operator": "eq",
-        "left": { "contextPath": "ask-escalation-decision.escalation_decision" },
-        "right": "revise_plan"
+  {
+    "id": "notify-escalation",
+    "type": "user-notification",
+    "message": "⚠️ *Шаг снова не проходит проверку*\n\nВыберите: вернуться и пересмотреть план, попросить человека помочь с конкретной проблемой или пропустить шаг, если он необязателен.",
+    "format": "markdown",
+    "connections": { "default": "ask-escalation-decision", "error": "ask-escalation-decision" }
+  },
+  {
+    "id": "ask-escalation-decision",
+    "type": "agent-directive",
+    "directive": "Шаг не удался после {{step_retry}} попыток.\n\nСпроси пользователя:\n1. **revise_plan** — вернуться к планированию и пересмотреть подход\n2. **ask_user** — запросить помощь человека с конкретной проблемой\n3. **skip** — пропустить этот шаг и продолжить\n\n`decision` записывает собственный выбор пользователя: каждый из трёх вариантов ведёт в своё место, поэтому предположенный ответ выбирает маршрут за него.",
+    "completionCondition": "Пользователь выбрал один из трёх вариантов",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "escalation_decision": {
+          "type": "string",
+          "enum": ["revise_plan", "ask_user", "skip"]
+        },
+        "user_input": { "type": "string" }
       },
-      "output": "revise"
+      "required": ["escalation_decision"],
+      "if": {
+        "properties": { "escalation_decision": { "const": "ask_user" } },
+        "required": ["escalation_decision"]
+      },
+      "then": {
+        "required": ["user_input"],
+        "properties": { "user_input": { "type": "string", "minLength": 1 } }
+      }
     },
-    {
-      "when": {
-        "operator": "eq",
-        "left": { "contextPath": "ask-escalation-decision.escalation_decision" },
-        "right": "skip"
+    "cases": [
+      {
+        "when": {
+          "operator": "eq",
+          "left": { "contextPath": "ask-escalation-decision.escalation_decision" },
+          "right": "revise_plan"
+        },
+        "output": "revise"
       },
-      "output": "skip"
+      {
+        "when": {
+          "operator": "eq",
+          "left": { "contextPath": "ask-escalation-decision.escalation_decision" },
+          "right": "skip"
+        },
+        "output": "skip"
+      }
+    ],
+    "connections": {
+      "success": "handle-user-help",
+      "revise": "revise-plan",
+      "skip": "mark-step-skipped"
     }
-  ],
-  "connections": {
-    "success": "handle-user-help",
-    "revise": "revise-plan",
-    "skip": "mark-step-skipped"
   }
-}
+]
 ```
 
 Три исхода тоже не требуют отдельного узла: два case называют ветки, уходящие с обычного пути, а
@@ -862,13 +844,12 @@ flowchart LR
 Вариант `revise_plan` возвращает к фазе Planning, позволяя агенту пересмотреть подход на основе того, что он узнал из неудач.
 
 :::tip
-Устанавливайте `max_retries` в зависимости от сложности задачи. Простые задачи: 2-3 повтора.
-Сложные задачи: 3-5 повторов. Всегда предоставляйте вариант `skip` для некритичных шагов.
+Выбирайте бюджет только по действующей политике, а не произвольной оценке сложности. Skip разрешён только явно необязательному условию; он не обходит обязательное ревью, согласование или полномочия на внешний эффект.
 :::
 
 ## Production паттерны
 
-Реальные паттерны из production workflows (development-flow, 104 ноды).
+Примеры ниже показывают отдельные решения; выбирайте их по реальным потребителям и действующим полномочиям.
 
 ### Express/Full Mode ветвление
 
@@ -921,32 +902,18 @@ flowchart LR
 
 ### Паттерн числовой валидации (рекомендуемый)
 
-:::caution
-**Проблема boolean валидации:** Агенты склонны к оптимизму. На вопрос "Результат валиден? да/нет"
-они могут ответить "да" даже когда нашли проблемы. Это обесценивает validation loops.
-:::
-
-**Решение:** Используйте числовой счётчик проблем вместо boolean. Движок механически проверяет равен ли счётчик нулю — нет места для интерпретации.
+Число замечаний уместно, когда маршрут действительно зависит от числа подтверждённых дефектов. Рецензент изучает реальный артефакт по требованиям и объясняет находки в одном каноническом отчёте. Число можно исказить так же, как boolean: движок проверяет форму ответа и вычисляет маршрут, а не истинность ревью.
 
 ```json
 {
   "id": "validate-result",
   "type": "agent-directive",
-  "directive": "ТОЛЬКО ПРОВЕРЬ результат. Подсчитай найденные проблемы.",
-  "completionCondition": "Количество проблем сообщено",
+  "directive": "Inspect the real artifact against its requirements. Write the complete current findings and reasoning to the agreed report, then return its actual actionable finding count. Do not repair at this independent gate.",
+  "completionCondition": "Required independent review completed on an unchanged artifact and current findings recorded honestly",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "issues_count": {
-        "type": "number",
-        "minimum": 0,
-        "description": "Количество найденных проблем (0 = валидно)"
-      },
-      "issues": {
-        "type": "array",
-        "items": { "type": "string" },
-        "description": "Список проблем если есть"
-      }
+      "issues_count": { "type": "integer", "minimum": 0 }
     },
     "required": ["issues_count"]
   },
@@ -960,56 +927,15 @@ flowchart LR
       "output": "clean"
     }
   ],
-  "connections": {
-    "success": "fix-issues",
-    "clean": "next-step"
-  }
+  "connections": { "success": "fix-issues", "clean": "next-step" }
 }
 ```
 
-**Почему это работает:**
-
-- Агент не может соврать про число (количество объективно)
-- Case `issues_count == 0` проверяется механически движком — на том узле, который это число и
-  произвёл
-- Нет места для "почти готово" или "незначительные проблемы"
-
-**Когда использовать:** ВСЕ validation loops должны использовать этот паттерн. Замените существующие `is_valid: enum["да","нет"]` на `issues_count: number`.
+Это фрагмент ноды: адрес отчёта и названные целевые ноды задаются содержащим workflow. Другому процессу лучше подойдёт обоснованный вердикт pass/repair. Не заменяйте смысловую оценку произвольным баллом и не требуйте чисел без потребителя.
 
 ### Числовая валидация с результатами тестов
 
-Валидация с числовыми проверками вместо да/нет:
-
-```json
-{
-  "id": "run-tests",
-  "type": "agent-directive",
-  "directive": "Запусти тесты и сообщи результаты",
-  "completionCondition": "Числа пройденных и упавших тестов получены реальным прогоном",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "tests_passed": { "type": "number" },
-      "tests_failed": { "type": "number" }
-    },
-    "required": ["tests_passed", "tests_failed"]
-  },
-  "cases": [
-    {
-      "when": {
-        "operator": "eq",
-        "left": { "contextPath": "run-tests.tests_failed" },
-        "right": 0
-      },
-      "output": "all-passed"
-    }
-  ],
-  "connections": {
-    "success": "fix-tests",
-    "all-passed": "continue"
-  }
-}
-```
+Числа берите только из реального запуска выбранных тестов, когда они нужны читателю отчёта. Ноль упавших тестов не доказывает выполнение нужных проверок: пустая выборка, пропуски, отказ инфраструктуры и неуспешный процесс тоже могут дать ноль. Изучите фактический исход runner и охват выбранных проверок перед маршрутом успеха; сохраняйте сбои и блокеры в свидетельствах.
 
 ### Уведомления пользователя
 
@@ -1062,22 +988,24 @@ Workflow Management Flow проверяет по этим правилам ка�
 автономный идёт дальше:
 
 ```json
-{
-  "id": "notify-plan-approval",
-  "type": "user-notification",
-  "message": "📋 *План ждёт вашего согласования* — согласуйте, и работа пойдёт дальше, или отклоните с фидбеком, и план исправят.",
-  "format": "markdown",
-  "planList": "full",
-  "connections": { "default": "present-plan-to-user" }
-},
-{
-  "id": "notify-work-started",
-  "type": "user-notification",
-  "message": "▶️ *План согласован — работа идёт.*",
-  "format": "markdown",
-  "planList": "full",
-  "connections": { "default": "execute-step" }
-}
+[
+  {
+    "id": "notify-plan-approval",
+    "type": "user-notification",
+    "message": "📋 *План ждёт вашего согласования* — согласуйте, и работа пойдёт дальше, или отклоните с фидбеком, и план исправят.",
+    "format": "markdown",
+    "planList": "full",
+    "connections": { "default": "present-plan-to-user" }
+  },
+  {
+    "id": "notify-work-started",
+    "type": "user-notification",
+    "message": "▶️ *План готов — работа продолжается в согласованном объёме.*",
+    "format": "markdown",
+    "planList": "full",
+    "connections": { "default": "execute-step" }
+  }
+]
 ```
 
 Первое ставится на интерактивную ветку маршрута по режиму, второе — на автономную.
@@ -1139,221 +1067,124 @@ Workflow Management Flow проверяет по этим правилам ка�
 
 ## Паттерны файловой персистенции
 
-Для агентов с доступом к файловой системе используйте файлы для:
-
-- Выгрузки больших данных из контекста workflow
-- Отслеживания прогресса выполнения между итерациями
-- Восстановления после прерываний
-- Создания аудит-лога
-
-:::note
-Эти паттерны работают только для агентов с файловым доступом. Предусмотрите fallback для MCP-only
-агентов.
-:::
+Файл даёт большому или общему артефакту канонический адрес. Переменные и история выполнения уже сохраняются движком; файл не нужен только из-за возможного прерывания разговора. Используйте назначенный проектом игнорируемый workspace и соблюдайте полномочия на файловую систему и раскрытие данных.
 
 ### Структура директорий
 
-Используйте шаблоны для организации файлов:
+Например, после объявления и инициализации глобального `workspace_path` владельцем workspace:
 
+```text
+{{workspace_path}}/
+├── process-id.txt
+├── plan.md
+├── steps/
+│   └── result.md
+└── final-report.md
 ```
-./{{task_name}}/
-├── process-id.txt              # ID выполнения workflow
-├── plan.md                     # Текущий план
-├── step-{{step_index}}/
-│   ├── iteration-{{iteration}}/
-│   │   ├── result.md           # Результат шага
-│   │   └── artifacts/          # Сгенерированные файлы
-│   └── summary.md              # Сводка по шагу
-└── final-report.md             # Финальный отчёт
-```
+
+Владение, локальное игнорирование и materialize описаны в [Workspace](/ru/docs/patterns/workspace/). Это пример путей, а не команда создать директорию в корне проекта.
 
 ### Отслеживание прогресса
 
-Сохраняйте process ID для восстановления:
-
-```json
-{
-  "id": "save-process-id",
-  "type": "agent-directive",
-  "directive": "Сохрани process ID в ./{{task_name}}/process-id.txt для восстановления",
-  "completionCondition": "Файл создан с process ID",
-  "connections": { "success": "next-step" }
-}
-```
+Содержательный владелец workspace записывает ID выполнения вместе с handoff-артефактами либо доставляет стабильные файлы из реестра через `materialize`. Не добавляйте ход только для копирования ID. Найденный handoff не разрешает возобновлять отменённое или чужое выполнение: сначала изучите текущее состояние соответствующего запуска.
 
 ### Снимки итераций
 
-Сохраняйте результаты итераций в файлы вместо контекста:
-
-```json
-{
-  "id": "save-iteration-result",
-  "type": "agent-directive",
-  "directive": "Сохрани результат итерации {{current_iteration}} в ./{{task_name}}/step-{{step_index}}/iteration-{{current_iteration}}/result.md",
-  "completionCondition": "Результат сохранён в файл",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "file_path": { "type": "string" }
-    },
-    "required": ["file_path"]
-  },
-  "connections": { "success": "next-iteration" }
-}
-```
+Отдельные снимки нужны, когда реальному рецензенту или восстановлению требуются неизменяемые версии. Если имя использует номер итерации, объявите и инициализируйте числовую запись реестра, а увеличение выполняйте у существующего владельца expressions. Не добавляйте счётчики и снимки без потребителя. Не меняйте проверяемые байты до получения ревью.
 
 ### Выгрузка контекста
 
-Ссылайтесь на файлы вместо хранения больших данных в контексте:
+Подробный артефакт хранится в одном каноническом файле, потребители получают путь. Производитель `produce-analysis` может вернуть локальный `file_path`; последующий полный фрагмент ноды читает его:
 
 ```json
 {
   "id": "analyze-with-file-reference",
   "type": "agent-directive",
-  "directive": "Прочитай анализ из {{analysis_file_path}} и продолжи обработку",
-  "completionCondition": "Анализ загружен и обработан"
+  "directive": "Read the relevant analysis at {{produce-analysis.file_path}} and complete the requested assessment against the actual requirements.",
+  "completionCondition": "Analysis applied and substantive assessment completed with limitations reported",
+  "connections": { "success": "next-step" }
 }
 ```
 
 ### Когда использовать файловую персистенцию
 
-| Сценарий                | Файловый подход             | Контекстный подход      |
-| ----------------------- | --------------------------- | ----------------------- |
-| Большой анализ кода     | Сохранить в файл, ссылаться | Не рекомендуется        |
-| История итераций        | Сохранять каждую итерацию   | Хранить только текущую  |
-| Данные восстановления   | process-id.txt обязателен   | Теряется при прерывании |
-| Аудит-лог               | Дописывать в лог-файл       | Недоступно              |
-| Маленькие флаги статуса | Оба подхода                 | Проще                   |
-
-:::tip
-Сначала определите возможности агента (см. Определение возможностей агента) и предусмотрите оба
-пути — файловый и контекстный.
-:::
+Используйте файлы для навигации по отчётам, больших тел и передачи независимым читателям. Сохранённые переменные workflow подходят небольшим решениям и данным с прямыми потребителями. Предусмотрите поддерживаемый context-only маршрут, если файлы необязательны; если обязательный файловый контракт невыполним, сообщите блокер вместо выдуманного результата.
 
 ## Проблема получения ответа от пользователя
 
-Когда workflow требует подтверждения от пользователя, агент может "оптимизировать" — заполнить поля inputSchema не дожидаясь реального ответа.
+Схема проверяет форму отправленного ответа, но не устанавливает, что его дал человек. Если workflow требует настоящего решения пользователя, агент должен дождаться этого решения.
 
 ### Проблема
 
-```json
-{
-  "id": "approve-plan",
-  "directive": "Покажи план пользователю. Спроси: 'Подтверждаете? (да/нет)'",
-  "inputSchema": {
-    "properties": {
-      "approved": { "type": "string", "enum": ["да", "нет"] }
-    }
-  }
-}
-```
-
-**Что происходит:** Агент показывает план, затем сразу заполняет `approved: "да"` не дожидаясь ответа пользователя.
-
-**Почему:** Агент видит что может заполнить поле самостоятельно и "оптимизирует" не останавливаясь.
+Показать план и сразу отправить `approved: "yes"` означает придумать одобрение. Имя поля, обязательная строка evidence и аннотация humanGate не делают предполагаемый ответ законным.
 
 ### Решение: скажите, чем является ответ
 
-Скажите, что поле записывает случившееся, и что будет, если оно не случилось:
+Поле записывает ответ пользователя о текущем артефакте. Это фрагмент ноды; названные цели должны существовать в содержащем workflow:
 
 ```json
 {
   "id": "approve-plan",
-  "directive": "Представь план и спроси, утверждён ли он. `approved` записывает собственный ответ пользователя: без ответа записывать нечего, а предположенный ответ уводит прогон в ветку, которую пользователь не выбирал. `user_response_text` — этот ответ дословно.",
-  "completionCondition": "Пользователь явно ответил да или нет (не предполагаемый ответ)",
-  "inputSchema": {
-    "properties": {
-      "approved": { "type": "string", "enum": ["да", "нет"] },
-      "user_response_text": {
-        "type": "string",
-        "description": "Точный текст ответа пользователя"
-      }
-    },
-    "required": ["approved", "user_response_text"]
-  }
-}
-```
-
-### Ключевые техники
-
-1. **Скажите, чей ответ записывает поле** — `approved` хранит ответ пользователя, поэтому без
-   ответа записывать туда нечего
-2. **Требуйте `user_response_text`** — дословный ответ и делает запись проверяемой потом
-3. **Назовите следствие каждого ответа** — куда ведёт «нет», что закрывает «да»; предположенный
-   ответ уводит прогон в ветку, которую пользователь не выбирал
-4. **Разделите ноду, когда риск оправдывает лишний ход** — см. ниже
-
-### Разделение на две ноды (альтернатива)
-
-Для критичных подтверждений разделите на отдельные ноды:
-
-```
-[show-information] → [get-user-confirmation, маршрутизирует по ответу]
-```
-
-Первая нода только показывает, вторая получает ответ и по нему маршрутизирует:
-
-```json
-{
-  "id": "show-plan",
-  "directive": "Покажи план пользователю. Объясни каждый этап.",
-  "inputSchema": {
-    "properties": {
-      "plan_shown": { "type": "string", "enum": ["да"] }
-    }
-  },
-  "connections": { "success": "get-plan-approval" }
-},
-{
-  "id": "get-plan-approval",
-  "directive": "План показан выше. Спроси, утверждён ли он. `approved` записывает собственный ответ пользователя; предположенный ответ уводит прогон в ветку, которую он не выбирал.",
+  "type": "agent-directive",
+  "directive": "Present the current plan and wait for the user's actual answer. approved records that answer: without one there is nothing to submit. Record user_response_text verbatim. Rejection feedback belongs to the revision owner, not to an unreviewed repair at this gate.",
+  "completionCondition": "The user actually responded about this version and the answer is recorded without assumption",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "approved": { "type": "string", "enum": ["да", "нет"] }
+      "approved": { "type": "string", "enum": ["yes", "no"] },
+      "user_response_text": { "type": "string", "minLength": 1 }
     },
-    "required": ["approved"]
+    "required": ["approved", "user_response_text"]
   },
   "cases": [
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "get-plan-approval.approved" },
-        "right": "да"
+        "left": { "contextPath": "approve-plan.approved" },
+        "right": "yes"
       },
       "output": "approved"
     }
   ],
-  "connections": {
-    "success": "revise-plan",
-    "approved": "proceed"
-  }
+  "connections": { "success": "revise-plan", "approved": "proceed" }
 }
 ```
 
-:::caution
-Это известное ограничение workflows выполняемых агентами. Всегда тестируйте ноды с
-пользовательским вводом вручную перед деплоем.
-:::
+### Ключевые техники
+
+- Укажите владельца решения, редакцию артефакта и последствия каждого ответа.
+- Дождитесь ответа поддерживаемым механизмом хоста; показ вопроса не означает получение ответа.
+- Сохраните настоящие замечания для владельца пересмотра и повторите обязательное ревью.
+- Одобрение плана само по себе не разрешает публикацию, развёртывание и другие внешние эффекты, если контракт вызывающей стороны не предоставляет эти полномочия явно.
+
+### Разделение на две ноды (альтернатива)
+
+Отдельная ответственность представления полезна только при самостоятельном артефакте или границе решения. Простое разделение показа и записи ответа не предотвращает вымышленного одобрения и добавляет ходы:
+
+```text
+[подготовить содержательный артефакт] → [получить настоящий ответ] → одобрение / пересмотр
+```
+
+При проверке взаимодействия наблюдайте реальное ожидание, настоящий ответ, замечания при отказе и выбранный маршрут. Разбор JSON не проверяет участие человека.
 
 ## Лучшие практики
 
-1. **Один узел = одна ответственность** — не смешивайте проверку и исправление
+1. **Один узел = одна ответственность** — отделяйте обязательное независимое ревью от починки; производитель может запускать собственные точечные проверки
 2. **Решайте там, где свидетельство** — узел, который произвёл ответ, несёт `cases`,
    маршрутизирующие по нему; отдельный `condition` — для общего или именованного решения
 3. **Ясные директивы** — начинайте с глагола: Создай, Проверь, Исправь
 4. **Явные отрицания** — "НЕ исправляй, ТОЛЬКО проверь"
-5. **Используйте inputSchema** — всегда определяйте ожидаемую структуру ответа
-6. **Числовая валидация** — используйте счётчики вместо да/нет для точных проверок
-7. **Счетчики итераций** — предотвращайте бесконечные циклы
+5. **Используйте inputSchema** — задавайте данные, нужные реальному потребителю
+6. **Обоснованная проверка** — выбирайте наблюдения и вердикт по проверяемому свойству
+7. **Повторы по причине** — нужен диагноз, изменённая работа или действующий бюджет; счётчик сам по себе не останавливает цикл
 8. **Gate подтверждения** — для критических действий
 9. **Самодокументирование** — объявляйте знания как значения по умолчанию в variableRegistry
 10. **Graceful уведомления** — ошибки каналов связи не должны блокировать workflow
 
 ## Связанное
 
-- [Узлы](/docs/ru/concepts/nodes/) — Справочник типов узлов
-- [Шаблоны](/docs/ru/concepts/templates/) — Динамический контент
-- [Инструменты](/docs/ru/reference/tools/) — Справочник MCP tools
+- [Узлы](/ru/docs/concepts/nodes/) — Справочник типов узлов
+- [Шаблоны](/ru/docs/concepts/templates/) — Динамический контент
+- [Инструменты](/ru/docs/reference/tools/) — Справочник MCP tools
 - [Паттерн Replan](/ru/docs/patterns/replan/) — Пересмотр многошагового плана по ходу выполнения
 - [Completeness Self-Review](/ru/docs/patterns/self-review/) — Проверка каждого требования перед выдачей

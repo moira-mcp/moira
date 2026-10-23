@@ -6,7 +6,7 @@
  *
  * SINGLETON: First access to any getter triggers validation and logging.
  *
- * @see docs/deployment/ENVIRONMENT_VARIABLES.md
+ * @see docs/operator/configuration.md
  */
 
 import { createLogger } from "../logging/logger.js";
@@ -563,15 +563,6 @@ class ConfigSingleton {
   }
 
   // ============================================================================
-  // Paths
-  // ============================================================================
-
-  getDocsDir(): string {
-    this.ensureInitialized();
-    return process.env.DOCS_DIR || "./docs";
-  }
-
-  // ============================================================================
   // Initialization
   // ============================================================================
 
@@ -812,9 +803,6 @@ export function getLoadTestSecret(): string | undefined {
 export function isLoadTestAuthEnabled(): boolean {
   return config.isLoadTestAuthEnabled();
 }
-export function getDocsDir(): string {
-  return config.getDocsDir();
-}
 export function getExtraTrustedOrigins(): string[] {
   return config.getExtraTrustedOrigins();
 }
@@ -823,21 +811,15 @@ export function getCorsAllowedOrigins(): string[] {
 }
 
 /**
- * Read system prompt from docs/SYSTEM-PROMPT.md
- * Single source of truth for agent instructions
+ * Read the checked-in default prompt. Effective MCP instructions are database-backed.
  */
-import { readFileSync, existsSync } from "fs";
-import { join } from "path";
+import { readFileSync } from "fs";
 
 export function getSystemPrompt(): string {
-  const docsDir = getDocsDir();
-  const filePath = join(docsDir, "SYSTEM-PROMPT.md");
-
-  if (!existsSync(filePath)) {
-    return "MCP Moira - Agent Workflow Engine. Use get_help tool for documentation.";
-  }
-
-  return readFileSync(filePath, "utf-8");
+  return readFileSync(
+    new URL("../../../../config/prompts/systemPrompt.md", import.meta.url),
+    "utf-8",
+  );
 }
 
 /**

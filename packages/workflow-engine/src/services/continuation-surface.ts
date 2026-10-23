@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { WorkflowGraph } from "../interfaces/core-interfaces.js";
 import type { GraphNode } from "../types/graph-nodes.js";
-import { canonicalJson } from "../extensions/declared-schema.js";
+import { canonicalJson } from "@mcp-moira/shared/canonical-json";
 
 /**
  * The continuation surface of a paused execution: everything about the workflow definition that can

@@ -32,9 +32,6 @@ import type { RunBlock } from "../run/model";
 import type { ExportEntry } from "./operations";
 import type { ExecutionStopCapability } from "@mcp-moira/shared/execution-management";
 
-type EngineGraph = Parameters<typeof findNodeReferences>[0];
-const engine = (graph: WorkflowGraph): EngineGraph => graph as unknown as EngineGraph;
-
 export { NODE_ID_PATTERN };
 
 // --- Rename
@@ -75,17 +72,17 @@ export function renamePreview(
     next === nodeId ? "unchanged" : newIdProblem(workflow, next);
   // The engine reports connection targets apart from the other references; a rename rewrites both.
   const leadingIn = new Map<string, number>();
-  for (const edge of incomingEdges(engine(workflow), nodeId)) {
+  for (const edge of incomingEdges(workflow, nodeId)) {
     leadingIn.set(edge.source, (leadingIn.get(edge.source) ?? 0) + 1);
   }
   return {
     problem,
     references: [
-      ...findNodeReferences(engine(workflow), nodeId),
+      ...findNodeReferences(workflow, nodeId),
       ...[...leadingIn].map(([source, count]) => ({ path: `nodes[${source}].connections`, count })),
     ],
-    prose: findProseMentions(engine(workflow), nodeId),
-    teleport: (node?.type as string | undefined) === "teleport",
+    prose: findProseMentions(workflow, nodeId),
+    teleport: node?.type === "teleport",
   };
 }
 
@@ -117,7 +114,7 @@ export function deletePlan(workflow: WorkflowGraph, nodeId: string): DeletePlan 
   const successor = successorKey ? (node?.connections?.[successorKey] ?? null) : null;
   const proposed = successor && successor !== nodeId ? successor : null;
   const byId = new Map(workflow.nodes.map((n) => [n.id, n]));
-  const incoming = incomingEdges(engine(workflow), nodeId).map((edge) => {
+  const incoming = incomingEdges(workflow, nodeId).map((edge) => {
     const source = byId.get(edge.source);
     return {
       edge: edgeId(edge.source, edge.key),
@@ -131,10 +128,10 @@ export function deletePlan(workflow: WorkflowGraph, nodeId: string): DeletePlan 
     refused: node?.type === "start" ? "only-start" : null,
     incoming,
     // References inside the deleted step go with it; the ones elsewhere are left without a source.
-    dangling: findNodeReferences(engine(workflow), nodeId).filter(
+    dangling: findNodeReferences(workflow, nodeId).filter(
       (location) => !location.path.startsWith(`nodes[${nodeId}]`),
     ),
-    teleport: (node?.type as string | undefined) === "teleport",
+    teleport: node?.type === "teleport",
   };
 }
 
@@ -283,7 +280,7 @@ export function insertBlockChoice(
   const from = node?.progressNodeId;
   const to = target?.progressNodeId;
   if (!from || !to || from === to) return null;
-  const process = deriveProcess(engine(workflow) as Parameters<typeof deriveProcess>[0]);
+  const process = deriveProcess(workflow);
   if (!process || process.backEdges.includes(edgeId(edge.source, edge.key))) return null;
   return { source: from, target: to };
 }

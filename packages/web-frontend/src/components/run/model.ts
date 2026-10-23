@@ -1,12 +1,16 @@
 /**
- * View model of the run page: the unit 3 projection (`ExecutionProgress`) read as blocks with
+ * View model of the run page: `ExecutionProgress` read as blocks with
  * their run state, plus the definition facts a block's steps show (type, summary, expected
  * evidence). Nothing here derives run state: statuses, pass counts, the route and the variables
  * are the server's; this module only joins the process blocks with the per-block run facts and
  * looks up the steps' authored text in the workflow definition.
  */
 
-import type { WorkflowGraph, WorkflowNode } from "../../types/workflow-types";
+import type {
+  ProgressContentTemplate,
+  WorkflowGraph,
+  WorkflowNode,
+} from "../../types/workflow-types";
 import type {
   BlockDurationStatistics,
   ExecutionBlockList,
@@ -188,7 +192,7 @@ export interface StepInfo {
   cases: Array<{ when: unknown; output: string }>;
   /** The authored progress label and content of the node, when given. */
   progressLabel: string | null;
-  progressContent: string | null;
+  progressContent: ProgressContentTemplate | null;
 }
 
 /** One outgoing connection of a step: inside its block (points at a sibling step) or out of it. */
@@ -375,8 +379,7 @@ export function stepsOf(
       text,
       evidence: evidenceFields(
         (node as { inputSchema?: unknown }).inputSchema,
-        workflow?.variableRegistry as unknown as
-          Record<string, Record<string, unknown>> | undefined,
+        workflow?.variableRegistry,
       ),
       routing,
       completionCondition: stringField(node, "completionCondition"),
@@ -389,7 +392,7 @@ export function stepsOf(
         ? ((node as { cases: Array<{ when: unknown; output: string }> }).cases ?? [])
         : [],
       progressLabel: stringField(node, "progressActiveLabel"),
-      progressContent: stringField(node, "progressActiveContent"),
+      progressContent: node.progressActiveContent ?? null,
     };
   });
 }

@@ -5,7 +5,7 @@ import { URL } from "node:url";
 import { once } from "node:events";
 import { connectHttps, transportClosed } from "./tls-transport.mjs";
 import { ownerPullRequest, serveOwnerGit, GitHubOwnerError } from "./github-owner.mjs";
-import { readOwnerJsonBody } from "./request-body.mjs";
+import { readOwnerJsonBody } from "../../shared/src/http/request-body.mjs";
 import {
   scopedCredentialViewSchema,
   scopedCredentialCollectionSchema,

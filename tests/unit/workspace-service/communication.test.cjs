@@ -842,7 +842,7 @@ test("cancelling a backpressured materialize writer settles its owned stream wit
 
 test("framed Unicode control preserves a coalesced opaque file view without header limits", async () => {
   const { encodeOwnerFrame, readOwnerFrame } =
-    await import("../../../packages/workspace-service/src/stream-frame.mjs");
+    await import("../../../packages/shared/src/http/owner-stream-frame.mjs");
   const control = { text: "中".repeat(4096), file: { size: 6 } };
   const bytes = Buffer.from([0, 255, 1, 128, 10, 42]);
   const encoded = encodeOwnerFrame(
@@ -867,7 +867,7 @@ test("framed Unicode control preserves a coalesced opaque file view without head
 
 test("destroying a framed source cancels an actually pending original incoming read", async () => {
   const { encodeOwnerFrame, readOwnerFrame } =
-    await import("../../../packages/workspace-service/src/stream-frame.mjs");
+    await import("../../../packages/shared/src/http/owner-stream-frame.mjs");
   const input = new PassThrough();
   const encoded = encodeOwnerFrame({ file: { size: 10 } }, (async function* () {})());
   for await (const piece of encoded.body) input.write(piece);
@@ -885,7 +885,7 @@ test("guest shutdown closes stalled communication ingress before awaiting its un
   const { startWorkspaceService } =
     await import("../../../packages/workspace-service/src/server.mjs");
   const { encodeOwnerFrame, OWNER_STREAM_CONTENT_TYPE } =
-    await import("../../../packages/workspace-service/src/stream-frame.mjs");
+    await import("../../../packages/shared/src/http/owner-stream-frame.mjs");
   const previousLife = process.env.MOIRA_ENVIRONMENT_ID;
   process.env.MOIRA_ENVIRONMENT_ID ??= "service-test";
   cleanup.push(() => {
@@ -975,7 +975,7 @@ test.each(["malformed control", "unconsumed replay"])(
   "%s flushes its complete HTTP result before closing unread file ingress",
   async (mode) => {
     const { readOwnerFrame, settleOwnerFrame, encodeOwnerFrame, OWNER_STREAM_CONTENT_TYPE } =
-      await import("../../../packages/workspace-service/src/stream-frame.mjs");
+      await import("../../../packages/shared/src/http/owner-stream-frame.mjs");
     const root = await realpath(await mkdtemp("/tmp/owner-frame-"));
     cleanup.push(() => rm(root, { recursive: true, force: true }));
     const socketPath = join(root, "http.sock");

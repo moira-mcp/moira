@@ -1,13 +1,11 @@
-import {
-  createLogger,
-  getAccountAccessDenial,
-  getAppPrefix,
-  getBaseUrl,
-  getDatabase,
-  getGlobalSettingsService,
-  UserRepository,
-  type SuccessfulRegistration,
-} from "@mcp-moira/shared";
+import { createLogger } from "@mcp-moira/shared/logging/logger";
+import { getAccountAccessDenial } from "@mcp-moira/shared/auth/account-admission";
+import { getAppPrefix } from "@mcp-moira/shared/config/env";
+import { getBaseUrl } from "@mcp-moira/shared/urls";
+import { getDatabase } from "@mcp-moira/shared/database/connection";
+import { getGlobalSettingsService } from "@mcp-moira/shared/services";
+import { UserRepository } from "@mcp-moira/shared/database/repositories/user-repository";
+import type { SuccessfulRegistration } from "@mcp-moira/shared/auth";
 import type { IDataRepository } from "../interfaces/data-repository.js";
 import { DatabaseRepository } from "../storage/database-repository.js";
 import { getActiveUserCommunicationService } from "./user-communication-provider.js";

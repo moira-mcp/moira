@@ -67,7 +67,7 @@ flowchart TD
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "step_scope" },
+        "left": { "contextPath": "review-step.step_scope" },
         "right": "plan"
       },
       "output": "plan"
@@ -80,8 +80,7 @@ flowchart TD
 }
 ```
 
-Нода ревью записывает `step_scope` через `inputSchema.globalInputs`, а сама переменная объявлена в
-`variableRegistry` с теми значениями, которые обрабатывают маршруты.
+Нода `review-step` объявляет локальное поле `step_scope` с enum `step` / `plan` в inputSchema. Глобальная переменная не нужна. Фрагменты предполагают наличие названных целевых нод в содержащем workflow.
 
 ## 3. Проверка покрытия перед сдачей
 
@@ -96,8 +95,8 @@ flowchart TD
   "completionCondition": "Every requirement checked against the artifact and gap count reported",
   "inputSchema": {
     "type": "object",
-    "globalInputs": ["requirements_gaps_count"],
     "properties": {
+      "requirements_gaps_count": { "type": "integer", "minimum": 0 },
       "coverage_notes": { "type": "string" }
     },
     "required": ["requirements_gaps_count"]
@@ -114,7 +113,7 @@ flowchart TD
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "requirements_gaps_count" },
+        "left": { "contextPath": "validate-requirements-coverage.requirements_gaps_count" },
         "right": 0
       },
       "output": "complete"

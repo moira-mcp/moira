@@ -30,6 +30,7 @@ import type { RegistryVariable } from "../../types/workflow-types";
 const TYPES: RegistryVariable["type"][] = [
   "string",
   "number",
+  "integer",
   "boolean",
   "object",
   "array",

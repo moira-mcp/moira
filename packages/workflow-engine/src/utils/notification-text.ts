@@ -7,7 +7,8 @@
  * (`MOIRA_HOST`, `APP_BASE_PATH`); the sender resolves the run and the channel limit.
  */
 
-import { getAppPrefix, getBaseUrl } from "@mcp-moira/shared";
+import { getAppPrefix } from "@mcp-moira/shared/config/env";
+import { getBaseUrl } from "@mcp-moira/shared/urls";
 import type { ExecutionContext } from "../types/base-types.js";
 import type { TextEscaper } from "./execution-progress-lists.js";
 

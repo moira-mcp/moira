@@ -2,15 +2,10 @@
   "name": "mcp-moira",
   "version": "0.3.5",
   "description": "Agent Workflow Engine for AI agents with professional Web UI dashboard",
-  "main": "dist/server.js",
   "type": "module",
   "workspaces": [
     "packages/*"
   ],
-  "bin": {
-    "mcp-moira": "./dist/server.js",
-    "moira-cli": "./dist/cli.js"
-  },
   "scripts": {
     "local": "node packages/local/dist/cli.js",
     "local:build": "node scripts/build-local.js",
@@ -141,7 +136,6 @@
     "style-loader": "^3.3.0",
     "supertest": "^7.3.1",
     "testfold": "^0.4.5",
-    "ts-jest": "^29.4.14",
     "ts-loader": "^9.6.2",
     "tsx": "^4.23.15",
     "typescript": "^5.6.0",

@@ -13,36 +13,7 @@ Claude Code is Anthropic's official CLI and VS Code extension for Claude. This g
 
 ## Configuration
 
-1. **Open Claude Code settings**
-
-   In VS Code, open Command Palette and run:
-
-   ```
-   Claude Code: Open Settings
-   ```
-
-   Or edit directly:
-
-   {/* prettier-ignore */}
-
-- ~/.claude/
-  - settings.json
-
-2. **Add Moira MCP server**
-
-   Add to your `settings.json` with URL: `{MCP_URL}`
-
-3. **Restart Claude Code**
-
-   Reload the window or restart VS Code to apply changes.
-
-4. **Authenticate**
-
-   When first using Moira tools, you'll be prompted to authenticate. Follow the OAuth flow in your browser.
-
-   **Alternative: API Token**
-
-   If OAuth is not available, create an API token in Moira web UI (Settings → Apps & tokens → API tokens) and add it to your MCP config as a Bearer token header. See [MCP Clients → API Tokens](/docs/integration/mcp-clients/#api-tokens) for details.
+Use the Claude Code entry in [MCP Clients](/docs/integration/mcp-clients/) for the server's generated setup and current transport/authentication configuration. Complete OAuth authentication, or use the documented API-token header when OAuth is unavailable. Do not copy credentials into project instructions.
 
 ## Verify Connection
 
@@ -59,7 +30,7 @@ You should see your workflows listed.
 ### Starting a Workflow
 
 ```
-Start the "development-flow" workflow in Moira
+Find the current software development workflow in Moira and start it for this task
 ```
 
 Claude will:
@@ -111,7 +82,7 @@ To start a task, run the development workflow:
 ```
 
 :::tip
-Add workflow process IDs to your CLAUDE.md for easy resumption after session interruption.
+Keep project-wide workflow selection rules in CLAUDE.md. Store an active Process ID in the task's ignored workspace/handoff so transient run state does not become permanent project instructions.
 :::
 
 ## Available Tools
@@ -151,11 +122,11 @@ If process ID is lost:
 
 1. Check `session({ action: "executions" })` for active executions
 2. Resume with the correct process ID
-3. Consider adding process ID to CLAUDE.md for persistence
+3. Retain the selected Process ID in the task's ignored workspace/handoff
 
 ## Best Practices
 
-1. **Save Process IDs** - Store in CLAUDE.md for session continuity
+1. **Save Process IDs** - Retain in the task's ignored workspace/handoff
 2. **Follow Directives** - Execute exactly what the directive says
 3. **Meet Completion Conditions** - Verify before submitting
 4. **Check Help** - Use `help` when unsure

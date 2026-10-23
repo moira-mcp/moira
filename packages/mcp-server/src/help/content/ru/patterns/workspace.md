@@ -10,7 +10,7 @@ description: Организация файлов workflow в выделенно�
 ## Структура
 
 ```
-./moira-ws/{workspace-name}/
+./agent_temp_files_local/moira-ws/{workspace-name}/
 ├── process-id.txt       # ID выполнения workflow для восстановления
 ├── development-plan.md  # Планы и спецификации
 ├── step-1/              # Результаты конкретных шагов
@@ -21,15 +21,14 @@ description: Организация файлов workflow в выделенно�
 
 ## Расположение рабочего пространства
 
-Все рабочие пространства создаются в поддиректории `./moira-ws/` **текущего проекта**:
+Используйте назначенную проектом игнорируемую рабочую директорию. Например:
 
 ```
-./moira-ws/{workspace-name}/
+./agent_temp_files_local/moira-ws/{workspace-name}/
 ```
 
 :::caution
-НЕ создавайте рабочие пространства в корне проекта (`./feature-name/`) или в других местах. Всегда
-используйте `./moira-ws/` для единообразия.
+Соблюдайте правила проекта и вызывающей стороны. Не создавайте произвольную директорию в корне проекта и не используйте workspace другого выполнения.
 :::
 
 ## Соглашение об именовании
@@ -49,13 +48,15 @@ description: Организация файлов workflow в выделенно�
 
 ### Владелец рабочего пространства
 
-Существующая ранняя ответственность определяет канонический путь рабочего пространства и возвращает
-его как глобальный `workspace_path`. Нода, единственная задача которой выбрать или создать
+Существующая ранняя ответственность определяет канонический путь рабочего пространства. Если последующим нодам нужен общий `workspace_path`, объявите строковую запись реестра и перенесите ответ владельца через `globalInputs`. Нода, единственная задача которой выбрать или создать
 директорию, добавляет ход, но не добавляет суждения.
 
 Если стабильные файлы берутся из default-значений реестра workflow, сразу после этого владельца
-разместите ноду `materialize`. Она создаёт директорию назначения и распаковывает все объявленные
-файлы из одного неизменяемого архива владельца, удерживая на этом маршруте их тела вне контекста агента:
+разместите ноду `materialize`. Она выдаёт инструкции доставки одного неизменяемого архива владельца. Агент выполняет поддерживаемую команду распаковки либо объявленный context fallback; сам переход из ноды не доказывает создание файлов.
+
+Этот общий фрагмент объявления не является объявлением встроенного Workflow Management Flow.
+Он предполагает строковые записи реестра `workspace_process_id_file` и `workflow_reference`
+со стабильными телами в default, заданный `workspace_path` и последующую ноду `create-plan`:
 
 ```json
 {
@@ -81,17 +82,17 @@ completion condition первого потребителя должна треб
 
 ### Использование пути рабочего пространства
 
-Ссылайтесь на `{{workspace_path}}` в последующих директивах:
+Ссылайтесь на `{{workspace_path}}` в последующих директивах. Если путь использует `current_step`, объявите и инициализируйте этот номер для фактического потребителя.
 
 ```json
 {
-  "directive": "Save development plan to {{workspace_path}}development-plan.md"
+  "directive": "Save development plan to {{workspace_path}}/development-plan.md"
 }
 ```
 
 ```json
 {
-  "directive": "Create step results in {{workspace_path}}step-{{current_step}}/step-results.md"
+  "directive": "Create step results in {{workspace_path}}/step-{{current_step}}/step-results.md"
 }
 ```
 
@@ -114,11 +115,11 @@ completion condition первого потребителя должна треб
 
 ## Настройка Git
 
-Добавьте `./moira-ws/` в `.gitignore`:
+Назначенная директория должна игнорироваться Git. Используйте локальный exclude, если политика проекта не разрешает изменение tracked ignore-файла. Для примера выше:
 
-```gitignore
+```text
 # Рабочие пространства Moira workflow
-moira-ws/
+agent_temp_files_local/
 ```
 
 Рабочие пространства — это временные рабочие директории, которые не следует коммитить.
@@ -127,20 +128,20 @@ moira-ws/
 
 При прерывании workflow агент может:
 
-1. Прочитать `process-id.txt` из рабочего пространства
-2. Возобновить выполнение по сохранённому ID процесса
-3. Продолжить с последнего завершённого шага
+1. Прочитать handoff и `process-id.txt` принадлежащего задаче workspace.
+2. Убедиться, что выполнение относится к этой задаче и не отменено и не заменено.
+3. Через `session` проверить текущий статус и шаг; продолжать из состояния движка в пределах разрешённого восстановления.
 
 ```json
 {
-  "directive": "Check for existing workspace in ./moira-ws/\nIf found, read process-id.txt and resume workflow"
+  "directive": "Inspect the task-owned workspace handoff and execution status. Resume only the matching active execution when authorized; a found process ID alone is not permission to resume."
 }
 ```
 
 ## Пример Workflow Management Flow
 
-Workflow Management Flow определяет `workspace_path`, материализует два стабильных файла для обеих
-веток и затем выбирает создание или редактирование:
+Workflow Management Flow определяет `workspace_path`, материализует ID процесса, тематические
+справочники и стартовые шаблоны для обеих веток и затем выбирает создание или редактирование:
 
 ```text
 get-action-type
@@ -150,8 +151,12 @@ get-action-type
        | edit   -> prepare-edit-workflow
 ```
 
-Архив записывает `process-id.txt` и `workflow-authoring-reference.md`. Владельцы веток create и edit
-затем записывают свои требования и provenance, не дублируя стабильные файлы.
+Архив записывает `process-id.txt`, тематические Markdown-файлы в `reference/` и стартовые JSON
+workflow в `reference/templates/`. Их тела задают строковые defaults `workflow_reference_*` и
+`workflow_template_*`. Каждый потребитель читает файлы, названные его директивой; затем владельцы
+веток create и edit записывают свои требования и provenance, не дублируя стабильные справочники.
+[Пример материализации](/ru/docs/reference/materialize/#применение-в-workflow-management-flow)
+показывает фактические bootstrap-пути и источники реестра.
 
 ## Перевод ручного bootstrap
 

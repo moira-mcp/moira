@@ -20,334 +20,68 @@ reading help or calling an old tool does not bypass the check.
 
 ## Behavioral guidance
 
-The typed catalog defines what clients can send. The following notes describe authorization, state changes, and operational behavior that is not encoded in JSON Schema.
+The catalog defines accepted inputs. These topic owners explain authority, durable state and effects that a schema alone cannot establish.
 
 ### User communication
 
-`communication_send` sends ordinary text to the authenticated user's configured channels.
-The server selects credentials and recipients. An optional `channel` selects one configured
-channel; callers cannot provide destination authority or arbitrary headers. Provider text limits
-apply; Telegram accepts up to 4096 characters in an ordinary message.
+`communication_send` uses the authenticated user's configured channels; callers do not supply recipient credentials or arbitrary headers. Provider limits apply (ordinary Telegram text: 4096 characters).
 
-`communication_deliver` requires the host's native `file` descriptor. Pass its `file_id`,
-`download_url` and available name/type/size metadata unchanged; never invent a file ID or URL.
-Select the returned controller reference in `owner` when several controllers are registered.
-Availability is decided by actual dispatch; an unavailable selected controller is not replaced.
+For `communication_deliver`, pass the host's native file descriptor and metadata unchanged. An explicitly selected registered controller is never replaced because another is available. `communication_deliver_publication` addresses the owner through an existing immutable publication. Publication does not send a message; delivery neither consumes nor renews it. Reads remain subject to expiry and current authority.
 
-`communication_deliver_publication` uses an existing immutable `publication` reference,
-which already addresses its owner:
-
-```javascript
-communication_deliver_publication({
-  publication: "<returned publication reference>",
-  message: "The requested recording",
-  kind: "document",
-});
-operation_get({ reference: "<returned operation reference>" });
-```
-
-The file owner retains the bytes and original delivery receipt. Cloud Moira authorizes the
-channel and streams the source to its fixed vendor transport without acquiring the native file
-or retaining a temporary copy. The owner receives channel capabilities and provider constraints
-and validates the complete file/text plan before vendor staging. An explicitly selected unsupported
-kind is refused rather than silently changed; no eligible delivery cannot report success.
-Ordinary text needs no file owner. A delivery returns its original
-operation reference; collect it without resending. If the first reply was lost, use
-`operation_find` at the selected owner and choose the original explicitly. No match, absence or
-an unavailable observation does not prove that delivery never happened.
-Workflow attachment notification results expose the same `operation` for collection; their
-internal execution/visit identity is not a separate public recovery protocol.
-
-Publications contain complete immutable bytes and support repeated reads until expiry under
-current authority. Source edits do not change them. Publishing does not send a message, and
-delivery neither consumes nor renews a publication. Real Telegram image/document restrictions
-and installed extension transports remain applicable.
+The owner retains bytes and the original receipt. Cloud Moira authorizes the channel and streams to its fixed vendor transport without retaining a native-file copy. The owner validates the complete file/text plan before staging; unsupported explicit kinds are refused, not silently changed. Collect the returned original operation with `operation_get`. If its first reply was lost, find candidates at that owner and choose the original explicitly, even for one match. Absence or an unavailable observation does not establish that delivery never happened. See [delivery recovery](/docs/integration/troubleshooting/).
 
 ### Workspace purposes and references
 
-Workspace, controller, target and installation references are returned by discovery. Copy them
-unchanged; encoded addresses do not grant authority. Lifecycle tools consume the captured
-workspace observation. A conflict requires a new observation and deliberate decision, including
-another confirmation for deletion. Callers do not manufacture request IDs, generations or hashes.
+Discovery returns opaque workspace, controller, target and installation references. Copy them unchanged; an address is not authority. Lifecycle conflicts require a fresh observation and deliberate decision, including renewed confirmation for deletion.
 
-`command_run` accepts either argv or script and optional text stdin; `command_run_native`
-requires a native stdin file instead. Operation and process references retain their original
-owner. `operation_get` collects, `operation_find` discovers candidates, and
-`process_output`/`process_stop` address the returned process. Each deliberate uncontrolled
-call is a distinct intent; a lost first reply is never deduplicated from command text.
-An absent receipt or unavailable owner does not authorize automatic replay. Candidate selection
-is explicit, even for one match. Generic operation results are data for their operation kind,
-not necessarily workspace summaries.
-Discovery returns safe metadata and references; full original outcomes require explicit collection.
-Get and find project known uncertain outcomes as `unconfirmed` even when the private receipt is
-terminal. A confirmed refusal remains completed with `outcome.ok:false`; neither classification
-rewrites the retained receipt or permits replay.
+Commands use argv or script; native stdin requires `command_run_native`. Each deliberate uncontrolled call is a distinct intent: command text cannot deduplicate a lost first reply. Collect original operations/processes through their returned references. Known uncertain outcomes project as `unconfirmed`; a confirmed refusal is completed with `outcome.ok:false`. Neither permits automatic replay or changes the retained receipt. `operation_resume` continues only the original retained private-repository setup, not commands or replacement repositories.
 
-`operation_resume` explicitly continues only the retained private-repository setup identified
-by its original repository-create operation reference. It does not rerun commands or create
-another repository. Read-only collection remains `operation_get`.
-
-`file_read` returns complete UTF-8 characters, a checked whole-file reference and optional
-continuation. Read by lines or returned cursor. `file_create` requires an absent path;
-`file_replace` checks complete expected text or an observed file reference. `file_patch`
-matches old/new text against one original, without caller-computed byte offsets or hashes.
-`file_upload` requires a native descriptor and an explicit create path or checked replacement
-target. `file_download` publishes the complete file by path, deriving its name and media type
-when omitted; no separate stat is required. `file_preview` returns validated native image
-content. Explicit windows bound observations without imposing a command work deadline.
+File reads return complete UTF-8 characters and checked references/cursors. Create requires absence; replacement checks complete expected text or an observed reference; patches match text against one original without caller-computed offsets or hashes. Upload needs a native descriptor and explicit create/checked replacement target. Download publishes the complete file, not just an observed prefix. Observation windows do not impose a command deadline. See [workspace and file troubleshooting](/docs/integration/troubleshooting/) and [workspace patterns](/docs/patterns/workspace/).
 
 ### Workflow discovery and execution
 
-`list` returns only workflows accessible to the authenticated user. Search, visibility, ordering, and pagination filters are combined; `total` describes all matches, not only the returned page. Every response includes the effective `offset` and `limit`, `returnedCount`, and `hasMore`. When another page exists, pass `nextOffset` as the next request's `offset`; the terminal page returns `nextOffset: null`.
+Follow the [Agent Guide](/docs/integration/agent-guide/) for prepare/execute, current Step attempt identity, exact replay, stale reconciliation, input schema and metadata revisions. Use [Troubleshooting](/docs/integration/troubleshooting/) for diagnose/recover; recovery cannot replay effects, reopen a terminal run or bypass a healthy execution's step.
 
-All tools publish root-object input schemas. Workspace purposes each have their own strict schema;
-unknown or mixed-purpose fields are rejected before dispatch. Workflow `start` still exposes
-`action` for its prepare/execute phases and validates the selected phase exactly.
+A step response is evidence of stored execution state, not proof that the agent performed its directive. A missing value, an empty value and a rejected answer are distinct. Materialize archive custody, owner collection, fallback and completion are specified in [Materialize](/docs/reference/materialize/). Task names and one-use progress image grants are specified in [Workflows](/docs/concepts/workflows/).
 
-`start({ action: "prepare" })` resolves and validates an authorized workflow, binds the workflow version and request options, and returns a Start attempt ID that expires after 15 minutes without creating an execution. `parentExecutionId` links a child to an existing parent; use `"none"` for a standalone execution. `skipNotificationCheck` records a policy to bypass only optional ordinary-notification preflight during execute. `skipTelegramCheck` remains a deprecated alias with the same behavior, and conflicting values are rejected.
+### Stopping an execution
 
-`start({ action: "execute", startAttemptId })` revalidates mutable workflow, parent, account, lock-delivery, and communication preconditions before consuming that exact reservation. A `user-notification` workflow with no configured channel returns channel-neutral Settings guidance; a legacy `telegram-notification` workflow returns Telegram setup guidance. A workflow containing a lock node always requires a valid Telegram bot token and chat ID for the current user; neither skip field bypasses trusted PIN delivery. A failed mutable precondition stores one replayable `START_PRECONDITION_CHANGED` receipt and creates no execution. Success returns the Process ID, first Step attempt ID, and first directive. A duplicate execute call replays the exact stored response and cannot create another execution; a separate preparation is an intentional separate start.
-
-`step` requires both the Process ID and Step attempt ID from the current presentation, even when the node accepts empty input. The attempt identifies the presented step; it is not workflow input. Submitting the same attempt with the same input returns its durably stored result without applying the transition again. Concurrent identical calls coalesce behind one owner: duplicates either receive that owner's stored receipt within the bounded wait or receive `ATTEMPT_PROCESSING`; the handler is not executed sequentially for each duplicate. A different input for a completed attempt, an attempt from another execution, and an older attempt after the process has advanced are rejected.
-
-`ATTEMPT_PROCESSING` means another caller still owns the mutation; retry the same attempt and input. `ATTEMPT_STALE` is rejected before handler work: automatically read `session({ action: "current_step", executionId })` and retry the intended submission once with the returned Step attempt ID. `ATTEMPT_CONFLICT` is rejected because that attempt is already bound to different input: automatically read `current_step`, discard the conflicting attempt, and continue from the returned directive and schema without replaying its old input. A step-level `ATTEMPT_INVALID_OR_EXPIRED` that explicitly directs the caller to `current_step` uses the same state-refresh recovery; discard the unavailable attempt. An unavailable start attempt does not provide this recovery. `ATTEMPT_OUTCOME_UNKNOWN` means an external effect may already have happened, so inspect the returned Process ID and do not automatically retry. An owner may retire a blocked execution with its current revision through `session({ action: "cancel-execution", executionId, expectedRevision })`. Each later paused presentation has a new attempt ID. A workflow may expose named teleport entries; teleporting and ordinary node input are mutually exclusive. If input contains the reserved `execution_note` field, Moira updates the execution note shown in execution lists. Tool failures remain failures and are not rendered as successful steps.
-
-`session` is scoped to executions owned by the current user. It can inspect the current user, list or inspect executions, repeat the current step without advancing it, diagnose why a paused run cannot continue, update an execution note or parent, manage caller-owned reminders, inspect or update declared runtime variables subject to workflow policy, read progress or request a one-use progress-image download, raise the agent's question to the user, and deliver a paused materialization node's files into the response when this host cannot run the presented command. `await-user` is for the moment an agent cannot continue without the user: it records `question` (up to 500 characters) and optional `options` (up to four choices) on the running execution, bound to the step the run stands on, so the run is shown as waiting for the user with that question, and the user is notified through their notification channels with the question, its choices and a link to the run (a new question sooner than ten minutes after the previous notification is held until then); the user answers the agent in its chat, not in Moira. A new call replaces the question and `resolve: true` clears it. The agent's next step (accepted or refused), a variable it sets with `set-variable`, recovery, cancellation and completion clear it too, and so does the run leaving that step; a person's edit on the run page does not. The call does not change the step revision, so the presented Step attempt stays valid, and `execution_context` returns the open question as `awaitingUser`. After an interruption, `current_step` returns the authoritative current presentation and its Step attempt ID. If a paused execution has no persisted Step attempt, `current_step` creates a bound presentation without executing or advancing the node. It also repairs a presented attempt whose only stale binding is the execution revision. A live attempt bound to another node, or to a continuation surface the current definition no longer has, returns `CURRENT_PRESENTATION_STALE`; its old ID is not recommended or replayable, and the error points at `diagnose`. `diagnose` reports whether a paused run can still continue against the workflow as it stands and names every reason it cannot — the node it is on and whether that node still exists, which facts of its continuation surface changed, which references the presented step cannot resolve from the context, a recorded execution error, and an attempt that is foreign, unbound or not presented. Each cause says whether it `blocks`: a blocking cause means the run cannot reach its next step without repair, while a non-blocking one — a missing or revision-stale presentation, an attempt another caller is executing, an unresolved reference, a recorded error — explains what you are seeing while the run stays usable. `continuable` is true when no cause blocks. The action changes nothing, and a healthy run reports itself continuable with no causes. `recover` then returns such a run to a step it can resume from: give it `nodeId` for a node a run can wait on — an agent-directive, teleport, materialize, lock or subgraph node — and `variableValues` for what that step needs, and it moves the run there, writes those values into the context and presents the node afresh, so the next call is an ordinary `step()`. It is refused for a run that is already over: a completed or cancelled run stays finished, since recovery repairs a run that is trying to continue and cannot, and `diagnose` still explains why such a run cannot continue. Among runs that are still going, it is refused unless `diagnose` reports at least one blocking cause — a healthy run is refused on purpose — and every refusal leaves the run untouched and names what to call next. Both outcomes are audited, the refusals as well as the repairs. The continuation surface is what the paused step still depends on: everything that node declares except how it is displayed (including a `humanGate` mark, which only changes who the run is shown as waiting for), plus the registry entries for the global variables it declares as inputs. An updated workflow therefore leaves a paused run usable unless the change reaches it — a new version, new tags, a rewritten description, an edit to another node, or a purely cosmetic change to the paused node all leave it usable.
-
-For an agent-directive step whose expression reads a saved top-level variable absent from the execution, `diagnose` reports `missing_expression_variables` as blocking when Moira can establish that no answer field accepted by both the input schema and the node's top-level output declaration can supply the value, and the node has no authored error route. An open input schema alone does not make an undeclared answer field usable. A declared output field also cannot supply the value if the input schema forbids it, for example with `maxProperties: 0`, a false property schema, or a prohibition inside `allOf`. For schema constraints Moira cannot establish as a prohibition, the field remains answer-capable and an invalid answer must be corrected normally. A failed `step` caused by that missing read and `current_step` point the agent to `diagnose` and `recover`. Supply the named values through `recover` with the current `nodeId`; declared variables must match their registry schemas. Recovery refuses missing or invalid values without changing the execution. A successful recovery presents the same node with a fresh Step attempt ID; submit the step's ordinary answer to continue. A malformed answer or an expression error caused by answer data remains retryable, even when diagnosis also names a later missing saved value; correct the current answer error first. An authored error route still runs as defined. A historical recorded error alone does not make a healthy run recoverable.
-
-During ordinary progression, an original `step` advances the execution revision when it persists workflow state; `stop-execution` also advances it once when ending the run. Parent, reminder, note, and runtime-variable mutations do not advance it or invalidate the current Step attempt. Parent, reminder, and runtime-variable writes require both `expectedRevision` and the corresponding opaque revision returned by `execution_context`, `reminders`, `variables`, or the previous mutation (`expectedParentRevision`, `expectedRemindersRevision`, or `expectedContextRevision`). These target revisions prevent an older metadata snapshot from overwriting a newer one within the same step generation. Parent changes accept `"none"` to detach, require same-owner running executions, and reject ancestry cycles. Reminders do not change the workflow plan or grant authority; active reminders are returned when an execution completes. Runtime variable writes are default-deny, must satisfy the variable schema, and never advance the graph. A write whose revision is no longer current is rejected before anything is written; its `AGENT INSTRUCTIONS` tell the caller to re-read that state and retry with the current revisions, without involving the user.
-
-For a paused materialize node, `current_step` returns a five-minute archive command rather than
-file bodies. Run it as issued, then complete the step with `null` or `{}` after extraction succeeds.
-The first materialize archive request resolves authorized text and pins the selected paired
-controller's complete identity plus an original publication request ID. Repeating the same
-five-minute grant collects that publication without resolving sources, rendering or submitting again.
-Its bytes remain immutable if the workflow definition changes. An absent or unconfirmed original
-returns HTTP 409 with `COMMUNICATION_OUTCOME_UNCONFIRMED` and `request_id`; collection never replays.
-A completed owner error returns HTTP 422, and an unavailable controller returns HTTP 503 with
-`COMMUNICATION_OWNER_UNAVAILABLE`. Obtain a fresh current-step presentation only for a separate
-explicit retry. Current user/node/context checks remain required. The `materialize` text fallback
-requires no file owner and keeps its separate 256 KiB observation budget.
-
-`update-task-title` establishes or renames the owner's active task independently of arbitrary notes.
-Read `execution_context` and pass its `revision` and `metadataRevisions.taskIdentity` as
-`expectedRevision` and `expectedTaskIdentityRevision`. The normalized nonempty title is bounded to
-500 JavaScript string code units; Unicode control/formatting characters are rejected before trimming.
-Both guards apply even to an identical normalized name, whose successful no-op changes no activity
-or events. Naming preserves the step attempt and other metadata. Completed/stopped runs refuse it.
-See [execution task naming](/docs/concepts/workflows/#execution-task-name) for the call and fallback.
-Progress reads without an authored process return `source: "metadata"`, not invented blocks or an
-error; authored projections retain `source: "trace"`.
-
-Recovery to a materialize target keeps that node paused for delivery. Its grant resolves current
-registry defaults; context changes alone do not refresh caller files. Execute the delivery before
-completing the node.
-
-Progress-image grants require authored progress and bind the execution owner, workflow version,
-step revision, context revision, independent task identity revision and normalized render options.
-A rename, including a same-clock change back to the original text, invalidates a prior grant.
-Stale redemption does not successfully consume it; obtain a fresh grant, also when its identity
-binding is absent. Failed rendering or HTTP delivery releases reservation; successful response
-completion consumes the grant once.
-Rendering requires a paired controller with an active registration. Supply `device_id` when several
-are registered, even when only one is online; omission requires exactly one registered owner.
-Actual dispatch checks availability without substituting another controller. `COMMUNICATION_OWNER_UNAVAILABLE` is an
-operational HTTP 503 from mint/public read and a coded MCP failure. Connect that controller rather
-than recreating a VM. The one-use progress URL is distinct from the repeatable owner publication;
-an error response finishing does not consume the progress grant. Ordinary progress reads and text
-notifications need no file owner.
-
-### Stopping a run
-
-Use `session({ action: "stop-execution", executionId, expectedRevision, reason })` when the user
-cancels a running workflow or wants to continue outside it. Use the current `execution_context`
-response's `revision` as `expectedRevision`. The caller must own the execution, and `reason` must contain 1–500
-characters after trimming. The operation permanently ends the run, records `stopReason`, clears
-its waits and advances its revision once; it does not report successful task completion.
-Pending notifications are superseded, but a notification delivery already begun may finish.
-
-An execution operation still in progress, including recovery or a run-page answer, prevents stopping; wait for it to
-finish and reload the context. A stale revision or an already finished run is refused without a
-change. Repeating the successful stop with the original revision and the same trimmed reason
-returns the same result without another write. `execution_context` and `executions` expose
-`stopReason`; the overview displays these runs as **Stopped**, hidden in its default active view
-even when they are children. Select **Stopped** or **All** to find them. An active child of a
-stopped parent remains active and is shown independently with its parent link.
-
-`cancel-execution` remains the separate operation for retiring a blocked start.
+Use the Agent Guide's [guarded stop operation](/docs/integration/agent-guide/#stopping-a-workflow) for cancellation of a running workflow. It records a permanent stopped result, not successful completion, and does not stop active child runs. `cancel-execution` is for a blocked start; it is not a substitute for stopping a running execution.
 
 ### Workflow definitions and reconciliation
 
-`manage` resolves workflow identities only within the caller's access. Create and edit validate the resulting definition before persistence. An existing identifier is overwritten only when explicitly requested; edit rejects empty changes, missing or duplicate nodes, and invalid resulting graphs.
-
-The `get` action returns the workflow's complete authored metadata, variable registry, runtime policy, progress projection, reminder, and structural facts. `includeNodes: false` omits only node definitions, while `includeValidation: false` omits only validation results. Use `list-nodes` for compact discovery, `get-nodes` for a selected batch, `analyze-variables` for definition-wide variable usage, and `set-visibility` to change an owned workflow between public and private.
-
-Node search uses bounded RE2-compatible expressions when the query contains regular-expression syntax and falls back to case-insensitive literal search for malformed or unsupported patterns. Cloning rejects a missing source or duplicate target identifier. Moving changes array order without rewriting authored connections and rejects a result that no longer validates.
-
-Workflow variable operations act on the definition's declared `variableRegistry`. Sharing and invite creation, listing, and revocation require owner authority. Failed mutations return an MCP error without partially applying the requested change.
-
-`reconciliation` handles conflicts among the previous bundled workflow, the current database workflow, and the incoming image workflow. Status is visible to agents but exposes full candidate states only to administrators; candidate retrieval and resolution are administrator-only. Resolve conflicts semantically through Workflow Management Flow—do not mechanically merge graph JSON.
+The Agent Guide owns [definition reads and mutations](/docs/integration/agent-guide/#reading-and-changing-definitions), pagination and administrator reconciliation. Definition mutation is not workflow execution. Use [Workflow Management Flow](/docs/reference/workflows/workflow-management-flow/) for semantic authoring and conflict resolution.
 
 ### Locks
 
-`lock` accepts only executions owned by the caller. Status returns the active lock, list returns public lock history, and unlock validates the supplied PIN against the active record. MCP lock creation requires a running execution with no active lock and valid Telegram settings for the current user. It sends the generated PIN only to that configured chat and returns non-secret lock metadata after delivery succeeds. Missing or invalid settings and send failure leave no usable active lock from that attempt; MCP responses and errors never include the PIN.
-
-The separately authenticated Web lock-creation route presents its one-time PIN to the human execution owner. That human response is not available through MCP or workflow-node output.
+A MCP lock belongs to the current user and requires a running execution and trusted Telegram delivery. No skip flag bypasses PIN delivery; failed delivery leaves no usable active lock. MCP responses never disclose the PIN. The separate authenticated Web creation response shows it once to the owner. See [lock nodes](/docs/concepts/nodes/#lock-node).
 
 ### Settings and notes
 
-`settings` reads one exact `key`, one `category`, or the complete accessible set. Do not combine `key` and `category` in a get request. Definitions include database-backed settings and settings declared by installed extension manifests. Encrypted values are always masked: database-backed values use `[encrypted]`, while extension values use a bullet mask that retains only the last four characters. Admin-only values and definitions are hidden from non-admin users. Setting a value requires an existing definition and enforces administrative restrictions, the declared type, optional JSON Schema validation, the declared minimum and maximum of a built-in number setting, encryption, and Telegram webhook registration when a bot token is saved. A structured JSON value must round-trip without values being omitted or transformed. Extension defaults must satisfy the same type and schema before the manifest is accepted. Listing returns the currently available definitions rather than stored values; removing an extension hides its definitions but keeps its per-user values for a later reinstall.
-
-`notes` stores user-isolated, versioned text. Reads may select a retained version; deletion is soft. Save enforces the configured per-note size, total storage, retained-version, key, and tag limits. Administrators may change the active storage limits.
+The Agent Guide owns [setting selectors, masking and validation](/docs/integration/agent-guide/#settings). Masked secrets are not replacement values. [Notes](/docs/concepts/notes/) owns versioned user-scoped text, soft deletion and configurable storage/version/key/tag limits.
 
 ### Playbooks
 
-`playbooks` keeps named, reusable behaviour text — a review standard, a tone of voice, a definition
-of done — in one place instead of inside the workflows that rely on it, so the same text can be
-edited once and read by an agent wherever it is needed.
+[Playbooks](/docs/concepts/playbooks/) are named reusable behavioral text. Publication grants authenticated reading of the owner's text, not mutation rights. Names are scoped to an account; saving or restoring creates a revision subject to configured retention and size limits. Name another owner's handle or ID explicitly when reading their public playbook.
 
-A name uses lower-case letters, digits and hyphens and is unique inside one account; writing under a
-name another user also has creates your own playbook rather than changing theirs. Every save writes a revision, `restore` writes a new revision
-carrying the older text, and `compare` reports the difference between two of them line by line.
-Revisions are kept up to the configured retention, and content is bounded per playbook.
+### Public artifacts and workflow files
 
-`visibility` publishes a playbook or makes it private again. A published playbook is readable by any
-signed-in user who names its owner and changeable only by its owner: publishing shares the text, not
-control over it. Reading somebody else's published playbook means naming them through `owner`, by handle or by user
-id.
-
-### Hosted artifacts and workflow files
-
-`artifacts` manages public static HTML outputs with per-user count and storage quotas, per-file size limits, and expiry. Upload may associate an artifact with an execution; update and delete require ownership. The token operation creates a one-use HTTP upload grant for external upload clients. Administrators may change active quotas globally or per user.
-
-`token` is reserved for file-based workflow import and export. Upload grants accept a workflow JSON file as multipart form field `workflow`; download grants require an authorized workflow. Both are short-lived. Use `manage` for ordinary workflow inspection and mutation.
-
-For an upload grant returned by `token`, submit the selected file to its `uploadUrl`:
-
-```bash
-curl -X POST "${uploadUrl}" -F "workflow=@your-workflow.json"
-```
+[Artifacts](/docs/concepts/artifacts/) owns public static HTML, upload grants, expiry, user quotas and ownership. Use `token` only for short-lived workflow JSON import/export grants; multipart upload uses field `workflow`. Ordinary workflow inspection and mutation use `manage`.
 
 ### Development codespaces
 
-Choose one provider for discovery; another provider or billing does not delay its response:
-
-```javascript
-workspace_list({ provider: "local-sandboxes" });
-workspace_list({ provider: "local-sandboxes", view: "diagnostics" });
-workspace_list({ provider: "github-codespaces", view: "history" });
-workspace_targets({ provider: "github-codespaces" });
-```
-
-The default `actionable` view contains current useful environments, including known incomplete
-setup. `diagnostics` exposes uncertain or unavailable owned identities with safe errors and
-original-operation references; `history` contains confirmed retired environments.
-`has_diagnostics` signals preserved diagnostic identities outside the ordinary list.
-An unavailable identity supports observation and original collection without an invented state,
-machine or lifecycle generation. A selected-provider failure remains explicit, not a healthy
-empty list. Changing views never deletes identities or retries their effects.
-
-`workspace_targets` requires the same provider selection. Local targets include observed controller
-contact status without awaiting GitHub installations. GitHub targets include registered controllers
-and eligible personal installation choices; registration alone does not certify reachability.
-
-Use `workspace_create` with a returned target and branch. `workspace_lifecycle` starts,
-stops or resumes incomplete Local or GitHub setup against its captured workspace reference.
-`workspace_adopt` assigns an observed GitHub environment to an explicitly selected controller;
-`workspace_adopt_external` prepares an owned environment by its known provider name.
-`workspace_delete` requires `confirm_delete: true` and the captured reference.
-A conflict requires `workspace_observe` and a new decision, never automatic precondition refresh.
-`workspace_setup_help` explains missing configuration without provisioning.
-
-A Local environment has its own VM and persistent files; one repository can have several VMs.
-Current owner permission and exact repository grants remain required. Owner settings govern
-Local resource admission. CPU/RAM/Docker defaults affect new VMs, not existing admitted profiles.
-GitHub requires current account/App grants, personal billing and the explicitly selected paired
-controller. Controller discovery uses registration, not an availability fallback.
-The controller saves the machine and idle/retention choices before cloud submission; cloud Moira
-brokers fixed provider calls with current authority and billing checks.
-Provider idle policy applies to new GitHub Codespaces: disabling auto-stop requests GitHub's
-240-minute maximum, not unlimited uptime. A silent command can be interrupted by provider idle stop.
-
-`resume_setup` continues the same proved incomplete environment after repairing its prerequisite.
-GitHub continuation requires the original generation, measured root, guest life and release;
-it neither reinstalls the service nor starts the provider. An enrolled guest renews authority
-after a cold start before reconnecting remotely, while its Unix API is already usable. A
-never-enrolled guest cannot mint replacement setup proof after its life changes.
-Ordinary start and custody acknowledgement are separate. Unknown creation remains collection of
-the original operation, not permission to replace a VM. Guest Unix readiness is independent of
-remote enrollment; MCP work additionally needs its authorized live route. The observed remote
-state can be unconfigured, enrollment unavailable, connecting, connected, unavailable or refused.
-Temporary loss reconnects; confirmed refusal retires remote authority. Neither replays commands.
-
-`repository_admit` requests existing-private admission through a returned controller and GitHub
-repository ID. `repository_create` uses that controller, a returned installation and a name.
-Current owner delegation and verified personal-account grants remain mandatory. Agents cannot
-change that consent or supply rights. An incomplete creation retains its original operation and
-confirmed GitHub identity. Repair installation/permission prerequisites, inspect with
-`operation_get`, and explicitly continue with `operation_resume` when instructed; do not
-create another repository. Unknown creation uses its retained marker, never unrelated name adoption.
-
-Scoped Git/PR work uses derived credentials while original OAuth/refresh credentials remain
-server-side. Ordinary Git fetch/push follows repository rights. `pull_request_create` returns
-an operation; collect it after uncertainty and use `pull_request_read` with head/base or number
-before deliberately creating another PR. Credential custody or disposal uncertainty is not a
-confirmed refusal. Preserve the returned original and follow its security-collection guidance.
-Tokens are never project files, command arguments, environment values or tool results.
-
-Commands, sessions and complete output belong to the common guest owner and its persistent
-journal. Cloud routing has no offline command queue or separate result copy. Loss of observation
-does not cancel a command; provider stop can interrupt it. `timeout_seconds` is explicit,
-and output windows do not limit retained output. Cancellation remains pending until physically
-proved. Named sessions must be explicitly opened or continued and cannot be assumed to survive
-guest restart. File changes use confined descriptors, checked originals and atomic transactions;
-interrupted recovery preserves uncertainty and foreign changes.
-
-Native input streams directly to the owner without base64 or cloud attachment storage.
-Operation identity, input digest/comparison metadata and original results remain retained.
-After a matching terminal result and settled readers, the owner can remove a verified temporary
-native/stdin copy; live, unknown or conflicting work retains it. Complete command output remains,
-and collection neither reacquires that source nor repeats the action.
-Repository authority is checked before acquisition, and final owner admission can still refuse
-prepared input. File/output continuation preserves complete UTF-8 characters. Binary files require
-download rather than lossy text decoding. Download returns an immutable resource link and
-publication reference with size, digest and expiry; a bound never publishes a prefix as a full file.
-Preview validates the complete PNG/JPEG container, not decoded pixels. Explicit observation
-bounds, actual storage capacity, filesystem ownership, current authority and real provider
-limits remain; there are no generic command runtime, output or file-transfer quotas.
+Choose one provider for discovery; unrelated providers or billing must not delay it. Use returned references and current permissions for lifecycle operations, repository admission and Git authority. Never substitute a reachable controller for the selected registered owner. Idle/provider limits and provider diagnostics are explained in [Self-hosting](/docs/getting-started/self-hosting/) and [Troubleshooting](/docs/integration/troubleshooting/).
 
 #### Direct guest terminal access
 
-The installed `moira-workspace` CLI uses the same private Unix owner and purposes.
-Use `--help` for supported options:
-
-```bash
-moira-workspace exec -- npm test
-moira-workspace get "$OPERATION_REF"
-moira-workspace output "$PROCESS_REF" --stream stdout
-moira-workspace read README.md
-moira-workspace patch README.md --old "Old text" --new "New text"
-```
-
-Copy returned references into later calls. Each deliberate mutation is a new intent; there is no
-caller-supplied request ID or automatic replay. `find` discovers retained originals for explicit
-selection. `native-upload`, `exec --native-stdin` and `deliver --native` read the native
-descriptor from stdin, never argv. Files and PRs use checked references and meaningful
-parameters; publication and delivery remain distinct. Local-only execution does not require cloud enrollment,
-but cloud collection still needs a registered authorized owner.
-Detached guest daemon diagnostics rotate separately in
-`~/.local/state/moira/workspace-service/daemon.log`, `daemon.log.1` and `daemon.log.2`, each bounded
-to 1 MiB. This does not trim command stdout/stderr; use the returned process reference and
-`output` or `process_output` for those full streams.
-Installation through the common image or Feature is described in
-[self-hosting](/docs/getting-started/self-hosting/#connect-local-codespaces).
+Use the supported guest CLI for an authorized codespace. Preserve full operation output and daemon diagnostics rather than inferring success from a shell exit or the existence of a workspace. `resume_setup` continues the same proven guest lifetime; it does not authorize VM replacement. See [Troubleshooting](/docs/integration/troubleshooting/).
 
 ### Runtime help
 
-`help` discovers file-backed topics from the installed MCP help corpus and lists the direct `tools` topic alongside them. Call it without a topic to see the current topic names and aliases. Multiple requested topics are returned together with separators. The `tools` topic and its `tool` alias render the same typed catalog shown above directly from the registry.
+`help()` discovers English topics and aliases; `help({ topic: "tools" })` renders this same typed catalog. It is not a reader of effective database-overridden system instructions. See [Agent Instructions](/docs/integration/agent-instructions/) for the canonical file default.
 
-## Related
+## Related documentation
 
-- [MCP Agent Guide](/docs/integration/agent-guide/) — How to use MCP tools
-- [Troubleshooting](/docs/integration/troubleshooting/) — Common issues
+- [Agent Guide](/docs/integration/agent-guide/) — execution and tool-use procedures
+- [Troubleshooting](/docs/integration/troubleshooting/) — failures and uncertain outcomes
+- [Writing workflows](/docs/guides/workflow-creation/) — authored graph contracts

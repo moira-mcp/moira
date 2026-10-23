@@ -1,8 +1,6 @@
 /**
  * Workflow Mutation Service - Centralized workflow mutation with validation caching
  *
- * Issue #463: Performance optimization for workflow list
- *
  * This service is the SINGLE entry point for all workflow mutations:
  * - Create new workflows
  * - Update existing workflows
@@ -18,7 +16,7 @@
  */
 
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
-import { GraphValidator } from "@mcp-moira/workflow-engine";
+import { GraphValidator } from "@mcp-moira/workflow-engine/validation";
 import { unresolvedPlaybookReferences } from "./playbook-references.js";
 import type { PlaybookService } from "./playbook-service.js";
 import type {

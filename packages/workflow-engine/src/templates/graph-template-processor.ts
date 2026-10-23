@@ -12,14 +12,12 @@
 import type { ExecutionContext } from "../types/base-types.js";
 import { runPageUrl } from "../utils/notification-text.js";
 import { GraphTemplateProcessor as TemplateCore } from "./graph-template-core.js";
-import {
-  createLogger,
-  getNoteService,
-  getPlaybookService,
-  collectPlaybookReferences,
-  NoteNotFoundError,
-} from "@mcp-moira/shared";
-import type { NoteService, PlaybookService } from "@mcp-moira/shared";
+import { createLogger } from "@mcp-moira/shared/logging/logger";
+import { getNoteService, getPlaybookService } from "@mcp-moira/shared/services";
+import { collectPlaybookReferences } from "@mcp-moira/shared/services/playbook-references";
+import { NoteNotFoundError } from "@mcp-moira/shared/errors";
+import type { NoteService } from "@mcp-moira/shared/services/note-service";
+import type { PlaybookService } from "@mcp-moira/shared/services/playbook-service";
 
 export interface GraphTemplateContext {
   variables: Record<string, unknown>;
@@ -139,7 +137,7 @@ export class GraphTemplateProcessor extends TemplateCore {
       });
     }
 
-    // §10 Fix B: runtime guard (async path)
+    // Report residual placeholders after asynchronous template resolution.
     this.warnOnResidualPlaceholder(processed, context);
 
     // Step final: Restore escaped sequences to literal {{
@@ -241,8 +239,8 @@ export class GraphTemplateProcessor extends TemplateCore {
 
         if (playbook) {
           // Another account's text is data, not authoring: it may not be re-read as template
-          // syntax, or a published playbook would run as a template inside somebody else's run
-          // (§14). Your own playbook is authoring and expands as the rest of your definition does.
+          // syntax, or a published playbook would run as a template inside somebody else's run.
+          // Your own playbook is authoring and expands as the rest of your definition does.
           replacement =
             ownerId === context.userId
               ? playbook.content

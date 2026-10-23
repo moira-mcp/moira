@@ -8,7 +8,7 @@ import {
   decryptValue,
   maskEncryptedValue,
   generateEncryptionKey,
-} from "@mcp-moira/workflow-engine/utils/encryption.js";
+} from "@mcp-moira/shared/settings-encryption";
 
 describe("Encryption Service", () => {
   beforeAll(() => {
@@ -17,6 +17,21 @@ describe("Encryption Service", () => {
   });
 
   describe("encryptValue / decryptValue", () => {
+    it("decrypts persisted settings ciphertext with a 16-byte IV", () => {
+      const originalKey = process.env.TELEGRAM_ENCRYPTION_KEY;
+      // Synthetic fixture from the original 16-byte-IV AES-256-GCM settings format.
+      // Keep the persisted bytes fixed: generating them here would also accept a changed codec.
+      process.env.TELEGRAM_ENCRYPTION_KEY = "0123456789abcdef".repeat(4);
+      const stored =
+        "00112233445566778899aabbccddeeff:19b659e197717e975efdcaff15768413:306dd7346e992053dfeeff160185f8d8f25d0b654c59c964561528c3bb38564d17";
+      try {
+        expect(decryptValue(stored)).toBe("stored-settings-before-owner-move");
+      } finally {
+        if (originalKey === undefined) delete process.env.TELEGRAM_ENCRYPTION_KEY;
+        else process.env.TELEGRAM_ENCRYPTION_KEY = originalKey;
+      }
+    });
+
     it("encrypts and decrypts string correctly", () => {
       const plaintext = "test-bot-token-123456789";
       const encrypted = encryptValue(plaintext);

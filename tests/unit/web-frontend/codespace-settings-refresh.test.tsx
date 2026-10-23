@@ -213,7 +213,7 @@ describe("GitHub Codespaces Settings", () => {
     act(() => observeReadSession("discovery-owner", "before-suspension"));
     renderSettings(<GitHubCodespaceManagement />);
     await screen.findByTestId(`github-codespace-${CODESPACE_ID}`);
-    fireEvent.change(screen.getByTestId("github-codespace-ref"), {
+    fireEvent.change(await screen.findByTestId("github-codespace-ref"), {
       target: { value: "feature/suspended-draft" },
     });
     act(() => suspendReadSession());
@@ -256,7 +256,7 @@ describe("GitHub Codespaces Settings", () => {
       );
       renderSettings(<GitHubCodespaceManagement />);
       await screen.findByTestId(`github-codespace-${CODESPACE_ID}`);
-      const draft = screen.getByTestId("github-codespace-ref");
+      const draft = await screen.findByTestId("github-codespace-ref");
       fireEvent.change(draft, { target: { value: "feature/unsaved" } });
       fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
       current = {
@@ -1168,7 +1168,7 @@ describe("GitHub Codespaces Settings", () => {
     );
     renderSettings(<GitHubCodespaceManagement />);
     const row = await screen.findByTestId(`github-codespace-${CODESPACE_ID}`);
-    const branch = screen.getByTestId("github-codespace-ref");
+    const branch = await screen.findByTestId("github-codespace-ref");
     fireEvent.change(branch, { target: { value: "feature/draft" } });
     branch.focus();
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));

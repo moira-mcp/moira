@@ -13,7 +13,7 @@
  *   k6 run load-tests/k6/scenarios/settings-api.js
  *
  * Environment variables:
- *   BASE_URL - Base URL of target system (default: http://localhost:4201)
+ *   TARGET_BASE_URL - Base URL of the explicitly selected test system
  *   LOAD_TEST_SECRET - Secret for load test authentication
  *   LOAD_PROFILE - Load profile (light/medium/heavy/soak)
  */
