@@ -15,22 +15,20 @@ workflows/
 
 ## Startup reconciliation
 
-During container startup, Moira reconciles the complete filesystem catalog with the database and
-the previous bundled baseline before it mutates any workflow.
-
 Only `workflows/production/flows/` is an OSS catalog source. `workflows/examples/flows/` contains
 reviewed demonstrations that remain testable without being installed or advertised as production
 workflows. Personal exports and local backups must stay outside the repository; they are not
 examples and must never be added to either tracked directory. Private deployments supply their
 additional catalog through `WORKFLOWS_DIRS`.
 
-An upstream-only change updates the managed workflow. A user-only change is preserved. A two-sided
-change preserves the database workflow and records previous/current/incoming candidates for a
-semantic merge through Workflow Management Flow. Self-host remains available for recovery; SaaS
-preflight treats the same unresolved conflict as fatal. The conflict-free plan and baseline changes
-are applied in one SQLite transaction.
+Startup reconciles definitions with the database and previous bundled baseline. It preserves local
+intent and captures previous/current/incoming evidence for divergent changes. An unresolved workflow
+conflict blocks initialization, including self-host: ordinary application services remain stopped
+while the existing one-off reconciliation command supports recovery. Follow the
+[bundled catalog reference](../docs/reference/bundled-catalog.md) for identity, atomic application,
+conflict recovery, Playbooks and prompt reconciliation rather than bypassing startup guards.
 
 ## Documentation
 
-- Technical reference and operator commands: [docs/WORKFLOWS.md](../docs/WORKFLOWS.md)
+- File authoring and validation: [Workflow CLI](../docs/reference/workflow-cli.md)
 - User documentation source: [Workflow reference](../packages/docs/src/content/docs/docs/reference/workflows/index.mdx)

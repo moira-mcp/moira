@@ -6,7 +6,7 @@
  *
  * SINGLETON: First access to any getter triggers validation and logging.
  *
- * @see docs/deployment/ENVIRONMENT_VARIABLES.md
+ * @see docs/operator/configuration.md
  */
 
 import { createLogger } from "../logging/logger.js";

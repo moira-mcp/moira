@@ -27,6 +27,7 @@ import {
   getAppPrefix,
   getWebBackendPort,
   getNodeEnv,
+  getMcpServerVersion,
   metricsMiddleware,
   createMetricsServer,
   getMetricsPort,
@@ -494,20 +495,23 @@ class MoiraApiServer {
     this.app.use("/api/admin", adminUserSecurityRoutes);
     this.app.use("/api/admin", requireAdminRouteCapability, adminRoutes);
 
-    // Default route for API documentation
+    // Discovery entry points; each resource router owns its detailed operations.
     this.app.get("/api", (req, res) => {
       res.json({
         name: "MCP Moira Web UI API",
-        version: "0.1.0",
-        description: "REST API for workflow visualization and validation",
+        version: getMcpServerVersion(),
+        description: "HTTP API entry points; protected resources require account admission",
         endpoints: {
           health: "GET /api/health",
-          config: "GET /api/config",
+          config: "GET /api/health/config",
+          features: "GET /api/features",
+          currentUser: "GET /api/user/me",
           workflows: "GET /api/workflows",
-          folderWorkflows: "GET /api/workflows/:folder",
-          workflowDetail: "GET /api/workflows/:folder/:id",
-          workflowValidation: "POST /api/workflows/:folder/:id/validate",
-          folders: "GET /api/folders",
+          executions: "GET /api/executions",
+          nodeTypes: "GET /api/node-types",
+          notes: "GET /api/notes",
+          playbooks: "GET /api/playbooks",
+          artifacts: "GET /api/artifacts",
         },
         timestamp: new Date().toISOString(),
       });

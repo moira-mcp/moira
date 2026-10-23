@@ -36,6 +36,35 @@ const renderedText = (html: string): string => {
   return normalizeText(getTextContent(parse(html)));
 };
 
+const elements = (node: DefaultTreeAdapterMap["node"]): DefaultTreeAdapterMap["element"][] => [
+  ...(defaultTreeAdapter.isElementNode(node) ? [node] : []),
+  ...("childNodes" in node ? node.childNodes.flatMap(elements) : []),
+];
+
+const attribute = (node: DefaultTreeAdapterMap["element"], name: string): string | undefined =>
+  node.attrs.find((entry) => entry.name === name)?.value;
+
+const expectNativeTableOfContents = (html: string): void => {
+  const nodes = elements(parse(html));
+  const content = nodes.find((node) =>
+    attribute(node, "class")?.split(/\s+/).includes("sl-markdown-content"),
+  );
+  const toc = nodes.find((node) => node.tagName === "starlight-toc");
+  expect(content).toBeDefined();
+  expect(toc).toBeDefined();
+  const headings = elements(content!).filter((node) => /^h[23]$/.test(node.tagName));
+  expect(headings.length).toBeGreaterThan(0);
+  const links = elements(toc!).filter(
+    (node) => node.tagName === "a" && attribute(node, "href") !== "#_top",
+  );
+  expect(links.map((node) => decodeURIComponent(attribute(node, "href")!.slice(1)))).toEqual(
+    headings.map((node) => attribute(node, "id")),
+  );
+  expect(links.map((node) => normalizeText(getTextContent(node)))).toEqual(
+    headings.map((node) => normalizeText(getTextContent(node))),
+  );
+};
+
 describe("public MCP tool contract rendering", () => {
   test("real EN and RU routes render their tool contracts and default prompts", async () => {
     const docsRoot = path.resolve("packages/docs");
@@ -96,6 +125,21 @@ describe("public MCP tool contract rendering", () => {
         );
         const renderedSource = await markdown.render(renderPortableHelpTokens(source));
         expect(renderedText(html)).toContain(renderedText(renderedSource.code));
+      }
+
+      // Cover a long imported topic, ordered before/after fragments, the imported default
+      // prompt and ordinary authored MDX through the real Astro/Starlight build.
+      for (const prefix of ["docs", "ru/docs"]) {
+        for (const route of [
+          "guides/workflow-creation",
+          "getting-started/quickstart",
+          "integration/agent-instructions",
+          "reference/workflows/quick-task",
+        ]) {
+          expectNativeTableOfContents(
+            readFileSync(path.join(outputRoot, prefix, route, "index.html"), "utf8"),
+          );
+        }
       }
     } finally {
       rmSync(outputRoot, { recursive: true, force: true });

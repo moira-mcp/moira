@@ -309,6 +309,41 @@ list({ search: "test" })
 list({ visibility: "public", limit: 10 })
 ```
 
+## Reading and changing definitions
+
+For `list`, `total` counts the whole filtered query. Follow the returned `nextOffset` rather than
+inferring the next page from its length; `nextOffset: null` ends the listing. Filters apply together.
+
+`manage get` returns metadata, variable registry, runtime policy, progress and reminder definitions
+as well as structure. `includeNodes: false` omits only node definitions; `includeValidation: false`
+omits only validation results. Use `list-nodes`, `get-nodes` or `analyze-variables` for a focused read.
+Mutations validate the complete resulting graph before saving; a rejected mutation is not partly
+applied. Moving a node changes array order, not its connections. Cloning requires an existing source
+and an unused target ID. Node search supports bounded RE2-compatible expressions and falls back to
+case-insensitive literal matching for invalid or unsupported patterns. Visibility, access grants
+and invites require the appropriate owner authority.
+
+Reconciliation compares the previous bundled definition, current database definition and incoming
+image definition. Status is available to agents; full candidates and resolution require an
+administrator. Resolve semantic conflicts through Workflow Management Flow, not mechanical JSON merging.
+
+## Settings
+
+Read one exact `key`, one `category`, or all accessible settings; do not combine key and category.
+`list` returns currently available definitions, not stored values. Definitions come from the database
+and installed extension manifests. Administrator-only definitions and values remain hidden from
+other users. Database secrets return `[encrypted]`; extension secrets return a dotted mask with
+the last four characters. A mask is not a value to write back.
+
+Writing requires an existing definition and obeys its type, JSON Schema and built-in numeric bounds,
+administrator restrictions and encryption policy. Saving a Telegram bot token registers its webhook.
+Structured JSON must survive serialization and reading without data loss or coercion. Extension
+defaults pass the same type/schema checks before a manifest is accepted. Removing an extension
+hides its definitions but retains user values for reinstallation.
+
+For workflow JSON import/export use the short-lived `token` grants; upload uses multipart field
+`workflow`. Ordinary definition reads and mutations use `manage` instead.
+
 ## Common Patterns
 
 ### Start and Execute First Step

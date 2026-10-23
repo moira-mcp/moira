@@ -1,85 +1,42 @@
-# Project Structure
+# Project structure
 
-```
-mcp-moira/
-├── packages/                         # Monorepo packages
-│   ├── workflow-engine/              # Core workflow execution engine
-│   │   ├── src/                      # Engine source code
-│   │   │   ├── core/                 # Core execution components
-│   │   │   ├── handlers/             # Node type handlers
-│   │   │   ├── storage/              # File persistence
-│   │   │   ├── types/                # TypeScript definitions
-│   │   │   ├── validation/           # JSON Schema validation
-│   │   │   └── index.ts              # Public API exports
-│   │   └── tests/                    # Engine tests
-│   ├── mcp-server/                   # MCP HTTP protocol server
-│   │   ├── src/                      # Server source code
-│   │   │   ├── server.ts             # HTTP transport
-│   │   │   ├── tools/                # MCP protocol tools
-│   │   │   ├── cli/                  # CLI commands
-│   │   │   └── core/                 # MCP engine adapter
-│   │   └── tests/                    # MCP tests
-│   ├── web-backend/                  # Express Web API
-│   │   ├── src/                      # Backend source code
-│   │   │   ├── routes/               # API endpoints
-│   │   │   ├── services/             # Business logic
-│   │   │   ├── middleware/           # Express middleware
-│   │   │   └── types/                # Backend types
-│   │   └── tests/                    # Backend tests
-│   ├── shared/                        # Shared library (@mcp-moira/shared)
-│   │   └── src/                      # Config, types, services, MCP client data
-│   ├── local/                        # Companion, VM custody, grants and provider bootstrap
-│   │   └── src/                      # Host runtime and lifecycle boundaries
-│   ├── workspace-service/            # Shared Local/GitHub guest owner
-│   │   └── src/                      # Commands, sessions, guarded files, HTTP and CLI
-│   └── web-frontend/                 # React Web UI
-│       ├── src/                      # Frontend source code
-│       │   ├── components/           # React components
-│       │   │   ├── cards/            # Reusable card components (list + grid modes)
-│       │   │   ├── workflow/         # Workflow-specific components
-│       │   ├── services/             # API clients
-│       │   ├── types/                # Frontend types
-│       │   └── App.tsx               # Main app
-│       └── tests/                    # Frontend tests
-├── tests/                            # Cross-package integration tests
-├── workflows/production/             # Workflow definitions
-├── docs/                             # Documentation
-├── package.json                      # Workspace configuration
-├── tsconfig.base.json                # Base TypeScript config
-└── README.md                         # Main project documentation
-```
+The root [package.json](package.json) defines the npm workspaces in `packages/*`. Each package's
+manifest and export map define its supported entry points. Use [architecture and source ownership](docs/development/architecture.md)
+for dependency boundaries, authored types and application composition; this page locates the source.
 
-## Development Commands
+## Packages
 
-```bash
-npm install             # Install dependencies
-npm run docker:restart  # Build and run Docker
-npm test                # Run all tests
-npm run fix             # ESLint + Prettier fix
-```
+| Work area                                                                        | Source                                                                                   |
+| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Graph authoring, validation, execution and projections                           | [workflow-engine](packages/workflow-engine/)                                             |
+| Foundation primitives, application services, SQL repositories and authentication | [shared](packages/shared/)                                                               |
+| MCP transport, tools and portable help                                           | [mcp-server](packages/mcp-server/)                                                       |
+| HTTP routes and admission                                                        | [web-backend](packages/web-backend/)                                                     |
+| React editor, run views and browser state                                        | [web-frontend](packages/web-frontend/)                                                   |
+| Workflow definition CLI                                                          | [workflow-cli](packages/workflow-cli/)                                                   |
+| Astro/Starlight website and localized presentation                               | [docs](packages/docs/)                                                                   |
+| Paired host controller and VM lifecycle                                          | [local](packages/local/)                                                                 |
+| Common guest command, file, session and result owner                             | [workspace-service](packages/workspace-service/)                                         |
+| Extension contracts and isolated execution                                       | [extension-sdk](packages/extension-sdk/), [extension-runner](packages/extension-runner/) |
 
-## Package Architecture
+## Other owners
 
-### workflow-engine
+- [tests/](tests/): maintained root suites and fixtures. [TESTING-GUIDE.md](tests/TESTING-GUIDE.md)
+  owns commands; [COVERAGE-MAP.md](tests/COVERAGE-MAP.md) locates behavior coverage.
+- [workflows/production/](workflows/production/): bundled workflow and playbook catalogs. Use
+  [catalog reconciliation](docs/reference/bundled-catalog.md) and the [workflow CLI](docs/reference/workflow-cli.md).
+- [config/](config/): image build, ingress/service configuration and canonical prompt assets.
+  [scripts/](scripts/) owns build, startup, migration and maintenance entrypoints; supported commands
+  come from the root manifest and [contributor setup](docs/development/getting-started.md).
+- [docs/](docs/README.md): contributor, reference and operator documentation. User topics live in
+  [portable help](packages/mcp-server/src/help/content/), composed into the EN/RU website by the docs
+  package. [Documentation ownership](docs/development/documentation.md) explains the shared sources.
+- [examples/extensions/](examples/extensions/) and [extensions/](extensions/): extension examples
+  and the optional installation mount; see [extension authoring](packages/mcp-server/src/help/content/guides/writing-extensions.md).
+- [.github/](.github/): CI, release and contribution-policy automation. [CONTRIBUTING.md](CONTRIBUTING.md)
+  owns the contributor process.
 
-Core workflow execution logic with node handlers, storage, and validation.
-
-### mcp-server
-
-MCP HTTP protocol implementation with tools and CLI commands.
-
-### web-backend
-
-Express API server for workflow visualization and management.
-
-### web-frontend
-
-React UI for workflow visualization using Ant Design and React Flow.
-
-### local and workspace-service
-
-The companion owns Local VM lifecycle, repository grants and finite work authority.
-`workspace-service` owns commands, sessions, guarded file operations and durable results inside
-both Local VMs and GitHub Codespaces. The direct `moira-workspace` CLI uses its private Unix socket;
-remote MCP calls use authenticated live routing. Build the common programs with
-`npm run workspace:build` and the canonical owned-runtime payload with `npm run workspace:package`.
+The self-host Compose installation keeps application state in `./data`; workspace bytes and original
+operations belong to their separate owners. The contributor container is disposable. Follow
+[configuration](docs/operator/configuration.md) and [workspace custody](docs/reference/workspaces.md)
+rather than treating generated directories or source checkouts as durable production storage.

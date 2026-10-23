@@ -228,7 +228,7 @@ describe("public workflow selection surfaces", () => {
   it("does not advertise removed identities on live selection surfaces", () => {
     const liveSelectionText = [
       read("config/prompts/systemPrompt.md"),
-      read("docs/WORKFLOWS.md"),
+      read("docs/reference/bundled-catalog.md"),
       read("packages/docs/src/content/docs/docs/SYSTEM-PROMPT-RU.md"),
       read("packages/docs/src/content/docs/docs/reference/workflows/index.mdx"),
       read("packages/docs/src/content/docs/ru/docs/reference/workflows/index.mdx"),
@@ -239,7 +239,9 @@ describe("public workflow selection surfaces", () => {
     for (const slug of removedPublicSlugs) {
       expect(liveSelectionText).not.toContain(`moira/${slug}`);
     }
-    expect(read("docs/WORKFLOWS.md")).toContain("Do not maintain a copied catalog");
+    expect(read("docs/reference/bundled-catalog.md")).toContain(
+      "current authorized MCP discovery, not a copied list here",
+    );
   });
 
   it("keeps the workflow-template guide dynamic and its examples qualified", () => {

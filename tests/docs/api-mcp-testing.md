@@ -83,6 +83,46 @@ that text. Neither is a substitute for inspecting the complete SDK result when a
 native image content or block identity. Use `client.callTool` for those contracts and assert the
 actual error/result shape; do not assume all application refusals throw exceptions.
 
+## Account admission and retirement
+
+Test the actual protected route and registered MCP transport, rather than accepting an unknown
+endpoint's 404 as evidence that authorization worked. Establish that each owned credential works
+before changing the account, then observe its refusal afterward. [Shared account admission](../../packages/shared/src/auth/account-admission.ts),
+[HTTP middleware](../../packages/web-backend/src/middleware/auth-middleware.ts) and the
+[MCP server](../../packages/mcp-server/src/server.ts) enforce distinct stages:
+
+- A pending self-host account can read `/api/user/me` and sign out, while product/token/OAuth/MCP
+  access returns `ACCOUNT_APPROVAL_REQUIRED`. Approval and email verification are independent.
+- SaaS sensitive admission applies its email-verification gate. Do not infer universal verification
+  from an ordinary route that intentionally requires only session admission.
+- Blocking refuses new sign-in and use of existing credentials. Exercise browser session, OAuth
+  issuance/refresh or access, and persistent-token use when those are the changed boundary; a
+  successful session-revocation test alone proves none of the other paths.
+- Assert the expected status/code at the actual stage. Invalid/revoked credentials can fail before
+  account lookup, whereas a still-valid persistent credential reaches the blocked-account gate.
+  Blocking need not delete every API-token row to refuse that credential.
+- The block route can return `503 SCOPED_CREDENTIAL_DISPOSAL_PENDING` after the block is committed.
+  Verify blocked state and retained custody rather than treating it as rollback. Account deletion
+  has a separate pending-resource/credential `409` contract; refusal is not completed erasure.
+
+Use a non-admin credential for direct administrator API refusal, and inspect unchanged owned state
+when an unauthorized mutation is attempted. Deployment capability refusal and resource owner-use
+authority are separate from administrator role. Reuse [HTTP contracts](../../docs/reference/http-api.md)
+and [account operations](../../docs/operator/accounts.md), not a universal 401/403 rule for every
+endpoint.
+
+## Real MCP client acceptance
+
+The SDK helper proves its own registration, authorization and transport flow. Compatibility with
+an installed client requires explicitly authorized use of that actual client, current configuration,
+browser login/consent and a harmless tool call whose full result is inspected. A client reconnect
+must satisfy current catalog initialization and account admission; neither a visible tool list nor
+a stale cached result proves a request succeeded. Use the maintained client setup documentation
+instead of copying installation-specific configuration paths into this guide. Record the tested
+client and unresolved prerequisites without promoting a simulated or skipped provider flow to a
+pass. Native attachments additionally require exact bytes/metadata and their owner/lifetime
+boundary; text-only SDK results do not establish native delivery.
+
 ## Workflow execution
 
 Reuse `startWorkflowExecutionState(client, workflowId, options)` for public prepare/execute start.

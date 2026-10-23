@@ -65,7 +65,7 @@ configuration loader. Run them with the intended installation environment; outsi
 required host, authentication and encryption settings must be valid even when the definition has
 no custom nodes. The loader reads `.env.local` for `NODE_ENV=development` and `.env` otherwise,
 from `ENV_FILE_FOLDER` or the caller's directory. See
-[installation configuration](../deployment/ENVIRONMENT_VARIABLES.md) before selecting an environment.
+[installation configuration](../operator/configuration.md) before selecting an environment.
 Do not copy production credentials into an editing fixture.
 
 Without a usable snapshot, a custom type can be unresolved, rather than proven invalid or available.
@@ -111,7 +111,7 @@ Process commands set block ownership, boundary labels, explained returns and opt
 Node update options also support active progress overrides, human gates and notification settings.
 These commands retain their type-specific restrictions. `none` clears the fields that explicitly
 support it; it is not a general JSON-null syntax. See the command help and
-[workflow semantics](../WORKFLOW.md) for the relevant contract.
+[workflow semantics](../development/architecture.md#context-templates-and-validation) for the relevant contract.
 
 ## Backups and versions
 

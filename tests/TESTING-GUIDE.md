@@ -96,7 +96,7 @@ exact bytes, sessions, publication and restart collection; it does not establish
 vendor delivery or physical sbx isolation.
 
 Real sbx acceptance requires an explicitly approved disposable profile and repository on the
-supported platform described in [workspace documentation](../docs/CODESPACES.md). Verify mountless
+supported platform described in [workspace documentation](../docs/reference/workspaces.md#local-runtime). Verify mountless
 creation, usable guest Docker, exit/output and byte integrity, sessions/files across stop/start,
 continued work under ordinary live settings, and explicit disable/stop/emergency shutdown with
 settled ownership. Check absence of host file, credential and socket forwarding; classify documented

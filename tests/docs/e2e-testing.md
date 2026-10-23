@@ -53,6 +53,57 @@ Use the configured browser base URL and the resolver's fetch URL for Node prepar
 browsers can see a different host from the local Node process; do not hard-code a localhost port
 or assume `TEST_BASE_URL` redirects both. See [target selection](test-infrastructure.md#target-selection).
 
+## Account and session acceptance
+
+Choose cases for the changed boundary rather than treating every account check as manual-only.
+[cross-tab-authority.spec.ts](../e2e/cross-tab-authority.spec.ts) already exercises real shared
+cookies with controlled delayed observations. [ProtectedRoute](../../packages/web-frontend/src/components/ProtectedRoute.tsx),
+[session coordination](../../packages/web-frontend/src/auth/better-auth-client.ts) and
+[return URL validation](../../packages/web-frontend/src/utils/return-url.ts) own the behavior:
+
+| Case                                         | Observation that distinguishes correct behavior                                                                                                                                                              |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Login from a protected deep link             | Successful admission returns to the safe requested relative path; external/protocol-relative/traversal targets and prefix-aware login loops are refused.                                                     |
+| Logout or account replacement in another tab | Previously admitted private content is hidden while identity is unknown; the replacement account never sees the previous account's holdings.                                                                 |
+| Recheck confirms the same account            | Existing mounted content and drafts survive confirmation; an ordinary resource-level 403 does not sign the account out.                                                                                      |
+| A previous account's request finishes late   | Its success, failure, targeted revoke and redirect cannot overwrite new content or expire the replacement shared cookie.                                                                                     |
+| Session loss                                 | After authoritative session refusal, protected content stays hidden and sign-in remains usable. Removing a cookie tests missing credentials; server-side expiry or revocation needs its own controlled case. |
+| Ordinary user opens an administrator route   | No administrator content becomes visible; separately verify server refusal, since a browser redirect alone does not prove API authorization.                                                                 |
+| Administrator blocks a dedicated user        | Observe the actual UI action when that is the subject, then verify denied sign-in and existing access through the [API/MCP boundary](api-mcp-testing.md#account-admission-and-retirement).                   |
+
+Keep self-host approval, SaaS verification, administrator role and capabilities separate. Signup
+can issue a session while product access remains pending; feature hiding is not server enforcement.
+For forced reset, consent and invite completion, retain the initiating account and await settled
+session facts before asserting a redirect. Use owned users and avoid waiting days for expiry:
+controlled session state verifies that transition, while real elapsed/provider behavior is a
+separate acceptance claim. Contracts are in [authentication](../../docs/reference/authentication.md).
+
+## Browser and external acceptance
+
+A mocked provider or SDK OAuth fixture does not verify real Google/GitHub sign-in. When explicitly
+authorized, use a configured test installation with social login enabled and an owned provider
+account: exercise the actual button, provider consent, return, resulting account identity and
+admitted application session. Also inspect cancellation/refusal without assuming every refusal
+returns a successful login. Existing-email linking must follow the configured authentication
+policy; do not assume that matching email alone authorizes linking. The built-in self-host policy
+does not offer social login. [Better Auth configuration](../../packages/shared/src/auth/better-auth-config.ts)
+owns provider enablement; this is distinct from workspace GitHub App pairing.
+
+For changed email flows, verify the mode's expected action and actual received link with an owned
+mailbox when real delivery is authorized. Check verification/reset completion and rejection of the
+old password after reset; a test-log URL, provider acceptance or public `real` capability alone
+does not prove inbox arrival. Without real delivery, verify unavailable controls and the supported
+ordinary-user recovery path. Do not invent a fixed delivery time or exact subject as a release
+guarantee; use [account/configuration contracts](../../docs/operator/accounts.md).
+
+Inspect changed navigation, forms, tables and diagrams at relevant mobile/desktop widths,
+keyboard focus, theme and locale. Record the actual browser/device used; a Chromium pass does
+not establish Safari/Firefox/Edge compatibility. Landing/deployment presentation belongs to its
+source owner. For performance changes, select a representative owned dataset and observe the
+specific pagination, rendering or concurrent-request behavior; arbitrary historic item/time
+thresholds are not current product guarantees. Native/provider effects remain separately scoped
+below and in the [acceptance guide](../TESTING-GUIDE.md#native-and-provider-acceptance).
+
 ## Run and inspect
 
 ```bash

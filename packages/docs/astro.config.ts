@@ -18,6 +18,7 @@ import {
   lazyImagesRehypePlugin,
   portableHelpRemarkPlugin,
 } from "./src/utils/frontmatter";
+import { importedHeadingsRecmaPlugin } from "./src/utils/imported-headings";
 import {
   getBaseUrl,
   getMcpUrl,
@@ -403,6 +404,7 @@ export default defineConfig({
     processor: unified({
       remarkPlugins: [readingTimeRemarkPlugin, portableHelpRemarkPlugin],
       rehypePlugins: [responsiveTablesRehypePlugin, lazyImagesRehypePlugin],
+      recmaPlugins: [importedHeadingsRecmaPlugin],
     }),
   },
 

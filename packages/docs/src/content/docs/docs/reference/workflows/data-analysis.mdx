@@ -26,33 +26,13 @@ Provide the analytical question, the decision the result must inform, scope, aud
 | --- | --- |
 | Analyze datasets that are already supplied or explicitly authorized | **Data Analysis** |
 | Discover and verify external literature or web sources for a bounded answer | [Verified Research](/docs/reference/workflows/verified-research/) |
-| Develop a research direction through repeated exploration and refinement | [Verified Research](/docs/reference/workflows/verified-research/) |
-| Implement a product change, including its tests and documentation | [Software Development Flow](/docs/reference/workflow-templates/#software-development-flow) |
+| Implement a product change, including its tests and documentation | [Software Development Flow](/docs/reference/workflows/software-development-flow/) |
 
 <Aside type="note">
 Data Analysis does not grant access to a source merely because it appears in the request. Use it only for data the caller supplied or explicitly authorized. Use a research workflow when the primary task is finding external evidence rather than analyzing known datasets.
 </Aside>
 
 ## Process
-
-```mermaid
-flowchart LR
-    A[Capture contract] --> B[Frame problem]
-    B --> C[Acquire authorized sources]
-    C --> D{Usable evidence?}
-    D -->|Yes| E[Prepare data]
-    E --> F[Independent readiness review]
-    F -->|Findings| G[Repair, reacquire, or limit]
-    G --> C
-    F -->|Accepted| H[Analyze and synthesize]
-    D -->|No| I[Produce limited result]
-    H --> J[Independent result review]
-    I --> J
-    J -->|Findings| K[Repair at the owning layer]
-    K --> B
-    J -->|Accepted| L[Optional final approval]
-    L --> M[Deliver result]
-```
 
 The flow performs these connected responsibilities:
 
@@ -122,6 +102,5 @@ The terminal `analysis_result` records:
 ## Related
 
 - [Verified Research](/docs/reference/workflows/verified-research/) — bounded external-source research
-- [Verified Research](/docs/reference/workflows/verified-research/) — bounded external research with repeated independent critique
 - [PRD Creation](/docs/reference/workflows/prd-creation/) — reviewed product requirements informed by evidence
 - [Workflow Templates Overview](/docs/reference/workflow-templates/) — compare all public workflows

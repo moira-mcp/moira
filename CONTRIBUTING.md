@@ -10,14 +10,14 @@ By participating in this project you agree to abide by our
 
 ### Prerequisites
 
-- Node.js 24+
+- Node.js 24
 - Docker (for running the full stack and integration/e2e tests)
 
 ### Setup
 
 ```bash
 # Install dependencies (npm workspaces — installs all packages)
-npm install
+npm ci
 
 # Copy the example env and adjust if needed
 cp .env.example .env
@@ -36,9 +36,16 @@ npm test                 # full suite
 npm run test:unit        # unit tests (no Docker needed)
 ```
 
-See `tests/TESTING-GUIDE.md` for details on the test categories.
+See [getting started](docs/development/getting-started.md) for contributor setup and
+[the testing guide](tests/TESTING-GUIDE.md) for suite selection and required gates.
 
 ## Coordinate work through an issue
+
+Use the tracker for plans and unfinished work; do not add a repository backlog or handoff diary.
+Search existing issues and check the current implementation before opening another task. Describe
+the present problem, a reproducible example or evidence, the expected result and relevant scope.
+Separate confirmed behavior from hypotheses and decisions awaiting an owner. Keep private
+deployment, policy, custody and sensitive security details in their appropriate private channel.
 
 Before starting substantial implementation, find or open a GitHub issue and wait
 until maintainers have made it claimable. An issue is claimable only when all of
@@ -148,15 +155,14 @@ lifecycle state but must not be used by itself to reserve work.
    `packages/web-frontend/src/routes/routeTable.ts` with a screen tour or a written reason for
    having none; a new major control gets a step in its screen's tour. When you change a control a
    tour points at, or what a step says, decide whether the step's `revision` must rise, then run
-   `npm run guides:snapshot`. The unit checks fail until this is done (see `docs/WEB-UI.md`,
-   "Guides").
+   `npm run guides:snapshot`. See [Guides](docs/development/web-ui.md#guides).
 6. Run the test suite and make sure it passes.
 7. Update documentation if you changed user-facing behavior.
 8. Open a pull request against `master`, follow the policy below, use a closing
    reference to the claimed issue, and describe what and why.
 
 For engine or workflow-contract changes that can affect an execution already in progress, follow
-the [running-execution compatibility rule](docs/SYSTEM.md#running-execution-compatibility). Test an
+the [running-execution compatibility rule](docs/reference/execution.md#running-execution-compatibility). Test an
 execution started on the earlier definition against the updated workflow: it must continue through
 an ordinary step or authored error route, or have a blocking diagnosis, safe recovery, and a
 subsequent ordinary step on the same execution. If the change cannot affect an in-flight execution,
@@ -182,6 +188,20 @@ tolerant handling of unknown runtime JSON do not widen the authored union. For m
 the full graph after a real editor operation and save, and check the emitted browser bundle for
 accidental engine execution, storage or Node dependencies. Visible changes also need inspection in
 the running interface.
+
+### Resolve Git conflicts
+
+Establish the repository's actual target branch and authorized integration method before changing
+history; do not assume every repository uses `master` or permits a direct merge. Read both sides
+and their intended behavior, including dependent types, callers, tests and configuration. Resolve
+the combined result rather than selecting an entire side merely because it compiles. During a
+rebase, `ours` and `theirs` refer to different roles than during a merge.
+
+For a sequence of commits, account for what each introduces and what earlier conflict resolutions
+already retained. Preserve issue references, authorship and required DCO trailers. Review the
+resulting diff and run the checks that observe the affected behavior before continuing integration.
+If preserving both valid contracts requires a product decision, obtain that decision instead of
+discarding one. A backup does not authorize reset, force-push or branch deletion.
 
 ## Pull-request policy
 
@@ -318,7 +338,7 @@ secrets or manual steps are involved (the release uses only the built-in
 `GITHUB_TOKEN`; it creates tags/releases, never pushing to `master`).
 
 Self-host users upgrade simply by pulling the new image — see
-[Updating / Upgrading](README.md#updating--upgrading) in the README.
+[Update and recover](README.md#update-and-recover) in the README.
 
 **CI on pull requests** runs PR Policy, Security Checks, Lint, Unit, Integration,
 and a Docker build + API/MCP tests. The Playwright **E2E** suite is flaky on shared
@@ -332,12 +352,12 @@ By contributing, you agree that your contributions will be licensed under the
 
 ## Documentation changes
 
-Follow [portable help source ownership](docs/DOCUMENTATION-STYLE-GUIDE.md#portable-runtime-help-sources)
+Follow [documentation ownership](docs/development/documentation.md)
 for prompt defaults and translations, semantic MDX wrappers, and typed tool exports.
 
 When modifying the public documentation under
 `packages/docs/src/content/docs/`:
 
 - [ ] Page exists in **both** languages: `docs/` (English) and `ru/docs/` (Russian)
-- [ ] Page is added to the sidebar configuration
+- [ ] Its navigation is deliberate: sidebar entry or an intentional unlisted route
 - [ ] Internal links use the correct locale prefix (`/docs/` for EN, `/ru/docs/` for RU)

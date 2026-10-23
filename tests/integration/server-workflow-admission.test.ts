@@ -2,6 +2,7 @@ import { expect, jest, test } from "@jest/globals";
 import express, { type Application } from "express";
 import request from "supertest";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { eq, inArray } from "drizzle-orm";
 import { getDatabase, resetFeatureResolver, WorkflowRepository } from "@mcp-moira/shared";
 import * as schema from "../../packages/shared/src/database/schema.js";
@@ -18,6 +19,25 @@ const { MoiraApiServer } = await import("../../packages/web-backend/src/server.j
 const { userProfileRoutes } = await import("../../packages/web-backend/src/routes/user-profile.js");
 const { default: userOAuthSessionsRoutes } =
   await import("../../packages/web-backend/src/routes/user-oauth-sessions.js");
+
+test("API discovery reports the release and reaches the mounted configuration route", async () => {
+  const app = (new MoiraApiServer() as unknown as { app: Application }).app;
+  const discovery = await request(app).get("/api");
+  expect(discovery.status).toBe(200);
+  const release = JSON.parse(readFileSync("package.json", "utf8")) as { version: string };
+  expect(discovery.body.version).toBe(release.version);
+  expect(discovery.body.endpoints.config).toBe("GET /api/health/config");
+  const [method, configurationPath] = discovery.body.endpoints.config.split(" ");
+  expect(method).toBe("GET");
+  const configuration = await request(app).get(configurationPath);
+  expect(configuration.status).toBe(200);
+  expect(configuration.body.success).toBe(true);
+  expect(configuration.body.data.workflowDirectories).toEqual(["database"]);
+  expect(configuration.body.data.features.authentication).toBe(true);
+  for (const retired of ["folderWorkflows", "workflowDetail", "workflowValidation", "folders"]) {
+    expect(discovery.body.endpoints).not.toHaveProperty(retired);
+  }
+});
 
 test("mounted workflow list and sharing aliases consume one admission and one API quota while retaining denial", async () => {
   const app = (new MoiraApiServer() as unknown as { app: Application }).app;
