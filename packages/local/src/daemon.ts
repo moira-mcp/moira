@@ -231,7 +231,7 @@ export class LocalDaemon {
         // first would wait forever on a guest attachment whose owner is still held.
         await this.controllerOwner?.prepareMaintenance();
         await this.detached?.owner.prepareMaintenance();
-        await this.manager.release();
+        await this.manager.release(true);
       }
       retired = true;
     } catch (error) {
@@ -254,6 +254,10 @@ export class LocalDaemon {
       } catch (error) {
         failures.push(error);
       }
+    this.update(
+      failures.length ? "faulted" : "offline",
+      failures.length ? "LOCAL_CONTROLLER_SHUTDOWN_UNCONFIRMED" : null,
+    );
     if (failures.length === 1) throw failures[0];
     if (failures.length)
       throw new AggregateError(failures, "Controller shutdown remains unconfirmed.");

@@ -87,13 +87,15 @@ describe("Local controller survives observation loss without native replay", () 
       await attachment;
       drained = true;
     });
-    await new LocalDaemon(f.manager, f.relay, {
+    const daemon = new LocalDaemon(f.manager, f.relay, {
       ...f.options,
       wait: async () => {
         abort.abort();
       },
-    }).run(abort.signal, () => false);
+    });
+    await daemon.run(abort.signal, () => false);
     expect(drained).toBe(true);
+    expect(daemon.status).toEqual({ controlPlane: "offline", code: null });
     expect(f.controllerRetire).not.toHaveBeenCalled();
     expect(f.manager.stopWork).not.toHaveBeenCalled();
     expect(f.manager.close).not.toHaveBeenCalled();
@@ -201,14 +203,17 @@ describe("Local controller survives observation loss without native replay", () 
     f.controllerClose.mockRejectedValue(
       new LocalRefusal("LOCAL_CUSTODY_UNCONFIRMED", "Native custody remains pending."),
     );
-    await expect(
-      new LocalDaemon(f.manager, f.relay, {
-        ...f.options,
-        wait: async () => {
-          abort.abort();
-        },
-      }).run(abort.signal),
-    ).rejects.toBeInstanceOf(AggregateError);
+    const daemon = new LocalDaemon(f.manager, f.relay, {
+      ...f.options,
+      wait: async () => {
+        abort.abort();
+      },
+    });
+    await expect(daemon.run(abort.signal)).rejects.toBeInstanceOf(AggregateError);
+    expect(daemon.status).toEqual({
+      controlPlane: "faulted",
+      code: "LOCAL_CONTROLLER_SHUTDOWN_UNCONFIRMED",
+    });
     expect(f.controllerRetire).toHaveBeenCalledTimes(1);
     expect(f.controllerClose).toHaveBeenCalledTimes(1);
     expect(f.manager.close).not.toHaveBeenCalled();

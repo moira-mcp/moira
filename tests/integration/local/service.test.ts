@@ -246,7 +246,7 @@ test("a real CLI observer exits while the original owner endpoint and running in
   }
 });
 
-test("a Local startup prerequisite failure remains inspectable and releases the standalone management gate", async () => {
+test("a Local startup prerequisite failure retains controller exclusion until explicit maintenance pause", async () => {
   const f = await fixture(false, undefined, true);
   try {
     expect(await f.observe()).toMatchObject({
@@ -257,13 +257,27 @@ test("a Local startup prerequisite failure remains inspectable and releases the 
     expect(JSON.stringify(await serviceFailure(f.state))).not.toContain(
       "Private fixture diagnostic",
     );
+    await expect(f.state.lock({ recoverStale: true })).rejects.toMatchObject({
+      code: "LOCAL_ALREADY_RUNNING",
+    });
+    expect(await f.records.get(f.space.id)).toEqual(f.space);
+    const id = requestId();
+    await serviceRequest(f.state, "POST", "/v1/service/maintenance", {
+      requestId: id,
+      release,
+      action: "pause",
+    });
+    while ((await collectServiceMaintenance(f.state, id))?.phase !== "paused") await nextTurn();
     const unlock = await f.state.lock({ recoverStale: true });
     try {
       expect(await f.observe()).toMatchObject({
         ready: false,
         failure: { code: "LOCAL_DOCKER_LOGIN_REQUIRED" },
       });
-      expect(await f.records.get(f.space.id)).toEqual(f.space);
+      expect(await f.records.get(f.space.id)).toMatchObject({
+        runtimeId: f.space.runtimeId,
+        desiredState: "stopped",
+      });
     } finally {
       await unlock();
     }
@@ -635,6 +649,30 @@ test("unconfirmed physical settlement retains the old active executable and orig
   }
 });
 
+test("unknown maintenance settlement preserves the native authentication fence and its original refusal", async () => {
+  const f = await fixture(true, undefined, true);
+  const id = requestId();
+  try {
+    const authenticationFailure = await serviceFailure(f.state);
+    const completed = f.running.catch((error) => error);
+    await serviceRequest(f.state, "POST", "/v1/service/maintenance", {
+      requestId: id,
+      release: staged,
+    });
+    expect(await completed).toMatchObject({ code: "LOCAL_STOP_PENDING" });
+    expect(await serviceFailure(f.state)).toEqual(authenticationFailure);
+    expect(await collectServiceMaintenance(f.state, id)).toMatchObject({
+      requestId: id,
+      phase: "unconfirmed",
+      error: "LOCAL_STOP_PENDING",
+    });
+    expect(f.active).toBe(release);
+    expect(await f.records.get(f.space.id)).toEqual(f.space);
+  } finally {
+    await f.close();
+  }
+});
+
 test("an interrupted maintenance shutdown cannot become a fresh update or start work", async () => {
   const f = await fixture();
   const id = requestId();
@@ -839,7 +877,7 @@ test("only the newly selected owner completes original maintenance with its actu
   }
 });
 
-test("the original selected maintenance can explicitly restart failed startup without repeating settlement or claiming completion", async () => {
+test("selected executable completion reports unavailable native recovery without closing the controller owner", async () => {
   const id = requestId(),
     f = await fixture(false, { requestId: id, phase: "selected" }, true);
   try {
@@ -849,16 +887,23 @@ test("the original selected maintenance can explicitly restart failed startup wi
       release: staged,
       failure: { code: "LOCAL_DOCKER_LOGIN_REQUIRED" },
     });
+    expect(await collectServiceMaintenance(f.state, id)).toMatchObject({
+      requestId: id,
+      phase: "completed",
+      recovery: {
+        restored: [],
+        unavailable: [{ spaceId: f.space.id, code: "LOCAL_DOCKER_LOGIN_REQUIRED" }],
+      },
+    });
     expect(
       await serviceRequest(f.state, "POST", "/v1/service/maintenance", {
         requestId: id,
         release: staged,
       }),
-    ).toMatchObject({ requestId: id, phase: "selected" });
-    await f.running;
+    ).toMatchObject({ requestId: id, phase: "completed" });
     expect(await collectServiceMaintenance(f.state, id)).toMatchObject({
       requestId: id,
-      phase: "selected",
+      phase: "completed",
     });
     expect(await f.records.get(f.space.id)).toEqual(before);
     expect(f.active).toBe(staged);

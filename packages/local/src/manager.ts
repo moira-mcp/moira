@@ -32,6 +32,7 @@ import { gitBroker } from "./git-broker.js";
 import { LocalRelay } from "./relay.js";
 import { NetworkBudget } from "./network-budget.js";
 import { guestAssets } from "./assets.js";
+import { requireNativeAdmission } from "./service-failure.js";
 
 export interface ManagerDependencies {
   signal?: AbortSignal;
@@ -82,6 +83,7 @@ export class LocalManager {
   }
 
   private async owner(cleanupOnly = false): Promise<DeviceGuard> {
+    if (!cleanupOnly) await requireNativeAdmission(this.records.state);
     const policy = await this.records.policy();
     const managementOnly = cleanupOnly && !policy.enabled;
     if (!this.device?.active || this.cleanupOnlyOwner !== managementOnly) {
@@ -153,54 +155,59 @@ export class LocalManager {
     });
   }
   async open(): Promise<void> {
-    await this.holdRunnerLock();
-    if (this.broker && this.tunnel) return;
-    try {
-      const policy = await this.records.policy();
-      if (this.dependencies.storage) await this.dependencies.storage(policy);
-      else await ensureStorageMounted(this.records.state, policy);
-      await this.owner();
-      if (this.dependencies.runtime) await this.runtime(policy).boundary.verifyConfiguration();
-      const onFault = this.dependencies.onFault ?? (() => undefined);
-      const budget = new NetworkBudget();
-      const relay = new LocalRelay(this.records);
-      const github = gitBroker(budget, onFault, (grant, action, signal) => {
-        if (!grant.spaceId)
-          throw new LocalRefusal(
-            "LOCAL_IDENTITY_CHANGED",
-            "Git requires its original locally owned sandbox.",
-          );
-        return relay.acquireGitCredential(grant.spaceId, grant.repository.id, action, signal);
-      });
-      this.broker = await startBroker(
-        {
-          authorize: (credential) =>
-            this.records.authorize(
-              credential,
-              (space) => this.guards.get(space.id)?.setupGeneration === space.generation,
-            ),
-          budget,
-          ...github,
-          onFault,
-        },
-        this.dependencies.brokerPorts?.http,
-      );
-      const saved = await this.records.state.read("broker.json", brokerState.parse);
-      this.tunnel = await startBrokerTunnel(
-        this.broker.port,
-        saved?.port ?? this.dependencies.brokerPorts?.tunnel,
-      );
-      await this.records.state.write("broker.json", { port: this.tunnel.port });
-    } catch (error) {
+    return this.serial("open", async () => {
+      await requireNativeAdmission(this.records.state);
+      // An existing controller owns this exclusion independently of native startup.
+      const retainGateOnFailure = Boolean(this.releaseLock);
+      await this.holdRunnerLock();
+      if (this.broker && this.tunnel) return;
       try {
-        await this.release();
-      } catch (cleanup) {
-        throw new AggregateError([error, cleanup], "Local startup and cleanup failed", {
-          cause: error,
+        const policy = await this.records.policy();
+        if (this.dependencies.storage) await this.dependencies.storage(policy);
+        else await ensureStorageMounted(this.records.state, policy);
+        await this.owner();
+        if (this.dependencies.runtime) await this.runtime(policy).boundary.verifyConfiguration();
+        const onFault = this.dependencies.onFault ?? (() => undefined);
+        const budget = new NetworkBudget();
+        const relay = new LocalRelay(this.records);
+        const github = gitBroker(budget, onFault, (grant, action, signal) => {
+          if (!grant.spaceId)
+            throw new LocalRefusal(
+              "LOCAL_IDENTITY_CHANGED",
+              "Git requires its original locally owned sandbox.",
+            );
+          return relay.acquireGitCredential(grant.spaceId, grant.repository.id, action, signal);
         });
+        this.broker = await startBroker(
+          {
+            authorize: (credential) =>
+              this.records.authorize(
+                credential,
+                (space) => this.guards.get(space.id)?.setupGeneration === space.generation,
+              ),
+            budget,
+            ...github,
+            onFault,
+          },
+          this.dependencies.brokerPorts?.http,
+        );
+        const saved = await this.records.state.read("broker.json", brokerState.parse);
+        this.tunnel = await startBrokerTunnel(
+          this.broker.port,
+          saved?.port ?? this.dependencies.brokerPorts?.tunnel,
+        );
+        await this.records.state.write("broker.json", { port: this.tunnel.port });
+      } catch (error) {
+        try {
+          await this.release(retainGateOnFailure);
+        } catch (cleanup) {
+          throw new AggregateError([error, cleanup], "Local startup and cleanup failed", {
+            cause: error,
+          });
+        }
+        throw error;
       }
-      throw error;
-    }
+    });
   }
 
   async stopWork(): Promise<void> {
@@ -338,7 +345,7 @@ export class LocalManager {
     await this.closeResources(keepLock);
   }
   /** The host service relinquishes observations; no VM stop intent is manufactured. */
-  async release(): Promise<void> {
+  async release(keepLock = false): Promise<void> {
     await this.openingOwner?.catch(() => undefined);
     if (this.device) {
       if (!this.device.active) await this.requireInactiveOwnerAbsent();
@@ -355,8 +362,10 @@ export class LocalManager {
     this.tunnel = undefined;
     await this.broker?.close();
     this.broker = undefined;
-    await this.releaseLock?.();
-    this.releaseLock = undefined;
+    if (!keepLock) {
+      await this.releaseLock?.();
+      this.releaseLock = undefined;
+    }
   }
   private async closeResources(keepLock: boolean): Promise<void> {
     const errors: unknown[] = [];
