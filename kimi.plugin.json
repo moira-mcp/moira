@@ -1,0 +1,22 @@
+{
+  "name": "moira",
+  "version": "1.0.0",
+  "description": "Resumable multi-step agent workflows through the Moira MCP server",
+  "keywords": ["mcp", "workflow", "agents", "automation"],
+  "author": "Moira maintainers",
+  "homepage": "https://github.com/moira-mcp/moira",
+  "license": "Apache-2.0",
+  "skills": "./skills/",
+  "mcpServers": {
+    "moira": {
+      "url": "https://moira-mcp.com/mcp"
+    }
+  },
+  "interface": {
+    "displayName": "Moira",
+    "shortDescription": "Structured, resumable workflows for AI agents",
+    "longDescription": "Discover and run multi-step workflows with per-step instructions, schema-checked responses, persisted execution state, and continuation across agent sessions.",
+    "developerName": "Moira maintainers",
+    "websiteURL": "https://moira-mcp.com"
+  }
+}
