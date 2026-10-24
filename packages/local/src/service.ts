@@ -10,8 +10,11 @@ import { LocalRelay } from "./relay.js";
 import { LocalDaemon } from "./daemon.js";
 import { ControllerState } from "./controller-state.js";
 import { LocalRefusal } from "./policy.js";
+import { recordServiceFailure, requireNativeAdmission, serviceFailure } from "./service-failure.js";
+export { serviceFailure } from "./service-failure.js";
 import {
   settlePrivateRuntime,
+  settleRuntimeOwner,
   readRuntimeSettlement,
   requireRecoveredRuntimeSettlement,
 } from "./guard.js";
@@ -117,19 +120,6 @@ export function serviceRequest(
 export async function collectServiceMaintenance(state: PrivateState, requestId: string) {
   return state.read(maintenanceKey(requestId), maintenanceSchema.parse);
 }
-export async function serviceFailure(state: PrivateState) {
-  return state.read(
-    "service-failure.json",
-    z
-      .object({
-        release: z.string().regex(/^[a-f0-9]{64}$/),
-        code: z.string().regex(/^LOCAL_[A-Z_]+$/),
-        at: z.number().int().nonnegative(),
-      })
-      .strict().parse,
-  );
-}
-
 interface ServiceDependencies {
   manager?: LocalManager;
   daemon?: LocalDaemon;
@@ -392,9 +382,11 @@ export async function runLocalService(
             if (!daemonStarted) {
               await manager.holdRunnerLock();
               await manager.close(true);
-              const policy = await records.policyOrNull();
-              if (policy) await (dependencies.settle ?? settlePrivateRuntime)(policy);
             }
+            // A running controller need not have acquired a native observer.
+            // Endpoint retirement alone cannot settle a prior released SDK owner.
+            if (await records.policyOrNull())
+              await settleRuntimeOwner(records, dependencies.settle);
             receipt.phase = "settled";
             await records.state.write(key, receipt);
           }
@@ -563,31 +555,52 @@ export async function runLocalService(
         true,
       );
       void daemonWork.catch(() => undefined);
-      let recovery: Awaited<ReturnType<LocalManager["restoreIntendedWork"]>> = {
-        restored: [],
-        unavailable: [],
-      };
-      if (
-        policy?.enabled &&
-        (await records.list()).some((space) => space.desiredState === "running" && space.runtimeId)
-      ) {
-        await manager.open();
-        recovery = await manager.restoreIntendedWork();
-      } else {
-        recovery.unavailable = (await records.list())
-          .filter((space) => space.desiredState === "running")
-          .map((space) => ({ spaceId: space.id, code: "LOCAL_NOT_RUNNING" }));
+      let recovery: Awaited<ReturnType<LocalManager["restoreIntendedWork"]>>;
+      try {
+        // A known authentication refusal survives executable replacement. Merely
+        // restoring communication must never re-open the native credential store.
+        if (policy) await requireNativeAdmission(records.state);
+        recovery = { restored: [], unavailable: [] };
+        if (
+          policy?.enabled &&
+          (await records.list()).some(
+            (space) => space.desiredState === "running" && space.runtimeId,
+          )
+        ) {
+          await manager.open();
+          recovery = await manager.restoreIntendedWork();
+        } else {
+          recovery.unavailable = (await records.list())
+            .filter((space) => space.desiredState === "running")
+            .map((space) => ({ spaceId: space.id, code: "LOCAL_NOT_RUNNING" }));
+        }
+        if (physicalController.signal.aborted) return daemonWork;
+        ready = true;
+        await records.state.remove("service-failure.json");
+      } catch (error) {
+        if (physicalStop || physicalController.signal.aborted) throw error;
+        ready = false;
+        startupFailed = true;
+        const code = error instanceof LocalRefusal ? error.code : "LOCAL_SERVICE_FAILED";
+        await recordServiceFailure(records.state, { release, code, at: Date.now() });
+        recovery = {
+          restored: [],
+          unavailable: (await records.list())
+            .filter((space) => space.desiredState === "running")
+            .map((space) => ({ spaceId: space.id, code })),
+        };
       }
-      if (physicalController.signal.aborted) return daemonWork;
-      ready = true;
-      await records.state.remove("service-failure.json");
-      for (const receipt of selected) {
+      // Selecting an executable and restoring every VM are separate outcomes.
+      // A degraded native capability does not leave the update identity pending.
+      for (const receipt of selected)
         await records.state.write(maintenanceKey(receipt.requestId), {
           ...receipt,
           phase: "completed",
           recovery,
         });
-      }
+      // Keep the controller, publications and their writer gate alive. Native
+      // prerequisite repair uses explicit maintenance pause, never an implicit
+      // release caused by an unrelated file-transfer request.
       await daemonWork;
     })().catch(async (error) => {
       if (physicalStop) throw error;
@@ -601,7 +614,7 @@ export async function runLocalService(
       daemonController.abort();
       await daemonWork;
       await manager.release();
-      await records.state.write("service-failure.json", {
+      await recordServiceFailure(records.state, {
         release,
         code: refusal?.code ?? "LOCAL_SERVICE_FAILED",
         at: Date.now(),
@@ -625,7 +638,7 @@ export async function runLocalService(
       });
     if (failure) throw failure;
   } catch (error) {
-    await records.state.write("service-failure.json", {
+    await recordServiceFailure(records.state, {
       release,
       code: error instanceof LocalRefusal ? error.code : "LOCAL_SERVICE_FAILED",
       at: Date.now(),

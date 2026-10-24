@@ -25,12 +25,8 @@ import {
 import { createWorkspaceRequestId } from "../../shared/src/codespaces/workspace-request-id.js";
 import { operationState } from "../../shared/src/codespaces/workspace-operation-state.mjs";
 import { LocalWebControl } from "./web-control.js";
-import {
-  runLocalService,
-  serviceRequest,
-  collectServiceMaintenance,
-  serviceFailure,
-} from "./service.js";
+import { runLocalService, serviceRequest, collectServiceMaintenance } from "./service.js";
+import { serviceFailure, clearAuthenticatedFailure } from "./service-failure.js";
 import {
   stageLocalService,
   ensureLocalServiceStarted,
@@ -649,6 +645,7 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
   if (command === "login") {
     const release = await state.lock();
     try {
+      const authenticationFailure = options["new-store"] ? null : await serviceFailure(state);
       const loginPolicy = await records.policy();
       const runtime = new SbxRuntime(loginPolicy);
       await admitStorage(loginPolicy);
@@ -671,6 +668,7 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
             : reject(new LocalRefusal("LOCAL_LOGIN_FAILED", "Docker sign-in did not complete.")),
         );
       });
+      await clearAuthenticatedFailure(state, authenticationFailure);
     } finally {
       await release();
     }

@@ -440,7 +440,12 @@ release and register login startup, then `npm run local -- run` to start or conn
 The persistent host owner holds VM custody and the broker/tunnel; this client exits without
 stopping them. Ordinary installation stages a release without replacing a running owner.
 `npm run local -- service-status` reports its running release, readiness, cloud connection,
-staged release and startup failure. A revoked device requires a new pairing and browser confirmation.
+staged release and startup failure. A failure restoring Local VMs does not close the paired
+controller or its file publications and original-operation collection. Native `ready: false`
+can coexist with a connected controller; inspect both rather than treating a Docker refusal as
+an unavailable file owner. Pairing authority and route reachability remain required. A confirmed
+controller shutdown reports `offline`; an unresolved shutdown reports `faulted`.
+A revoked device requires a new pairing and browser confirmation.
 Open that computer's codespace card and use **Check state again** for a pending start, stop or
 delete. It collects the original lifecycle receipt when its identity is known, otherwise it
 performs a read-only refresh. It never resubmits start/stop/delete or creates a replacement VM.
@@ -606,6 +611,29 @@ If there is no unresolved maintenance request, explicitly restart the active rel
 release and declares physical interruption. Use `run` if needed to start the selected owner,
 then check `service-status` and the original receipt. Keep the same `--state PATH` throughout;
 do not edit locks or sockets, replace pairing, or replay interrupted commands.
+
+For `LOCAL_DOCKER_LOGIN_REQUIRED`, the saved authentication refusal blocks native startup before
+credential access. Installing or restarting the owner preserves it; communication does not
+require repairing Docker sign-in. To restore native work, use an explicit maintenance pause and
+the existing credential store:
+
+```bash
+npm run local -- maintenance --pause --confirm
+npm run local -- collect ORIGINAL_MAINTENANCE_ID
+# Continue only after this original reports paused.
+npm run local -- login
+npm run local -- maintenance --resume --request-id ORIGINAL_MAINTENANCE_ID --confirm
+npm run local -- run
+npm run local -- service-status
+```
+
+Keep the same `--state PATH` on every command when configured. Login can require Keychain access
+or Docker browser sign-in; it is an explicit owner action, not a background file-transfer repair.
+Do not use `--new-store` or delete the failure record to bypass this refusal. Only successful
+same-store login clears the exact authentication failure it observed. Collect that same
+maintenance ID and inspect its VM recovery result; completed maintenance can still report
+unavailable VMs without replaying their interrupted commands.
+
 If the companion reports `LOCAL_STORAGE_FULL` during shrink, the requested size cannot preserve
 existing data or the native APFS minimum. Check the computer's shared backing-image capacity and
 actual disk space separately from free space on the Mac; admission imposes no extra reserve.
@@ -644,7 +672,10 @@ existing stores are preserved.
 For an owner update, stage the complete package with `install`, inspect `service-status`, then
 request `maintenance --confirm`. Retain its printed request ID and use `collect ORIGINAL_ID`
 after a lost reply. The owner settles exact physical custody before selecting the staged release;
-the successor restores the same saved VM identities, disks and intended running state. Accepted
+kernel settlement validates the captured profile, absence of its former owner and unchanged
+policy/custody records, even when no native observer was acquired. Closing the controller or
+releasing an observer does not establish physical shutdown.
+The successor restores the same saved VM identities, disks and intended running state. Accepted
 commands are not replayed, and commands interrupted by maintenance may have uncertain outcomes.
 If settlement is unconfirmed, no replacement owner starts. Preserve the receipt and resolve the
 physical refusal; do not issue another stop or replace the maintenance identity. After an explicit

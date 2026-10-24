@@ -143,6 +143,13 @@ An unavailable provider is not healthy absence; one provider's unresolved observ
 block independent discovery of another. Original uncertainty and custody survive restart and
 authority changes; collecting them does not repeat the effect or fabricate lifecycle authority.
 
+[Controller availability](integration/local/controller-native-failure.test.ts) exercises real
+archive publication and original collection during controlled native failure.
+[Native admission](integration/local/native-admission.test.ts) covers retained authentication
+refusal and runner exclusion; [runtime settlement](integration/local/runtime-settlement.test.ts)
+covers exact-profile shutdown and preservation on refusal. These fixtures do not establish
+physical VM or provider acceptance.
+
 | Level                        | Boundary and suite                                                                                                                                                                                                                                                                                                             |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Unit                         | Local policy, durable controller receipts, exact generation/grant authority, runtime observation and custody: [Local](unit/local/). Common Unix owner, semantic references, exact bytes, retained input/output and physical reader settlement: [workspace service](unit/workspace-service/).                                   |

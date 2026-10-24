@@ -300,6 +300,45 @@ export async function readRuntimeSettlement(records: LocalRecords) {
   return records.state.read("runtime-owner.json", receiptSchema.parse);
 }
 
+async function settleCapturedRuntimeOwner(
+  records: LocalRecords,
+  policy: LocalPolicy,
+  receipt: z.infer<typeof receiptSchema> | null,
+  settle: typeof settlePrivateRuntime,
+): Promise<void> {
+  if (receipt && receipt.profile !== profile(policy))
+    throw new LocalRefusal(
+      "LOCAL_RUNTIME_CHANGED",
+      "The previous owner belongs to another locally selected runtime profile.",
+    );
+  await refuseLiveRecoveryOwner(receipt);
+  await settle(policy);
+  if (
+    JSON.stringify(await records.policy()) !== JSON.stringify(policy) ||
+    JSON.stringify(await readRuntimeSettlement(records)) !== JSON.stringify(receipt)
+  )
+    throw new LocalRefusal(
+      "LOCAL_RUNTIME_CHANGED",
+      "The local policy or owner receipt changed during physical settlement.",
+    );
+  await refuseLiveRecoveryOwner(receipt);
+  await records.state.write("runtime-owner.json", {
+    owner: randomUUID(),
+    profile: profile(policy),
+    settled: true,
+  });
+}
+
+/** Caller holds the runner gate and explicit shutdown authority; no credentials are accessed. */
+export async function settleRuntimeOwner(
+  records: LocalRecords,
+  settle: typeof settlePrivateRuntime = settlePrivateRuntime,
+): Promise<void> {
+  const policy = await records.policy();
+  const receipt = await readRuntimeSettlement(records);
+  await settleCapturedRuntimeOwner(records, policy, receipt, settle);
+}
+
 /** The caller holds the runner gate; only a fresh explicit recovery can close an unknown stop. */
 export async function requireRecoveredRuntimeSettlement(
   records: LocalRecords,
@@ -357,12 +396,6 @@ async function recoveryAdmission(records: LocalRecords) {
       "Disable work before acknowledging an orphan device owner.",
     );
   const receipt = await records.state.read("runtime-owner.json", receiptSchema.parse);
-  if (receipt && receipt.profile !== profile(policy))
-    throw new LocalRefusal(
-      "LOCAL_RUNTIME_CHANGED",
-      "The previous owner belongs to another locally selected runtime profile.",
-    );
-  await refuseLiveRecoveryOwner(receipt);
   return { policy, receipt };
 }
 
@@ -377,24 +410,7 @@ export async function recoverLocalDevice(records: LocalRecords, confirmed: boole
   try {
     if (await upgradeLocalPolicyState(records, { recoverLegacy: true })) return;
     const { policy, receipt } = await recoveryAdmission(records);
-    await settlePrivateRuntime(policy);
-    const current = await records.policy();
-    const currentReceipt = await records.state.read("runtime-owner.json", receiptSchema.parse);
-    if (
-      current.enabled ||
-      JSON.stringify(current) !== JSON.stringify(policy) ||
-      JSON.stringify(currentReceipt) !== JSON.stringify(receipt)
-    )
-      throw new LocalRefusal(
-        "LOCAL_RUNTIME_CHANGED",
-        "The local policy or owner receipt changed during physical recovery.",
-      );
-    await refuseLiveRecoveryOwner(receipt);
-    await records.state.write("runtime-owner.json", {
-      owner: randomUUID(),
-      profile: profile(policy),
-      settled: true,
-    });
+    await settleCapturedRuntimeOwner(records, policy, receipt, settlePrivateRuntime);
   } finally {
     await release();
   }
