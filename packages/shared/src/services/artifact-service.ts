@@ -4,18 +4,19 @@
  *
  * Validation rules:
  * - Content: Must be valid HTML (basic validation)
- * - Size: Max from global setting (default 5 MB per artifact)
+ * - Size: Per-user/global limit (default 5 MiB per artifact)
  * - Quota: Max from global/per-user setting (default 100 MB total, 50 artifacts per user)
  * - TTL: Default from global setting (30 days)
  *
  * Quota resolution order:
- * 1. Per-user override (user.artifactQuotaMb, user.artifactMaxFiles)
- * 2. Global setting (artifacts.default_quota_mb, artifacts.default_max_files)
- * 3. Hardcoded defaults (100 MB, 50 files)
+ * 1. Per-user override (storage, count and per-file size)
+ * 2. Corresponding global setting
+ * 3. Hardcoded defaults (100 MiB, 50 files, 5 MiB per file)
  */
 
 import type { AuditRepository } from "../database/repositories/audit-repository.js";
 import type { GlobalSettingsService } from "./global-settings-service.js";
+import { artifactFileSizeMbToBytes } from "./artifact-size-policy.js";
 import {
   ArtifactRepository,
   MAX_ARTIFACT_SIZE,
@@ -93,6 +94,7 @@ export interface UserQuotaProvider {
   getUserQuota(userId: string): Promise<{
     artifactQuotaMb: number | null;
     artifactMaxFiles: number | null;
+    artifactMaxFileSizeMb: number | null;
   }>;
 }
 
@@ -191,19 +193,28 @@ export class ArtifactService {
   // ===== Quota Configuration =====
 
   /**
-   * Get max file size in bytes (from global settings or hardcoded default)
+   * Effective decoded UTF-8 content bytes: user override, global setting, then default.
+   * Invalid persisted values cannot disable admission. Transport resolves this before reading;
+   * create/update resolve it again before writing in case the policy changed during upload.
    */
-  private async getMaxFileSize(): Promise<number> {
-    if (this.quotaOverrides?.maxSize) {
-      return this.quotaOverrides.maxSize;
+  async getMaxFileSize(userId: string): Promise<number> {
+    const fixtureBytes = artifactFileSizeMbToBytes(
+      this.quotaOverrides?.maxSize === undefined
+        ? undefined
+        : this.quotaOverrides.maxSize / (1024 * 1024),
+    );
+    if (fixtureBytes !== null) return fixtureBytes;
+    if (this.userQuotaProvider) {
+      const quota = await this.userQuotaProvider.getUserQuota(userId);
+      const bytes = artifactFileSizeMbToBytes(quota.artifactMaxFileSizeMb);
+      if (bytes !== null) return bytes;
     }
     if (this.globalSettingsService) {
-      const mb = await this.globalSettingsService.getValue<string>(
+      const mb = await this.globalSettingsService.getValue<unknown>(
         GLOBAL_SETTINGS_KEYS.maxFileSizeMb,
       );
-      if (mb) {
-        return parseInt(mb, 10) * 1024 * 1024; // MB to bytes
-      }
+      const bytes = artifactFileSizeMbToBytes(mb);
+      if (bytes !== null) return bytes;
     }
     return MAX_ARTIFACT_SIZE;
   }
@@ -373,7 +384,7 @@ export class ArtifactService {
    * Get user's artifact statistics
    * Uses per-user quotas if available, otherwise global settings
    */
-  async getStats(userId: string): Promise<ArtifactStats> {
+  async getStats(userId: string): Promise<ArtifactStats & { maxFileSizeBytes: number }> {
     const maxTotalSize = await this.getMaxTotalSize(userId);
     const maxCount = await this.getMaxCount(userId);
     const stats = await this.artifactRepo.getStats(userId, maxTotalSize, maxCount);
@@ -390,7 +401,7 @@ export class ArtifactService {
       }),
     });
 
-    return stats;
+    return { ...stats, maxFileSizeBytes: await this.getMaxFileSize(userId) };
   }
 
   // ===== Create Operations =====
@@ -420,7 +431,7 @@ export class ArtifactService {
     const size = Buffer.byteLength(content, "utf8");
 
     // Get quotas (async - respects per-user overrides and global settings)
-    const maxFileSize = await this.getMaxFileSize();
+    const maxFileSize = await this.getMaxFileSize(userId);
     const maxTotalSize = await this.getMaxTotalSize(userId);
     const maxCount = await this.getMaxCount(userId);
 
@@ -520,7 +531,7 @@ export class ArtifactService {
     const newSize = Buffer.byteLength(content, "utf8");
 
     // Get quotas (async - respects per-user overrides and global settings)
-    const maxFileSize = await this.getMaxFileSize();
+    const maxFileSize = await this.getMaxFileSize(userId);
     const maxTotalSize = await this.getMaxTotalSize(userId);
 
     // Check per-artifact size limit

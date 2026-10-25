@@ -66,6 +66,45 @@ Browser CORS permits the application origin, configured `EXTRA_TRUSTED_ORIGINS`/
 
 Global/admin settings and per-user settings are database configuration, not environment variables. Installed declarations take precedence over DB definitions. Preserve absent, null and intentional empty values; use the settings service and its schemas instead of truthiness fallbacks. Built-in and extension secrets have explicit public masking policies. HTTP bulk writes can partially refuse and return 207; do not assume one transaction for the whole batch. Effective prompt overrides likewise preserve model→agent→default first-non-null precedence, including an empty existing override.
 
+### Artifact quotas and body admission
+
+The administrator's user quota form controls storage, file count and maximum size of one artifact.
+The per-file `maxFileSizeMb` override takes precedence over global `artifacts.max_file_size_mb`,
+then the 5 MiB default. One MiB is 1,048,576 bytes. Clearing that field stores null and restores
+inheritance without resetting storage/count; the full reset clears all three overrides. HTTP PUT
+also preserves omitted fields. The effective `maxFileSizeBytes` appears in user quota reads and
+artifact stats. Storage and count are independent budgets, not another per-file ceiling.
+
+File-size values must be positive and convert to a whole safe integer byte count; fractional MiB
+values are allowed. Both the byte count and `6 × bytes + 65,536` must be safe integers. The same
+validation applies to the global setting, including history restoration. Invalid persisted values
+fall back through the policy rather than disabling admission. Retention is separate; use each
+artifact's returned `expiresAt`, not a fixed lifetime inferred from an unavailable-artifact page.
+
+Upload admission authenticates the session or validates the token before reading a large body.
+For effective decoded HTML limit `N` bytes, artifact JSON create/update/token upload admits at most
+`6 × N + 65,536` bytes, allowing JSON escaping and finite metadata. The service rechecks the current
+decoded UTF-8 content limit before writing. Multipart token upload permits one file up to `N`,
+two text fields up to 16 KiB each, three parts and field names up to 100 bytes. The bundled
+multipart parser enforces its native 16 KiB header-block limit per part; this is not a configurable
+header-count setting. Oversized content frames/files return 413; malformed multipart headers,
+invalid multipart metadata or malformed JSON return 400.
+An invalid token returns 401 without parsing content. Tokens are marked used after successful
+creation; this does not establish atomic exactly-once behavior for concurrent uploads.
+
+Authenticated MCP JSON requests use `max(20 MiB, 6 × N + 65,536)` as an incremental body budget,
+independently of the tool name or JSON property order. This also bounds a direct MCP listener;
+it is not an unlimited-body endpoint. Authentication is checked before and after reading.
+Requests beyond the frame return HTTP 413 with JSON-RPC code `-32000` and `data.limitBytes`;
+the decoded artifact limit remains `N` even when the frame is larger.
+
+Supplied root and `/app` nginx configurations stream MCP and artifact upload paths without a
+second proxy body ceiling; the application's finite admission owns those bodies. Ordinary ingress
+retains its 20 MiB ceiling and ordinary backend JSON retains 10 MiB. Preserve these distinct owners
+when adding a reverse proxy; a lower proxy cap would refuse otherwise permitted uploads.
+See [HTTP admission](../reference/http-api.md#settings-notes-playbooks-and-artifacts) and
+[upload guidance](../../packages/mcp-server/src/help/content/patterns/artifacts-publishing.md).
+
 Notes quotas and completed-execution retention use global settings. `executions.retention_days=0` disables automatic retention; retention does not remove running executions or a completed parent with an active child. Confirm the current [retention service](../../packages/shared/src/services/execution-retention-service.ts) before changing cleanup behavior. Workspace original receipts and credential-custody records have separate ownership and cannot be cleared as execution-retention housekeeping.
 
 `WORKFLOWS_DIRS` is an ordered colon-separated catalog list; later directories override the same `(owner, slug)`. It falls back to `WORKFLOWS_DIR`, then `./workflows/production`. Private catalogs can extend the public image without copying definitions into OSS. Use the canonical catalog reader; test fixtures choose their own source-owned catalog explicitly. For commands and acceptance boundaries use [the testing guide](../../tests/TESTING-GUIDE.md).

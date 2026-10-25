@@ -276,9 +276,11 @@ test.describe("Admin User Detail - Artifact Quota", () => {
     await expect(page.getByTestId("quota-edit-form")).toBeVisible();
     await expect(page.getByTestId("quota-mb-input")).toBeVisible();
     await expect(page.getByTestId("quota-max-files-input")).toBeVisible();
+    await expect(page.getByTestId("quota-max-file-size-input")).toBeVisible();
   });
 
-  test("admin can set custom quota for user", async ({ page }) => {
+  test("admin can set custom quota for user", async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${BASE_URL}/admin/users/${testUserId}`);
     await page.waitForLoadState("domcontentloaded");
 
@@ -291,6 +293,12 @@ test.describe("Admin User Detail - Artifact Quota", () => {
     // Fill in custom quota values
     await page.getByTestId("quota-mb-input").fill("200");
     await page.getByTestId("quota-max-files-input").fill("100");
+    await page.getByTestId("quota-max-file-size-input").fill("24");
+    await page.getByTestId("artifact-quota-card").scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: testInfo.outputPath("quota-desktop-edit.png"),
+      animations: "disabled",
+    });
 
     // Save
     await page.getByTestId("save-quota-button").click();
@@ -299,8 +307,42 @@ test.describe("Admin User Detail - Artifact Quota", () => {
     await expect(page.getByTestId("quota-edit-form")).not.toBeVisible({ timeout: 10000 });
 
     // Check custom quota is now shown
-    await expect(page.locator("text=200 MB")).toBeVisible();
-    await expect(page.locator("text=100 files")).toBeVisible();
+    await expect(page.getByTestId("artifact-quota-card")).toContainText("200.0 MB");
+    await expect(page.getByTestId("artifact-quota-card")).toContainText("Files: 100");
+    await expect(page.getByTestId("quota-effective-file-size")).toContainText("24.0 MB");
+    await page.reload();
+    await expect(page.getByTestId("quota-effective-file-size")).toContainText("24.0 MB");
+    await page.getByTestId("artifact-quota-card").scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: testInfo.outputPath("quota-desktop-saved.png"),
+      animations: "disabled",
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByTestId("edit-quota-button").click();
+    await expect(page.getByTestId("quota-max-file-size-input")).toHaveValue("24");
+    await page.getByTestId("artifact-quota-card").scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: testInfo.outputPath("quota-phone-edit.png"),
+      animations: "disabled",
+    });
+    await page.getByTestId("quota-max-file-size-input").fill("");
+    await page.getByTestId("save-quota-button").click();
+    await expect(page.getByTestId("quota-edit-form")).not.toBeVisible();
+    await page.reload();
+    await expect(page.getByTestId("edit-quota-button")).toBeVisible();
+    await page.getByTestId("edit-quota-button").click();
+    await expect(page.getByTestId("quota-max-file-size-input")).toHaveValue("");
+    await expect(page.getByTestId("quota-mb-input")).toHaveValue("200");
+    await expect(page.getByTestId("quota-max-files-input")).toHaveValue("100");
+    await page
+      .getByTestId("quota-edit-form")
+      .getByRole("button", { name: "Cancel", exact: true })
+      .click();
+    await page.getByTestId("artifact-quota-card").scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: testInfo.outputPath("quota-phone-inherited.png"),
+      animations: "disabled",
+    });
   });
 
   test("admin can reset quota to default", async ({ page }) => {
@@ -314,6 +356,7 @@ test.describe("Admin User Detail - Artifact Quota", () => {
     // Set custom values first
     await page.getByTestId("quota-mb-input").fill("150");
     await page.getByTestId("quota-max-files-input").fill("75");
+    await page.getByTestId("quota-max-file-size-input").fill("18");
     await page.getByTestId("save-quota-button").click();
     await expect(page.getByTestId("quota-edit-form")).not.toBeVisible({ timeout: 10000 });
 
@@ -325,9 +368,11 @@ test.describe("Admin User Detail - Artifact Quota", () => {
     await expect(page.getByTestId("quota-edit-form")).not.toBeVisible({ timeout: 10000 });
 
     // Check that "Using global default" message is shown
-    await expect(
-      page.locator("text=Using global default").or(page.locator("text=глобальное значение")),
-    ).toBeVisible();
+    await expect(page.getByTestId("artifact-quota-card")).toContainText("Using global default");
+    await page.reload();
+    await expect(page.getByTestId("edit-quota-button")).toBeVisible();
+    await page.getByTestId("edit-quota-button").click();
+    await expect(page.getByTestId("quota-max-file-size-input")).toHaveValue("");
   });
 });
 

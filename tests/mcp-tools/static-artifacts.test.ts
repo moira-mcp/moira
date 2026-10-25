@@ -6,7 +6,13 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
-import { createAuthenticatedMCPClient, callMCPTool } from "../utils/mcp-auth.js";
+import {
+  createAuthenticatedMCPClient,
+  callMCPTool,
+  formatSessionCookie,
+  getAdminSessionCookie,
+} from "../utils/mcp-auth.js";
+import { getTestFetchUrl } from "../utils/test-config.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 // The /__frame route only serves content to iframe requests; top-level requests
@@ -252,6 +258,43 @@ describe("Static Artifact Serving E2E", () => {
   });
 
   describe("404 handling", () => {
+    test("missing page does not promise a lifetime under nondefault retention", async () => {
+      const baseUrl = getTestFetchUrl();
+      const cookie = formatSessionCookie(baseUrl, await getAdminSessionCookie(baseUrl));
+      const headers = { Cookie: cookie, "Content-Type": "application/json" };
+      const settingsResponse = await fetch(`${baseUrl}/api/admin/global-settings`, { headers });
+      expect(settingsResponse.status).toBe(200);
+      const settings = await settingsResponse.json();
+      const retention = settings.data.settings.find(
+        (setting: { key: string }) => setting.key === "artifacts.default_ttl_days",
+      );
+      expect(retention).toBeDefined();
+      const endpoint = `${baseUrl}/api/admin/global-settings/artifacts.default_ttl_days`;
+      try {
+        const updated = await fetch(endpoint, {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({ value: "7" }),
+        });
+        expect(updated.status).toBe(200);
+        const response = await fetch(
+          originForLabel(testArtifactOrigin, "00000000-0000-0000-0000-000000000000"),
+        );
+        expect(response.status).toBe(404);
+        const html = await response.text();
+        expect(html).toContain("This artifact may have expired, been removed, or never existed.");
+        expect(html).toContain("Ask its author for a current link.");
+        expect(html).not.toMatch(/available for \d+ days/i);
+      } finally {
+        const restored = await fetch(endpoint, {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({ value: retention.value }),
+        });
+        expect(restored.status).toBe(200);
+      }
+    });
+
     test("returns 404 for non-existent artifact (on its subdomain)", async () => {
       const fakeUuid = "00000000-0000-0000-0000-000000000000";
       const response = await fetch(originForLabel(testArtifactOrigin, fakeUuid));

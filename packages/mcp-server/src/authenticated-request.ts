@@ -1,13 +1,15 @@
 import type { Request, Response } from "express";
 import { isJsonContentType } from "@modelcontextprotocol/sdk/shared/mediaType.js";
-import { readJsonBody } from "@mcp-moira/shared/http/request-body";
+import { readJsonBody, RequestBodyLimitError } from "@mcp-moira/shared/http/request-body";
 import { settleOwnerFrame } from "@mcp-moira/shared/http/owner-stream-frame";
+import { getArtifactJsonBodyLimit } from "@mcp-moira/shared/artifact-size-policy";
 
 /** Authenticate before reading controls; the SDK retains media-type and JSON-RPC validation. */
 export async function readAuthenticatedMcpRequest<Principal>(
   req: Request,
   res: Response,
   authenticate: (req: Request, res: Response) => Promise<Principal | null>,
+  getMaxArtifactBytes: (principal: Principal) => Promise<number>,
 ): Promise<Principal | null> {
   const authenticateCurrent = async () => {
     // A refusal must close an unread or partly observed body without retaining the socket.
@@ -26,13 +28,34 @@ export async function readAuthenticatedMcpRequest<Principal>(
   if (!principal) return null;
   if (isJsonContentType(req.get("content-type"))) {
     try {
-      req.body = await readJsonBody(req);
-    } catch {
+      const maxBytes = Math.max(
+        20 * 1024 * 1024,
+        getArtifactJsonBodyLimit(await getMaxArtifactBytes(principal)),
+      );
+      req.body = await readJsonBody(req, { maxBytes });
+    } catch (error) {
       settleOwnerFrame(req, res);
+      if (
+        !(error instanceof RequestBodyLimitError) &&
+        !(
+          error &&
+          typeof error === "object" &&
+          "publicCode" in error &&
+          error.publicCode === "INVALID_JSON"
+        )
+      )
+        throw error;
       if (!res.destroyed)
-        res.status(400).json({
+        res.status(error instanceof RequestBodyLimitError ? 413 : 400).json({
           jsonrpc: "2.0",
-          error: { code: -32700, message: "Parse error: Invalid JSON" },
+          error:
+            error instanceof RequestBodyLimitError
+              ? {
+                  code: -32000,
+                  message: "Request body exceeds the authenticated frame limit",
+                  data: { limitBytes: error.limitBytes },
+                }
+              : { code: -32700, message: "Parse error: Invalid JSON" },
           id: null,
         });
       return null;

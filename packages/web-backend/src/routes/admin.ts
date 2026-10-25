@@ -45,6 +45,7 @@ import { getScopedCredentialService } from "../services/scoped-credential-factor
 import { sendConditionalRead } from "../utils/conditional-read.js";
 import { executionTaskTitles, withExecutionTaskTitles } from "../utils/execution-task-titles.js";
 import { executionDisplayStatus } from "@mcp-moira/shared/execution-management";
+import { artifactFileSizeMbToBytes } from "@mcp-moira/shared/artifact-size-policy";
 
 const router = Router();
 const repository = new DatabaseRepository();
@@ -2546,14 +2547,14 @@ router.post(
 
 /**
  * PUT /api/admin/users/:id/artifact-quota - Set per-user artifact quota overrides
- * Body: { quotaMb: number | null, maxFiles: number | null }
+ * Optional body fields: quotaMb, maxFiles, maxFileSizeMb; null resets inheritance.
  * Pass null to reset to global default
  */
 router.put(
   "/users/:id/artifact-quota",
   asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
-    const { quotaMb, maxFiles } = req.body;
+    const { quotaMb, maxFiles, maxFileSizeMb } = req.body;
 
     const currentUserId = (req as AuthenticatedRequest).userId;
 
@@ -2567,6 +2568,15 @@ router.put(
       (typeof maxFiles !== "number" || maxFiles < 0)
     ) {
       throw createApiError.validationFailed("maxFiles must be a positive number or null");
+    }
+    if (
+      maxFileSizeMb !== undefined &&
+      maxFileSizeMb !== null &&
+      (typeof maxFileSizeMb !== "number" || artifactFileSizeMbToBytes(maxFileSizeMb) === null)
+    ) {
+      throw createApiError.validationFailed(
+        "maxFileSizeMb must be positive MiB with a safe whole-byte content and JSON limit, or null",
+      );
     }
 
     const { user, getDatabase, UserRepository } = await import("@mcp-moira/shared");
@@ -2588,6 +2598,7 @@ router.put(
       id,
       quotaMb !== undefined ? quotaMb : previousQuota.artifactQuotaMb,
       maxFiles !== undefined ? maxFiles : previousQuota.artifactMaxFiles,
+      maxFileSizeMb !== undefined ? maxFileSizeMb : previousQuota.artifactMaxFileSizeMb,
     );
 
     if (!updated) {
@@ -2603,8 +2614,11 @@ router.put(
       metadata: {
         previousQuotaMb: previousQuota.artifactQuotaMb,
         previousMaxFiles: previousQuota.artifactMaxFiles,
+        previousMaxFileSizeMb: previousQuota.artifactMaxFileSizeMb,
         newQuotaMb: quotaMb !== undefined ? quotaMb : previousQuota.artifactQuotaMb,
         newMaxFiles: maxFiles !== undefined ? maxFiles : previousQuota.artifactMaxFiles,
+        newMaxFileSizeMb:
+          maxFileSizeMb !== undefined ? maxFileSizeMb : previousQuota.artifactMaxFileSizeMb,
       },
     });
 
@@ -2614,6 +2628,9 @@ router.put(
         userId: id,
         quotaMb: quotaMb !== undefined ? quotaMb : previousQuota.artifactQuotaMb,
         maxFiles: maxFiles !== undefined ? maxFiles : previousQuota.artifactMaxFiles,
+        maxFileSizeMb:
+          maxFileSizeMb !== undefined ? maxFileSizeMb : previousQuota.artifactMaxFileSizeMb,
+        maxFileSizeBytes: await getArtifactService().getMaxFileSize(id),
         updated: true,
       },
       timestamp: new Date().toISOString(),
@@ -2659,10 +2676,12 @@ router.get(
         overrides: {
           quotaMb: quota.artifactQuotaMb,
           maxFiles: quota.artifactMaxFiles,
+          maxFileSizeMb: quota.artifactMaxFileSizeMb,
         },
         effective: {
           storageLimit: stats.storageLimit,
           countLimit: stats.countLimit,
+          maxFileSizeBytes: stats.maxFileSizeBytes,
         },
         usage: {
           totalSize: stats.totalSize,

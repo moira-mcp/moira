@@ -44,6 +44,7 @@ import {
   getWorkflowReconciliationStatusSummary,
   formatWorkflowReconciliationNotice,
   projectPublicCodespaceReadiness,
+  getArtifactService,
 } from "@mcp-moira/shared";
 import {
   getCodespaceObservabilityService,
@@ -522,7 +523,12 @@ app.get("/mcp", (_req: Request, res: Response) => {
 // MCP HTTP endpoints - Authenticated mode with rate limiting
 app.post("/mcp", mcpLimiter, async (req: Request, res: Response) => {
   try {
-    const principal = await readAuthenticatedMcpRequest(req, res, authenticatePrincipal);
+    const principal = await readAuthenticatedMcpRequest(
+      req,
+      res,
+      authenticatePrincipal,
+      (admitted) => getArtifactService().getMaxFileSize(admitted.identity.userId),
+    );
     if (!principal) return;
     // Log MCP request with tool context (for debugging)
     const mcpMethod = req.body?.method;

@@ -466,14 +466,17 @@ export const managePlaybooksSchema = z.object({
 
 export const manageArtifactsSchema = z.object({
   action: z
-    .enum(["upload", "update", "delete", "list", "stats", "token"])
-    .describe("Action to perform on artifacts"),
+    .enum(["token", "upload", "update", "delete", "list", "stats"])
+    .describe("Prefer token then HTTP file upload for creation; upload is the no-HTTP fallback"),
   name: z.string().optional().describe("Artifact name (required for upload action)"),
-  content: z.string().optional().describe("HTML content (required for upload and update actions)"),
+  content: z
+    .string()
+    .optional()
+    .describe("Inline HTML for update or no-HTTP upload fallback; prefer token plus a local file"),
   executionId: z
     .string()
     .optional()
-    .describe("Link artifact to workflow execution (optional for upload)"),
+    .describe("Link inline upload to an execution; for HTTP upload send executionId in the body"),
   uuid: z.string().optional().describe("Artifact UUID (required for update and delete actions)"),
   limit: z
     .number()

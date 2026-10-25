@@ -16,29 +16,34 @@ Artifacts provide static HTML hosting for workflow outputs. Upload HTML content 
 
 ## MCP Tool
 
+For a generated HTML file, use the [token upload](#upload-tokens): obtain an upload URL,
+send the local file over HTTP as multipart field `file`, then retain the returned artifact URL.
+The `upload` action accepts inline HTML when HTTP file upload is unavailable.
+
 The `artifacts` MCP tool provides these actions:
 
 ```json
+artifacts({ action: "token", ttlMinutes: 60 })
 artifacts({ action: "upload", name: "report.html", content: "<html>...</html>" })
 artifacts({ action: "update", uuid: "abc-123", content: "<html>...</html>" })
 artifacts({ action: "delete", uuid: "abc-123" })
 artifacts({ action: "list", limit: 10 })
 artifacts({ action: "stats" })
-artifacts({ action: "token", ttlMinutes: 60 })
 ```
 
 | Action   | Purpose                          |
 | -------- | -------------------------------- |
-| `upload` | Create new artifact, returns URL |
+| `token`  | Get a URL for HTTP file upload   |
+| `upload` | Inline fallback, returns URL     |
 | `update` | Update existing artifact content |
 | `delete` | Remove an artifact               |
 | `list`   | List artifacts with pagination   |
 | `stats`  | Quota usage statistics           |
-| `token`  | Generate one-time upload token   |
 
-### Upload
+### Inline Upload Fallback
 
-Create a new HTML artifact. Artifacts are served at `https://{STATIC_DOMAIN}`.
+When HTTP file upload is unavailable, create an artifact from inline HTML. Use the returned URL;
+its origin is configured by the deployment.
 
 ```json
 artifacts({
@@ -89,10 +94,12 @@ artifacts({ action: "list", limit: 10, offset: 0 })
 
 ### Quotas and retention
 
-Storage, artifact-count, per-file-size, and default-retention policies are server-configured and
-may include per-user overrides. Check the effective storage and count quotas with `stats`. Upload
-and update errors report enforced file-size boundaries, and each returned `expiresAt` value is the
-authoritative expiration for that artifact.
+Check `stats` for the effective storage quota, artifact-count quota and `maxFileSizeBytes`.
+The file limit measures decoded HTML in UTF-8 bytes, rather than its escaped JSON representation.
+An administrator can override it per user; an unset override inherits the global
+`artifacts.max_file_size_mb` setting, then the 5 MiB default. One MiB is 1,048,576 bytes.
+Storage and count quotas are independent. Each returned `expiresAt` is authoritative for that
+artifact; a missing-page response does not establish a particular retention period.
 
 ```json
 artifacts({ action: "stats" })
@@ -101,6 +108,7 @@ artifacts({ action: "stats" })
     totalSize: 51200,
     storageLimit: 104857600,
     countLimit: 50,
+    maxFileSizeBytes: 5242880,
     storageUsedPercent: 0.05,
     countUsedPercent: 10
   }
@@ -108,7 +116,8 @@ artifacts({ action: "stats" })
 
 ## Upload Tokens
 
-Generate one-time tokens for HTTP API uploads. Useful for CI/CD pipelines or external tools that cannot use MCP directly.
+Generate a one-time token to publish a local HTML file without copying its contents into an MCP
+argument. Creating the token does not publish the file.
 
 ```json
 artifacts({ action: "token", ttlMinutes: 30 })
@@ -122,12 +131,19 @@ artifacts({ action: "token", ttlMinutes: 30 })
 Upload via HTTP:
 
 ```bash
-curl -X POST "https://{MOIRA_HOST}/api/public/artifacts/upload/xyz-789" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "report.html", "content": "<html>...</html>"}'
+curl -X POST "$UPLOAD_URL" \
+  -F 'file=@/absolute/path/report.html;type=text/html'
 ```
 
-Tokens are single-use and expire after the specified TTL.
+Set `UPLOAD_URL` to the exact `uploadUrl` returned by the token action. To associate an execution,
+add `-F "executionId=$EXECUTION_ID"`, where `EXECUTION_ID` is the actual existing owned execution ID
+returned by `start`. Omit it when no association is needed. The filename supplies
+the artifact name. JSON `{name, content, executionId?}` is also accepted. Confirm HTTP 201 and
+retain the response's actual `url`; the upload URL is a credential, not the public artifact URL.
+
+Tokens expire after the specified TTL and are marked used after successful creation. A content
+refusal does not consume a valid token. This sequential behavior does not guarantee atomic
+exactly-once creation under concurrent uploads. Reconcile a lost response before another attempt.
 
 ## Security
 
@@ -197,7 +213,8 @@ Use artifacts with the workspace pattern to organize workflow outputs:
 
 ### Linking to Executions
 
-Pass `executionId` when uploading to link artifacts to workflow executions:
+Pass `executionId` in the multipart or JSON upload body to link a token upload to an execution.
+For inline MCP upload, use the action argument:
 
 ```json
 artifacts({

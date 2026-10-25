@@ -394,7 +394,7 @@ function generate404Page(): string {
   <div class="container">
     <div class="emoji">🔍</div>
     <h1>Artifact Not Found</h1>
-    <p>This artifact may have expired, been removed, or never existed. Artifacts are available for 30 days after creation.</p>
+    <p>This artifact may have expired, been removed, or never existed. Ask its author for a current link.</p>
     <a href="${baseUrl}" class="button">Go to Moira</a>
   </div>
 </body>

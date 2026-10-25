@@ -84,6 +84,7 @@ interface ArtifactStatsResult {
   totalSize: number;
   storageLimit: number;
   countLimit: number;
+  maxFileSizeBytes: number;
   storageUsedPercent: number;
   countUsedPercent: number;
 }
@@ -228,6 +229,7 @@ export async function manageArtifacts(
             totalSize: stats.totalSize,
             storageLimit: stats.storageLimit,
             countLimit: stats.countLimit,
+            maxFileSizeBytes: stats.maxFileSizeBytes,
             storageUsedPercent: stats.storageUsedPercent,
             countUsedPercent: stats.countUsedPercent,
           },

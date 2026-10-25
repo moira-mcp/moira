@@ -35,8 +35,8 @@ The MCP process owns its served MCP limiter; the web backend's unused exported M
 that contract. See [rate-limit middleware](../../packages/web-backend/src/middleware/rate-limit-middleware.ts).
 
 Ordinary JSON and URL-encoded bodies have a 10 MiB parser limit. Stored workflow JSON has a 5 MiB
-UTF-8 limit, workflow multipart upload has a 10 MiB transport cap, and artifact multipart upload
-has a 5 MiB cap. Artifact service quotas also apply. Guarded execution-context editing measures the
+UTF-8 limit and workflow multipart upload has a 10 MiB transport cap. Artifact create/update and
+token uploads have owner-specific body admission described below. Guarded execution-context editing measures the
 merged serialized context against 10 MiB; this is not a universal limit on every engine write or a
 promise of one uniform 413 response. Native owner streams use separate framing/parsers.
 
@@ -318,11 +318,34 @@ is indistinguishable from missing; only the owner writes/publishes it. Usage cou
 owned running executions of each inspected referencing definition; `complete:false` means the
 bounded definition inspection is a lower bound, not zero or the complete installation inventory.
 
-Artifact size is UTF-8 content bytes. Per-user storage/count overrides precede global defaults;
-per-file and TTL settings also apply. Null quota overrides mean inherit, while zero is an explicit
-quota. Basic HTML validation is not sanitization. Upload token is marked used after creation;
+Artifact size is decoded HTML UTF-8 bytes. `GET /api/artifacts/stats` includes the effective
+`maxFileSizeBytes` alongside storage/count limits and usage. Per-user file-size overrides precede
+`artifacts.max_file_size_mb`, then the 5 MiB default; storage/count overrides follow their own
+global/default policies. Null overrides mean inherit; zero remains an explicit storage/count quota,
+but is not a valid file size. Each returned `expiresAt` defines that artifact's expiration.
+
+Session create/update authenticates before reading the body and rechecks current access afterwards.
+Public token upload validates the token before reading, then revalidates it before creation.
+For an effective file limit of `N` bytes, JSON admission is bounded by `6 × N + 65,536` bytes to
+allow escaping and metadata; the service still checks the actual decoded content limit. Multipart
+accepts one `file`, at most two text fields of 16 KiB each, three parts and field names up to 100 bytes.
+The bundled multipart parser has a native 16 KiB header-block limit per part. Metadata fields
+include optional `executionId`; the filename supplies the name. Over-budget content frames/files
+return 413; malformed JSON, malformed multipart headers or invalid multipart metadata return 400.
+Invalid tokens return 401 before content validation. See [operator framing](../operator/configuration.md#artifact-quotas-and-body-admission)
+for the MCP and supplied ingress boundaries.
+
+Basic HTML validation is not sanitization. Upload token is marked used after creation;
 do not treat that sequential contract as an atomic exactly-once guarantee under concurrent uploads.
 Public serving excludes expired/deleted/taken-down content. See [artifact security](../development/security.md).
+
+Administrator `GET /api/admin/users/:id/artifact-quota` returns `overrides.{quotaMb,maxFiles,maxFileSizeMb}`,
+`effective.{storageLimit,countLimit,maxFileSizeBytes}` and usage. PUT accepts these override fields
+optionally: omission preserves a stored override and `null` resets it to inheritance. A non-null
+`maxFileSizeMb` must be positive, represent a whole safe byte count and admit a safe JSON frame;
+fractional MiB values are allowed when those conditions hold. PUT returns accepted override values,
+effective `maxFileSizeBytes` and `updated:true`; changes are audited. The ordinary administrator
+and deployment-capability guards apply.
 
 Sources: [settings](../../packages/web-backend/src/routes/settings.ts),
 [Notes](../../packages/web-backend/src/routes/notes.ts),
@@ -475,6 +498,8 @@ wrapper; first-visit acknowledgment and wrapper language use origin-scoped cooki
 frame have separate CSPs and the frame sandbox permits scripts without same-origin/top-navigation/
 forms/popups. HTTPS images and selected external resources remain allowed: this is not complete
 network isolation. Report notifications are best effort and do not determine the report result.
+An unavailable artifact has a neutral 404 page; it does not reveal its private state or promise a
+fixed lifetime. Use the upload/list metadata's `expiresAt` for an owned artifact's actual expiration.
 See [security](../development/security.md) and
 [static route](../../packages/web-backend/src/routes/static-artifacts.ts).
 

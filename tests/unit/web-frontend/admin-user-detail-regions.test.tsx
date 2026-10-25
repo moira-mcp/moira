@@ -99,10 +99,18 @@ function detail(id: string) {
     emails: [],
   };
 }
-function quota(quotaMb = 10, maxFiles = 20) {
+function quota(
+  quotaMb: number | null = 10,
+  maxFiles: number | null = 20,
+  maxFileSizeMb: number | null = null,
+) {
   return {
-    overrides: { quotaMb, maxFiles },
-    effective: { storageLimit: 100 * 1024 ** 2, countLimit: 100 },
+    overrides: { quotaMb, maxFiles, maxFileSizeMb },
+    effective: {
+      storageLimit: 100 * 1024 ** 2,
+      countLimit: 100,
+      maxFileSizeBytes: (maxFileSizeMb ?? 5) * 1024 ** 2,
+    },
     usage: { totalSize: 0, totalArtifacts: 0, storageUsedPercent: 0, countUsedPercent: 0 },
   };
 }
@@ -299,7 +307,7 @@ test("a refused session revocation keeps confirmation open and a successful retr
 
 test("quota save followed by a failed read keeps the form, its focus and the truthful local error", async () => {
   const pending = deferred<Response>();
-  let saved: { quotaMb: number; maxFiles: number } | null = null;
+  let saved: { quotaMb: number; maxFiles: number; maxFileSizeMb: number | null } | null = null;
   responder = (path, method, init) => {
     if (path.endsWith("/artifact-quota") && method === "PUT") {
       saved = JSON.parse(String(init?.body));
@@ -309,18 +317,91 @@ test("quota save followed by a failed read keeps the form, its focus and the tru
     return ordinary(path, method);
   };
   mount();
-  const input = await editQuota();
-  fireEvent.change(input, { target: { value: "50" } });
+  await editQuota();
+  const input = screen.getByTestId("quota-max-file-size-input");
+  fireEvent.change(input, { target: { value: "24" } });
   fireEvent.click(screen.getByTestId("save-quota-button"));
   input.focus();
-  await waitFor(() => expect(saved).toEqual({ quotaMb: 50, maxFiles: 20 }));
-  expect(screen.getByTestId("quota-mb-input")).toBe(input);
+  await waitFor(() => expect(saved).toEqual({ quotaMb: 10, maxFiles: 20, maxFileSizeMb: 24 }));
+  expect(screen.getByTestId("quota-max-file-size-input")).toBe(input);
   expect(input).toHaveFocus();
   await act(async () => pending.resolve(failure("saved quota could not be reread")));
   expect(await screen.findByText("saved quota could not be reread")).toBeVisible();
   expect(screen.getByTestId("quota-edit-form")).toBeVisible();
   expect(input).toHaveFocus();
-  expect(input).toHaveValue(50);
+  expect(input).toHaveValue(24);
+});
+
+test("file size override refresh preserves a newer draft, and clearing only that override restores inheritance", async () => {
+  const refresh = deferred<Response>();
+  const submissions: unknown[] = [];
+  responder = (path, method, init) => {
+    if (path.endsWith("/artifact-quota") && method === "PUT") {
+      const values = JSON.parse(String(init?.body));
+      submissions.push(values);
+      return Promise.resolve(ok({ ...values, userId: "user-a", updated: true }));
+    }
+    if (path.endsWith("/artifact-quota") && submissions.length === 1) return refresh.promise;
+    if (path.endsWith("/artifact-quota") && submissions.length === 2)
+      return Promise.resolve(ok(quota()));
+    return ordinary(path, method);
+  };
+  mount();
+  await editQuota();
+  const input = screen.getByRole("spinbutton", {
+    name: i18n.t("admin.userDetail.artifactQuota.overrideMaxFileSizeMb"),
+  });
+  expect(screen.getByTestId("quota-effective-file-size")).toHaveTextContent("5.0 MB");
+  fireEvent.change(input, { target: { value: "24" } });
+  fireEvent.click(screen.getByTestId("save-quota-button"));
+  await waitFor(() =>
+    expect(submissions).toEqual([{ quotaMb: 10, maxFiles: 20, maxFileSizeMb: 24 }]),
+  );
+  fireEvent.change(input, { target: { value: "32" } });
+  input.focus();
+  await act(async () => refresh.resolve(ok(quota(10, 20, 24))));
+  expect(input).toHaveValue(32);
+  expect(input).toHaveFocus();
+  expect(screen.getByTestId("quota-effective-file-size")).toHaveTextContent("24.0 MB");
+  fireEvent.change(input, { target: { value: "" } });
+  fireEvent.click(screen.getByTestId("save-quota-button"));
+  await waitFor(() => expect(screen.queryByTestId("quota-edit-form")).toBeNull());
+  expect(submissions[1]).toEqual({ quotaMb: 10, maxFiles: 20, maxFileSizeMb: null });
+  expect(screen.getByTestId("quota-effective-file-size")).toHaveTextContent("5.0 MB");
+  expect(screen.getByTestId("artifact-quota-card")).toHaveTextContent("10.0 MB");
+});
+
+test("invalid file sizes stay in the quota draft without being submitted, and reset clears all overrides", async () => {
+  const submissions: unknown[] = [];
+  responder = (path, method, init) => {
+    if (path.endsWith("/artifact-quota") && method === "PUT") {
+      const values = JSON.parse(String(init?.body));
+      submissions.push(values);
+      return Promise.resolve(ok({ ...values, userId: "user-a", updated: true }));
+    }
+    if (path.endsWith("/artifact-quota"))
+      return Promise.resolve(ok(submissions.length ? quota(null, null) : quota(10, 20, 24)));
+    return ordinary(path, method);
+  };
+  mount();
+  await editQuota();
+  const input = screen.getByTestId("quota-max-file-size-input");
+  for (const invalid of ["0", "-1", "0.0000001", "1e30"]) {
+    fireEvent.change(input, { target: { value: invalid } });
+    fireEvent.click(screen.getByTestId("save-quota-button"));
+    expect(
+      await screen.findByText(i18n.t("admin.userDetail.artifactQuota.invalidFileSize")),
+    ).toBeVisible();
+    expect(input).toHaveValue(Number(invalid));
+  }
+  expect(submissions).toEqual([]);
+  fireEvent.click(screen.getByTestId("reset-quota-button"));
+  await waitFor(() => expect(screen.queryByTestId("quota-edit-form")).toBeNull());
+  expect(submissions).toEqual([{ quotaMb: null, maxFiles: null, maxFileSizeMb: null }]);
+  expect(screen.getByTestId("quota-effective-file-size")).toHaveTextContent("5.0 MB");
+  expect(screen.getByTestId("artifact-quota-card")).toHaveTextContent(
+    i18n.t("admin.userDetail.artifactQuota.usingDefault"),
+  );
 });
 
 test("new quota edits during the authoritative refresh remain dirty when its saved result arrives", async () => {
@@ -346,7 +427,7 @@ test("new quota edits during the authoritative refresh remain dirty when its sav
   expect(input).toHaveValue(75);
   expect(input).toHaveFocus();
   expect(screen.getByTestId("quota-edit-form")).toBeVisible();
-  expect(screen.getByTestId("artifact-quota-card")).toHaveTextContent("50 MB");
+  expect(screen.getByTestId("artifact-quota-card")).toHaveTextContent("50.0 MB");
 });
 
 test("a matching authoritative quota read closes an unchanged successfully saved edit", async () => {
@@ -364,7 +445,7 @@ test("a matching authoritative quota read closes an unchanged successfully saved
   fireEvent.change(input, { target: { value: "50" } });
   fireEvent.click(screen.getByTestId("save-quota-button"));
   await waitFor(() => expect(screen.queryByTestId("quota-edit-form")).toBeNull());
-  expect(screen.getByTestId("artifact-quota-card")).toHaveTextContent("50 MB");
+  expect(screen.getByTestId("artifact-quota-card")).toHaveTextContent("50.0 MB");
 });
 
 test("late primary and quota answers for a previous route cannot replace the new user's holding", async () => {
@@ -388,7 +469,7 @@ test("late primary and quota answers for a previous route cannot replace the new
   expect(screen.queryByRole("heading", { name: "user-a@example.test" })).toBeNull();
   expect(screen.getByTestId("quota-mb-input")).toBe(input);
   expect(input).toHaveValue(22);
-  expect(screen.getByTestId("artifact-quota-card")).not.toHaveTextContent("99 MB");
+  expect(screen.getByTestId("artifact-quota-card")).not.toHaveTextContent("99.0 MB");
 });
 
 test("approval publishes its confirmed timestamp and preserves the quota draft with focus returning to the status", async () => {

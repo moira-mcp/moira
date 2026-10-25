@@ -6,6 +6,8 @@
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import {
+  callMCPTool,
+  createAuthenticatedMCPClient,
   createTestUserViaApi,
   formatSessionCookie,
   getAdminSessionCookie,
@@ -523,19 +525,37 @@ describe("Artifacts API - Token Upload", () => {
   });
 
   test("POST /api/public/artifacts/upload/:token rejects missing content", async () => {
-    // Even with invalid token, validation should run
-    const res = await fetch(`${BASE_URL}/api/public/artifacts/upload/some-token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
+    const authenticated = await createAuthenticatedMCPClient(TEST_USER_A);
+    try {
+      const token = await callMCPTool<{ uploadUrl: string }>(authenticated.client, "artifacts", {
+        action: "token",
+      });
+      const res = await fetch(token.uploadUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
 
-    expect(res.status).toBe(400);
+      expect(res.status).toBe(400);
+      const json = (await res.json()) as { error: { message: string } };
+      expect(json.error.message).toContain("JSON body ({ name, content })");
 
-    const json = (await res.json()) as { error: { message: string } };
-    // Could be either validation failed (no content) or invalid token
-    // Both are acceptable failure modes
-    expect(res.status).toBeLessThan(500);
+      // Rejected content must leave the same upload token usable.
+      const retry = await fetch(token.uploadUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "token-after-missing-content.html",
+          content: "<html><body>Valid content after refusal</body></html>",
+        }),
+      });
+      expect(retry.status).toBe(201);
+      const created = (await retry.json()) as { data: { uuid: string } };
+      expect(created.data.uuid).toBeDefined();
+      createdUuids.userA.push(created.data.uuid);
+    } finally {
+      await authenticated.cleanup();
+    }
   });
 
   test("Public endpoint accepts requests without session cookie", async () => {

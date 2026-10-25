@@ -7,6 +7,7 @@ import {
   sqliteTable,
   text,
   integer,
+  real,
   primaryKey,
   uniqueIndex,
   index,
@@ -47,6 +48,7 @@ export const user = sqliteTable(
     // Per-user artifact quota overrides (null = use global setting)
     artifactQuotaMb: integer("artifactQuotaMb"), // Max total storage in MB (overrides artifacts.default_quota_mb)
     artifactMaxFiles: integer("artifactMaxFiles"), // Max artifact count (overrides artifacts.default_max_files)
+    artifactMaxFileSizeMb: real("artifactMaxFileSizeMb"), // Per-file MiB override; null inherits global
     createdAt: text("createdAt").notNull(),
     updatedAt: text("updatedAt").notNull(),
   },
