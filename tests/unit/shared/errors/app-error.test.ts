@@ -27,6 +27,7 @@ import {
   TooManyTagsError,
   NoteSizeExceededError,
   QuotaExceededError,
+  WorkflowRevisionConflictError,
 } from "@mcp-moira/shared";
 
 describe("AppError hierarchy", () => {
@@ -149,6 +150,22 @@ describe("AppError hierarchy", () => {
 
 describe("Error helpers", () => {
   describe("normalizeError", () => {
+    it("keeps a stale workflow write operational and exposes the revision needed to reload", () => {
+      const original = new WorkflowRevisionConflictError("workflow-1", 3, 4);
+      const normalized = normalizeError(original);
+
+      expect(normalized).toBeInstanceOf(ConflictError);
+      expect(normalized.statusCode).toBe(409);
+      expect(normalized.isOperational).toBe(true);
+      expect(normalized.message).toBe(original.message);
+      expect(normalized.context).toEqual({
+        code: "WORKFLOW_REVISION_CONFLICT",
+        workflowId: "workflow-1",
+        expectedRevision: 3,
+        currentRevision: 4,
+      });
+    });
+
     it("returns AppError unchanged", () => {
       const original = new ValidationError("Test");
       const normalized = normalizeError(original);

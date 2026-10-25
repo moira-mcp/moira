@@ -20,6 +20,11 @@ import type {
 import type { WorkflowMutationService } from "./workflow-mutation-service.js";
 import type { UserRepository } from "../database/repositories/user-repository.js";
 import type { AuditRepository } from "../database/repositories/audit-repository.js";
+import type { Revision, RevisionSummary } from "../database/repositories/revision-repository.js";
+import type { RevisionDiffPart } from "./revision-diff.js";
+import { migrateWorkflowGraph } from "@mcp-moira/workflow-engine/migration";
+import { GraphValidator } from "@mcp-moira/workflow-engine/validation";
+import { ValidationError } from "../errors/index.js";
 import { computeChanges } from "../logging/audit-logger.js";
 import { getAuditSource } from "../logging/context.js";
 import { createLogger, Component } from "../logging/logger.js";
@@ -29,6 +34,7 @@ import {
   UserNotFoundError,
   SlugConflictError,
   InvalidSlugError,
+  WorkflowAccessDeniedError,
 } from "../errors/domain-errors.js";
 import { validateSlug, normalizeSlug, parseWorkflowReference } from "../validation/slug-handle.js";
 
@@ -49,6 +55,8 @@ export interface SaveWorkflowOptions {
   adminBypass?: boolean;
   /** Revision the caller read; the write is refused if it moved on (see the repository). */
   expectedRevision?: number;
+  /** Content restoration must retain the currently stored publication policy. */
+  preserveVisibility?: boolean;
 }
 
 /**
@@ -57,6 +65,8 @@ export interface SaveWorkflowOptions {
 export interface SaveWorkflowResult {
   id: string;
   slug: string;
+  revision: number;
+  historyRevision: number;
   /** Validation result from mutation service (Issue #463) */
   validation?: ValidationCache;
 }
@@ -183,6 +193,7 @@ export class WorkflowService {
       isUpdate,
       adminBypass,
       expectedRevision,
+      preserveVisibility,
     } = options;
 
     // Get existing workflow for change detection (needed for audit)
@@ -220,6 +231,8 @@ export class WorkflowService {
         visibility,
         adminBypass,
         expectedRevision,
+        preserveVisibility,
+        requireExisting: isUpdate === true,
         skipAudit: true, // We handle audit here with change detection
       });
 
@@ -237,6 +250,8 @@ export class WorkflowService {
       return {
         id: mutationResult.id,
         slug: mutationResult.slug,
+        revision: mutationResult.revision,
+        historyRevision: mutationResult.historyRevision,
         validation: mutationResult.validation,
       };
     }
@@ -250,12 +265,98 @@ export class WorkflowService {
       visibility,
       adminBypass,
       expectedRevision,
+      preserveVisibility,
+      requireExisting: isUpdate === true,
     });
 
     // Perform detailed audit logging
     await this.auditSave(graph, userId, result.id, result.slug, visibility, isCreate, existing);
 
     return result;
+  }
+
+  /** Past definitions are editing material, not part of publishing the current definition. */
+  private async editableHistoryInfo(workflowId: string, userId: string): Promise<WorkflowInfo> {
+    const info = await this.workflowRepo.getFullInfo(workflowId, userId);
+    if (!info) throw new WorkflowNotFoundError(workflowId, "id");
+    if (!(await this.workflowRepo.canModify(workflowId, userId)))
+      throw new WorkflowAccessDeniedError(workflowId, userId, "write");
+    return info;
+  }
+
+  async history(workflowId: string, userId: string): Promise<RevisionSummary[]> {
+    await this.editableHistoryInfo(workflowId, userId);
+    return this.workflowRepo.history(workflowId);
+  }
+
+  async getRevision(
+    workflowId: string,
+    userId: string,
+    revision: number,
+  ): Promise<Revision | null> {
+    this.requireHistoryRevision(revision);
+    await this.editableHistoryInfo(workflowId, userId);
+    return this.workflowRepo.getRevision(workflowId, revision);
+  }
+
+  async compareRevisions(
+    workflowId: string,
+    userId: string,
+    from: number,
+    to: number,
+  ): Promise<{ from: number; to: number; parts: RevisionDiffPart[] } | null> {
+    this.requireHistoryRevision(from);
+    this.requireHistoryRevision(to);
+    await this.editableHistoryInfo(workflowId, userId);
+    return this.workflowRepo.compareRevisions(workflowId, from, to);
+  }
+
+  /** Restore content as a guarded new save, never rewind history or publication authority. */
+  async rollback(
+    workflowId: string,
+    userId: string,
+    revision: number,
+    expectedRevision: number,
+  ): Promise<{
+    workflowId: string;
+    revision: number;
+    historyRevision: number;
+    restoredFrom: number;
+  }> {
+    this.requireHistoryRevision(revision);
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)
+      throw new ValidationError("A nonnegative integer expectedRevision is required for rollback");
+    const info = await this.editableHistoryInfo(workflowId, userId);
+    const past = await this.workflowRepo.getRevision(workflowId, revision);
+    if (!past || past.content === null)
+      throw new WorkflowNotFoundError(`${workflowId}@${revision}`, "id");
+    const graph = { ...migrateWorkflowGraph(JSON.parse(past.content)).graph, id: workflowId };
+    const validation = await new GraphValidator().validateWorkflow(graph);
+    const references =
+      (await this.mutationService?.unresolvablePlaybookReferences(graph, userId)) ?? [];
+    if (!validation.valid || references.length)
+      throw new ValidationError("The stored workflow definition is not valid", {
+        errors: [...validation.errors.map((error) => error.message), ...references],
+      });
+    const saved = await this.save({
+      graph,
+      userId,
+      visibility: info.visibility,
+      isUpdate: true,
+      expectedRevision,
+      preserveVisibility: true,
+    });
+    return {
+      workflowId,
+      revision: saved.revision,
+      historyRevision: saved.historyRevision,
+      restoredFrom: revision,
+    };
+  }
+
+  private requireHistoryRevision(revision: number): void {
+    if (!Number.isSafeInteger(revision) || revision < 1)
+      throw new ValidationError("A positive integer history revision is required");
   }
 
   /**

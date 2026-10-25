@@ -231,6 +231,32 @@ To practise editing, the tutorial **Build your first flow** (**Show me around â†
 you through adding a step, connecting it, adding a choice and using a value from an earlier step
 on your own copy of Example 1, checking each lesson on this page.
 
+## Version history
+
+As the owner, open **Version history** from the page actions or the phone's action menu. It lists
+saved snapshots newest first. Select a snapshot to inspect its complete JSON content or compare
+it with the current definition as a diff or side by side. Public or shared access to the current
+workflow does not grant access to this history.
+
+The numbers in this dialog identify saved snapshots. They are separate from the author's
+`metadata.version` and from the current write revision that the page loaded. See
+[definition versions and saved history](/docs/guides/editing-workflows/#definition-versions-and-saved-history)
+for their meanings and the agent commands.
+
+**Restore** asks for confirmation and saves the selected content as a new history point, retaining
+the workflow's identity, owner and current sharing. It does not delete intervening snapshots.
+The server validates the chosen definition and checks the page's loaded write revision. If another
+editor saved first, restoration is refused: the confirmation stays open with the error, and the
+newer definition remains intact. Reload and review the current definition before trying again.
+After a successful restoration the page loads the restored definition.
+
+Save or discard unsaved edits before restoring. A draft does not prevent inspecting content or
+comparison, but disables restoration with an explanation; opening history does not discard it.
+Restoring content does not rewind a run or restore a deleted workflow. Already running processes
+use the saved definition under the usual continuation checks; inspect an incompatible paused step
+with `session diagnose` before choosing an authorized `session recover` target. See
+[stale presentation recovery](/docs/integration/troubleshooting/#current_presentation_stale).
+
 ## Explaining the page
 
 **What is this?** opens a tour of the page, each card sitting beside the element it explains, in

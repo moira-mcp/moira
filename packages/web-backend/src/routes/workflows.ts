@@ -7,6 +7,7 @@
  */
 
 import { Router, Request, Response } from "express";
+import { z } from "zod";
 import {
   ApiResponse,
   WorkflowListResponse,
@@ -43,6 +44,82 @@ import {
 } from "@mcp-moira/shared";
 
 const router = Router();
+
+// Explicit identity namespaces keep history operations disjoint from definition readers.
+const historyWorkflowId = async (req: Request): Promise<string> => {
+  const userId = (req as AuthenticatedRequest).userId;
+  if (req.params.id !== undefined) {
+    if (!z.string().uuid().safeParse(req.params.id).success)
+      throw createApiError.badRequest("A workflow UUID is required for by-id operations");
+    return req.params.id;
+  }
+  if (req.params.handle !== undefined) {
+    const { info } = await workflowService.getByReference(
+      `${req.params.handle}/${req.params.slug}`,
+      userId,
+    );
+    return info.id;
+  }
+  const graph = await workflowService.getBySlug(req.params.slug, userId);
+  if (!graph?.id) throw createApiError.notFound("Workflow not found");
+  return graph.id;
+};
+
+router.get(
+  ["/by-id/:id/history", "/by-reference/:handle/:slug/history", "/by-slug/:slug/history"],
+  asyncHandler(async (req: Request, res: Response) => {
+    const id = await historyWorkflowId(req);
+    const revisions = await workflowService.history(id, (req as AuthenticatedRequest).userId);
+    res.json({ success: true, data: { revisions }, timestamp: new Date().toISOString() });
+  }),
+);
+
+router.get(
+  [
+    "/by-id/:id/revisions/:revision",
+    "/by-reference/:handle/:slug/revisions/:revision",
+    "/by-slug/:slug/revisions/:revision",
+  ],
+  asyncHandler(async (req: Request, res: Response) => {
+    const id = await historyWorkflowId(req);
+    const stored = await workflowService.getRevision(
+      id,
+      (req as AuthenticatedRequest).userId,
+      Number(req.params.revision),
+    );
+    if (!stored) throw createApiError.notFound("Workflow revision not found");
+    res.json({ success: true, data: stored, timestamp: new Date().toISOString() });
+  }),
+);
+
+router.get(
+  ["/by-id/:id/compare", "/by-reference/:handle/:slug/compare", "/by-slug/:slug/compare"],
+  asyncHandler(async (req: Request, res: Response) => {
+    const id = await historyWorkflowId(req);
+    const comparison = await workflowService.compareRevisions(
+      id,
+      (req as AuthenticatedRequest).userId,
+      Number(req.query.from),
+      Number(req.query.to),
+    );
+    if (!comparison) throw createApiError.notFound("Workflow revisions not found");
+    res.json({ success: true, data: comparison, timestamp: new Date().toISOString() });
+  }),
+);
+
+router.post(
+  ["/by-id/:id/rollback", "/by-reference/:handle/:slug/rollback", "/by-slug/:slug/rollback"],
+  asyncHandler(async (req: Request, res: Response) => {
+    const id = await historyWorkflowId(req);
+    const restored = await workflowService.rollback(
+      id,
+      (req as AuthenticatedRequest).userId,
+      req.body?.revision,
+      req.body?.expectedRevision,
+    );
+    res.json({ success: true, data: restored, timestamp: new Date().toISOString() });
+  }),
+);
 
 /**
  * GET /api/workflows/:id/statistics?version=<semver> — typical block durations over the caller's

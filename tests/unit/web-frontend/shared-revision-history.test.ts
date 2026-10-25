@@ -1,5 +1,5 @@
 /**
- * One history interface, three consumers.
+ * One history interface across revisioned entities.
  *
  * Notes, playbooks and global settings keep their content in one revision store on the server. The
  * requirement is that they share the interface too, and the state that looks the same from outside
@@ -17,6 +17,7 @@ const CONSUMERS = {
   notes: "components/notes/NoteHistoryDialog.tsx",
   playbooks: "pages/Playbooks.tsx",
   globalSettings: "pages/AdminSettings.tsx",
+  workflows: "pages/FlowPage.tsx",
 };
 
 function read(relative: string): string {

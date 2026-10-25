@@ -38,8 +38,19 @@ import {
   normalizeSlug,
 } from "../../validation/slug-handle.js";
 import { executeListQuery, clampPagination, type ListQueryConfig } from "../list-query-builder.js";
-import { WorkflowRevisionConflictError } from "../../errors/domain-errors.js";
+import {
+  WorkflowRevisionConflictError,
+  WorkflowNotFoundError,
+} from "../../errors/domain-errors.js";
 import { recomputeGateWaiting, storedGraphNodes } from "../gate-waiting.js";
+import { recordWorkflowRevision } from "../workflow-history.js";
+import {
+  RevisionRepository,
+  REVISION_ENTITY_TYPES,
+  type Revision,
+  type RevisionSummary,
+} from "./revision-repository.js";
+import type { RevisionDiffPart } from "../../services/revision-diff.js";
 
 const DELETED_WORKFLOW_LIST_CONFIG: ListQueryConfig<"name" | "deletedAt"> = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -216,6 +227,8 @@ export interface SaveWorkflowOptions {
    * `WorkflowRevisionConflictError` reports the current revision otherwise. Ignored for a create.
    */
   expectedRevision?: number;
+  preserveVisibility?: boolean;
+  requireExisting?: boolean;
 }
 
 /**
@@ -1123,7 +1136,9 @@ export class WorkflowRepository {
   /**
    * Save workflow with automatic UUID and slug generation
    */
-  async save(options: SaveWorkflowOptions): Promise<{ id: string; slug: string }> {
+  async save(
+    options: SaveWorkflowOptions,
+  ): Promise<{ id: string; slug: string; revision: number; historyRevision: number }> {
     const { userId, slug: providedSlug, visibility = "private", adminBypass } = options;
     // Every write stores the current schema shape.
     const graph = migrateWorkflowGraph(options.graph).graph;
@@ -1158,9 +1173,16 @@ export class WorkflowRepository {
       // Update - only owner can update. With an expected revision the check and the write are one
       // statement, so two writers that read the same revision cannot both succeed. The paused runs
       // of the workflow whose gate the new definition changes are re-decided in the same transaction.
+      // Content writes cannot undo a deletion acknowledged after the authority read above.
+      let historyRevision = 0;
       const updated = this.db.transaction(
         (tx) => {
           const previous = storedGraphNodes(tx, existingId);
+          const previousDefinition = tx
+            .select({ graph: workflow.graph })
+            .from(workflow)
+            .where(eq(workflow.id, existingId))
+            .get();
           const rows = tx
             .update(workflow)
             .set({
@@ -1168,40 +1190,54 @@ export class WorkflowRepository {
               description: graph.metadata.description || null,
               version: graph.metadata.version,
               graph: graphJson,
-              visibility,
-              deleted: false,
-              deletedAt: null,
-              deletedBy: null,
+              visibility: options.preserveVisibility ? sql`${workflow.visibility}` : visibility,
               updatedAt: now,
               revision: sql`${workflow.revision} + 1`,
             })
             .where(
-              options.expectedRevision === undefined
-                ? eq(workflow.id, existingId)
-                : and(eq(workflow.id, existingId), eq(workflow.revision, options.expectedRevision)),
+              and(
+                eq(workflow.id, existingId),
+                or(eq(workflow.deleted, false), isNull(workflow.deleted)),
+                options.expectedRevision === undefined
+                  ? undefined
+                  : eq(workflow.revision, options.expectedRevision),
+              ),
             )
-            .returning({ id: workflow.id })
+            .returning({ id: workflow.id, revision: workflow.revision })
             .all();
-          if (rows.length > 0) recomputeGateWaiting(tx, existingId, previous, graph);
+          if (rows.length === 0) {
+            const current = tx
+              .select({ revision: workflow.revision, deleted: workflow.deleted })
+              .from(workflow)
+              .where(eq(workflow.id, existingId))
+              .get();
+            if (!current || current.deleted) throw new WorkflowNotFoundError(existingId, "id");
+            throw new WorkflowRevisionConflictError(
+              existingId,
+              options.expectedRevision ?? 0,
+              current.revision,
+            );
+          }
+          historyRevision = recordWorkflowRevision(this.db, {
+            id: existingId,
+            graph: graphJson,
+            previousGraph: previousDefinition?.graph,
+            authorId: userId,
+          });
+          recomputeGateWaiting(tx, existingId, previous, graph);
           return rows;
         },
         { behavior: "immediate" },
       );
 
-      if (updated.length === 0) {
-        const [current] = await this.db
-          .select({ revision: workflow.revision })
-          .from(workflow)
-          .where(eq(workflow.id, existingId));
-        throw new WorkflowRevisionConflictError(
-          existingId,
-          options.expectedRevision ?? 0,
-          current?.revision ?? 0,
-        );
-      }
-
-      return { id: existingId, slug: ownership.slug! };
+      return {
+        id: existingId,
+        slug: ownership.slug!,
+        revision: updated[0].revision,
+        historyRevision,
+      };
     } else {
+      if (options.requireExisting) throw new WorkflowNotFoundError(graph.id ?? "", "id");
       // Insert new workflow - generate UUID and slug
       const workflowId = randomUUID();
 
@@ -1227,20 +1263,33 @@ export class WorkflowRepository {
       // Update graph.id to use the new UUID
       const graphWithId = { ...graph, id: workflowId };
 
-      await this.db.insert(workflow).values({
-        id: workflowId,
-        userId,
-        slug: finalSlug,
-        name: graph.metadata.name,
-        description: graph.metadata.description || null,
-        version: graph.metadata.version,
-        graph: JSON.stringify(graphWithId),
-        visibility,
-        createdAt: now,
-        updatedAt: now,
-      });
+      const historyRevision = this.db.transaction(
+        () => {
+          this.db
+            .insert(workflow)
+            .values({
+              id: workflowId,
+              userId,
+              slug: finalSlug,
+              name: graph.metadata.name,
+              description: graph.metadata.description || null,
+              version: graph.metadata.version,
+              graph: JSON.stringify(graphWithId),
+              visibility,
+              createdAt: now,
+              updatedAt: now,
+            })
+            .run();
+          return recordWorkflowRevision(this.db, {
+            id: workflowId,
+            graph: JSON.stringify(graphWithId),
+            authorId: userId,
+          });
+        },
+        { behavior: "immediate" },
+      );
 
-      return { id: workflowId, slug: finalSlug };
+      return { id: workflowId, slug: finalSlug, revision: 0, historyRevision };
     }
   }
 
@@ -1284,6 +1333,32 @@ export class WorkflowRepository {
 
   // ===== Delete Operations =====
 
+  async history(workflowId: string): Promise<RevisionSummary[]> {
+    return new RevisionRepository(this.db).list({
+      entityType: REVISION_ENTITY_TYPES.workflow,
+      entityId: workflowId,
+    });
+  }
+
+  async getRevision(workflowId: string, revision: number): Promise<Revision | null> {
+    return new RevisionRepository(this.db).get(
+      { entityType: REVISION_ENTITY_TYPES.workflow, entityId: workflowId },
+      revision,
+    );
+  }
+
+  async compareRevisions(
+    workflowId: string,
+    from: number,
+    to: number,
+  ): Promise<{ from: number; to: number; parts: RevisionDiffPart[] } | null> {
+    return new RevisionRepository(this.db).compare(
+      { entityType: REVISION_ENTITY_TYPES.workflow, entityId: workflowId },
+      from,
+      to,
+    );
+  }
+
   async delete(workflowId: string, userId: string): Promise<void> {
     // Hard delete - only owner can delete. Its runs go with it (cascade): the change feed records
     // them as deleted in the same transaction, before the delete.
@@ -1295,6 +1370,10 @@ export class WorkflowRepository {
           .where(and(eq(workflow.id, workflowId), eq(workflow.userId, userId)))
           .get();
         if (!owned) return;
+        new RevisionRepository(this.db).deleteHistorySync({
+          entityType: REVISION_ENTITY_TYPES.workflow,
+          entityId: workflowId,
+        });
         recordExecutionsDeleted(tx, { workflowId });
         tx.delete(workflow)
           .where(and(eq(workflow.id, workflowId), eq(workflow.userId, userId)))

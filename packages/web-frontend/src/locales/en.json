@@ -1465,6 +1465,12 @@
     },
     "flowPage": {
       "title": "Flow",
+      "history": {
+        "open": "Version history",
+        "subject": "workflow “{{name}}”",
+        "dirtyDraft": "Save or undo your unsaved changes before restoring a version. You can still inspect and compare history.",
+        "restored": "Workflow version restored"
+      },
       "refreshing": "Refreshing…",
       "noProcess": "This workflow declares no process view (no blocks), so the page shows its node graph. Add a `progress` section with blocks to read it as a process.",
       "diagnostics": "Problems of the definition",
@@ -3653,6 +3659,10 @@
         "edit-reader": {
           "title": "Only its owner edits it",
           "body": "This page shows the definition, not a run: the header names the flow, its version, its description and its facts, and carries the page's actions. Only the flow's owner can edit it. To make your own version, use it as a template: you get a private copy you can change. Runs of this workflow are read on the run page."
+        },
+        "history": {
+          "title": "Inspect and restore saved versions",
+          "body": "As the owner, you can open Version history to inspect saved snapshots of the complete workflow definition and compare revisions. Restoring a snapshot creates a new history revision and checks the workflow revision loaded on this page. If someone saved changes elsewhere, restore refuses to overwrite them: reload the page first. Save or undo unsaved changes before restoring; you can still inspect and compare history with a draft open."
         },
         "explore": {
           "title": "Explore the same process your way",

@@ -480,9 +480,70 @@ under «Via the Workflow CLI» above.
 
 ## Version Control
 
+### Definition versions and saved history
+
+Three values describe different things:
+
+- `metadata.version` is the author's semantic version, such as `1.1.0`.
+- `revision` from `manage get` is the current write token. Pass it as `expectedRevision` when
+  applying a guarded edit or rollback; it is not a historical snapshot number.
+- `revision` in `manage history` identifies an immutable snapshot of the complete saved definition.
+  Separate saves retain separate snapshots even when their semantic versions are equal.
+
+Only the workflow owner can read, compare or restore its history. Permission to use a shared or
+public current definition does not expose past private definitions. History records definition
+writes, including catalog synchronization and stored-schema upgrades. When a definition has no
+recorded history, its actual current content becomes the baseline before its next content write;
+earlier unrecorded saves cannot be recovered. CLI file backups are separate from server history.
+
+List the available snapshots, then read a selected snapshot or compare two returned numbers:
+
+```typescript
+mcp__moira__manage({ action: "history", workflowId: "my-workflow" });
+mcp__moira__manage({ action: "get-revision", workflowId: "my-workflow", revision: 1 });
+mcp__moira__manage({
+  action: "compare-revisions",
+  workflowId: "my-workflow",
+  fromRevision: 1,
+  toRevision: 2,
+});
+```
+
+Replace `1` and `2` with snapshot numbers returned by history. An absent snapshot is an error,
+not an empty comparison. The snapshot contains the full graph, including registry, runtime policy
+and process presentation, rather than only the fields visible in the browser editor.
+
+Before restoring, read the current definition with `manage get` and retain its write token.
+After inspecting the selected content, pass that token to rollback:
+
+```typescript
+mcp__moira__manage({
+  action: "rollback",
+  workflowId: "my-workflow",
+  revision: 1,
+  expectedRevision: currentWriteRevision,
+});
+```
+
+Here `currentWriteRevision` is the `revision` from that current read, and `1` is the chosen history
+number. Rollback validates and migrates the selected definition, preserves the existing workflow's
+ID, owner and current sharing, and appends a new snapshot. The result returns the new write
+`revision`, new `historyRevision` and `restoredFrom`. A stale token produces
+`WORKFLOW_REVISION_CONFLICT` without changing the graph or history: reload and reassess the intended
+restoration before retrying. Soft deletion retains history; permanent deletion removes it.
+Content rollback is separate from an administrator restoring a deleted workflow.
+
+Restoration changes the saved definition, not the state of an existing run. Runs read the current
+definition; compatible paused steps can continue normally, while changed step semantics require
+inspection with `session diagnose` and an authorized `session recover` decision. Do not replay an
+old attempt, skip unfinished work or repeat an uncertain effect. See
+[stale presentation diagnosis and recovery](/docs/integration/troubleshooting/#current_presentation_stale).
+For browser inspection and guarded restoration, see the
+[flow page](/docs/guides/flow-page/#version-history).
+
 ### Increment Version
 
-Always update version when making changes:
+Use semantic version changes to communicate the meaning of an authored change:
 
 ```typescript
 {
@@ -499,6 +560,8 @@ Version semantics:
 - **Patch** (1.0.1): Bug fixes, text corrections
 
 ### Compare Versions
+
+To compare two different workflow definitions, rather than snapshots of one workflow, use `diff`:
 
 ```typescript
 mcp__moira__manage({

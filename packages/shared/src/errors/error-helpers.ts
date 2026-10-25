@@ -18,6 +18,7 @@ import {
   InvalidHandleError,
   SlugConflictError,
   HandleConflictError,
+  WorkflowRevisionConflictError,
   WorkflowNotFoundError,
   UserNotFoundError,
   WorkflowAccessDeniedError,
@@ -59,6 +60,14 @@ export function normalizeError(error: unknown): AppError {
     }
 
     // Conflict errors (409)
+    if (error instanceof WorkflowRevisionConflictError) {
+      return new ConflictError(error.message, {
+        code: error.code,
+        workflowId: error.workflowId,
+        expectedRevision: error.expectedRevision,
+        currentRevision: error.currentRevision,
+      });
+    }
     if (error instanceof SlugConflictError || error instanceof HandleConflictError) {
       return new ConflictError(error.message, { code: error.code });
     }

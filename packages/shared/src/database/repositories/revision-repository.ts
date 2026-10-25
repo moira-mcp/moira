@@ -29,6 +29,7 @@ export const REVISION_ENTITY_TYPES = {
   note: "note",
   globalSetting: "global-setting",
   playbook: "playbook",
+  workflow: "workflow",
 } as const;
 
 export type RevisionEntityType = (typeof REVISION_ENTITY_TYPES)[keyof typeof REVISION_ENTITY_TYPES];
@@ -78,24 +79,36 @@ export class RevisionRepository {
    * reused number: pruning removes the oldest rows, not the newest.
    */
   async append(options: AppendRevisionOptions): Promise<Revision> {
+    return this.appendSync(options);
+  }
+
+  /** Append atomically, including when composed inside an owning entity's synchronous transaction. */
+  appendSync(options: AppendRevisionOptions): Revision {
+    return this.db.transaction(() => this.appendContent(options), { behavior: "immediate" });
+  }
+
+  private appendContent(options: AppendRevisionOptions): Revision {
     const { entityType, entityId, content, authorId = null, maxRevisions } = options;
     const size = Buffer.byteLength(content ?? "", "utf8");
     const createdAt = new Date();
-    const revision = (await this.highestRevision({ entityType, entityId })) + 1;
+    const revision = this.highestRevision({ entityType, entityId }) + 1;
 
-    await this.db.insert(entityRevision).values({
-      id: randomUUID(),
-      entityType,
-      entityId,
-      revision,
-      content,
-      size,
-      authorId,
-      createdAt,
-    });
+    this.db
+      .insert(entityRevision)
+      .values({
+        id: randomUUID(),
+        entityType,
+        entityId,
+        revision,
+        content,
+        size,
+        authorId,
+        createdAt,
+      })
+      .run();
 
     if (maxRevisions !== undefined) {
-      await this.prune({ entityType, entityId }, maxRevisions);
+      this.prune({ entityType, entityId }, maxRevisions);
     }
 
     return { revision, content, size, authorId, createdAt: createdAt.getTime() };
@@ -103,7 +116,11 @@ export class RevisionRepository {
 
   /** The newest revision, or null when the entity has no history. */
   async latest(target: RevisionTarget): Promise<Revision | null> {
-    const [row] = await this.db
+    return this.latestSync(target);
+  }
+
+  latestSync(target: RevisionTarget): Revision | null {
+    const row = this.db
       .select()
       .from(entityRevision)
       .where(
@@ -113,7 +130,8 @@ export class RevisionRepository {
         ),
       )
       .orderBy(desc(entityRevision.revision))
-      .limit(1);
+      .limit(1)
+      .get();
     return row ? this.toRevision(row) : null;
   }
 
@@ -183,14 +201,19 @@ export class RevisionRepository {
 
   /** Remove an entity's whole history; the owner calls this when it deletes the entity itself. */
   async deleteHistory(target: RevisionTarget): Promise<void> {
-    await this.db
+    this.deleteHistorySync(target);
+  }
+
+  deleteHistorySync(target: RevisionTarget): void {
+    this.db
       .delete(entityRevision)
       .where(
         and(
           eq(entityRevision.entityType, target.entityType),
           eq(entityRevision.entityId, target.entityId),
         ),
-      );
+      )
+      .run();
   }
 
   /** Total stored size of an entity's history, in bytes. */
@@ -207,8 +230,8 @@ export class RevisionRepository {
     return row?.total ?? 0;
   }
 
-  private async highestRevision(target: RevisionTarget): Promise<number> {
-    const [row] = await this.db
+  private highestRevision(target: RevisionTarget): number {
+    const row = this.db
       .select({ revision: entityRevision.revision })
       .from(entityRevision)
       .where(
@@ -218,12 +241,13 @@ export class RevisionRepository {
         ),
       )
       .orderBy(desc(entityRevision.revision))
-      .limit(1);
+      .limit(1)
+      .get();
     return row?.revision ?? 0;
   }
 
-  private async prune(target: RevisionTarget, maxRevisions: number): Promise<void> {
-    const rows = await this.db
+  private prune(target: RevisionTarget, maxRevisions: number): void {
+    const rows = this.db
       .select({ id: entityRevision.id })
       .from(entityRevision)
       .where(
@@ -232,17 +256,21 @@ export class RevisionRepository {
           eq(entityRevision.entityId, target.entityId),
         ),
       )
-      .orderBy(asc(entityRevision.revision));
+      .orderBy(asc(entityRevision.revision))
+      .all();
 
     if (rows.length <= maxRevisions) return;
 
     const doomed = rows.slice(0, rows.length - maxRevisions);
-    await this.db.delete(entityRevision).where(
-      inArray(
-        entityRevision.id,
-        doomed.map((row) => row.id),
-      ),
-    );
+    this.db
+      .delete(entityRevision)
+      .where(
+        inArray(
+          entityRevision.id,
+          doomed.map((row) => row.id),
+        ),
+      )
+      .run();
     this.logger.debug("prune() dropped oldest revisions", {
       entityType: target.entityType,
       entityId: target.entityId,

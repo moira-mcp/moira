@@ -45,6 +45,10 @@ export const MANAGE_WORKFLOW_ACTIONS = [
   "list-invites",
   "revoke-access",
   "revoke-invite",
+  "history",
+  "get-revision",
+  "compare-revisions",
+  "rollback",
 ] as const;
 
 export const manageWorkflowSchema = z.object({
@@ -150,8 +154,28 @@ export const manageWorkflowSchema = z.object({
     .min(0)
     .optional()
     .describe(
-      "edit only: the workflow revision the changes were prepared against (from get); the edit is refused when the stored revision differs",
+      "edit or rollback: the current definition revision from get; required for rollback; a stale value refuses the write",
     ),
+  revision: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      "Immutable content-history revision for get-revision or rollback; distinct from metadata.version and expectedRevision",
+    ),
+  fromRevision: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Older content-history revision for compare-revisions"),
+  toRevision: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Newer content-history revision for compare-revisions"),
   includeNodes: z.boolean().optional().describe("Include full node definitions in get response"),
   includeValidation: z.boolean().optional().describe("Include validation results in response"),
   offset: z.number().optional().describe("Pagination offset for node listing"),

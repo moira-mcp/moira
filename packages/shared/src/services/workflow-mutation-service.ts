@@ -49,6 +49,8 @@ export interface MutationSaveOptions {
   adminBypass?: boolean;
   /** Revision the caller read; the write is refused if it moved on (see the repository). */
   expectedRevision?: number;
+  preserveVisibility?: boolean;
+  requireExisting?: boolean;
 }
 
 /**
@@ -59,6 +61,8 @@ export interface MutationSaveResult {
   id: string;
   /** Workflow slug */
   slug: string;
+  revision: number;
+  historyRevision: number;
   /** Validation result */
   validation: ValidationCache;
   /** Whether this was a new workflow (true) or update (false) */
@@ -153,6 +157,8 @@ export class WorkflowMutationService {
       skipAudit,
       adminBypass,
       expectedRevision,
+      preserveVisibility,
+      requireExisting,
     } = options;
 
     // Check if this is an update (workflow exists)
@@ -181,6 +187,8 @@ export class WorkflowMutationService {
       visibility,
       adminBypass,
       expectedRevision,
+      preserveVisibility,
+      requireExisting,
     });
 
     // 3. Cache validation result
@@ -218,6 +226,8 @@ export class WorkflowMutationService {
     return {
       id: saveResult.id,
       slug: saveResult.slug,
+      revision: saveResult.revision,
+      historyRevision: saveResult.historyRevision,
       validation: {
         status: isValid ? "valid" : "invalid",
         errors,

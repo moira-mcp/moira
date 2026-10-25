@@ -7,6 +7,7 @@
  */
 
 import axios, { AxiosInstance, AxiosResponse, AxiosError, AxiosRequestConfig } from "axios";
+import { z } from "zod";
 import { ConditionalReadStore, ReadRetiredError } from "./conditional-read-store";
 import {
   getReadIdentity,
@@ -66,6 +67,8 @@ import type {
   LocalPairingView,
   ControllerOperation,
 } from "@mcp-moira/shared";
+
+const workflowHistoryUuid = z.string().uuid();
 
 /** The latest notification about the wait a run stands in: what the run page shows under its banner. */
 export interface WaitingNotificationMark {
@@ -3628,6 +3631,78 @@ export class MoiraApiClient {
   }
 
   // ==================== Workflow Sharing API ====================
+
+  /** History uses explicit identity namespaces so operation names cannot shadow handle/slug reads. */
+  private buildWorkflowHistoryPath(identifier: string, operation: string): string {
+    const parts = identifier.split("/");
+    if (parts.length === 2) {
+      return `/workflows/by-reference/${parts.map(encodeURIComponent).join("/")}/${operation}`;
+    }
+    const namespace = workflowHistoryUuid.safeParse(identifier).success ? "by-id" : "by-slug";
+    return `/workflows/${namespace}/${encodeURIComponent(identifier)}/${operation}`;
+  }
+
+  async getWorkflowHistory(workflowId: string): Promise<RevisionSummary[]> {
+    return this.wrapFailure("get workflow history", async () => {
+      const response = await this.client.get<ApiResponse<{ revisions: RevisionSummary[] }>>(
+        this.buildWorkflowHistoryPath(workflowId, "history"),
+      );
+      return response.data.data!.revisions;
+    });
+  }
+
+  async readWorkflowRevision(workflowId: string, revision: number): Promise<string | null> {
+    return this.wrapFailure("read workflow revision", async () => {
+      const response = await this.client.get<ApiResponse<{ content: string | null }>>(
+        this.buildWorkflowHistoryPath(workflowId, `revisions/${revision}`),
+      );
+      return response.data.data!.content;
+    });
+  }
+
+  async compareWorkflowRevisions(
+    workflowId: string,
+    from: number,
+    to: number,
+  ): Promise<{
+    from: number;
+    to: number;
+    parts: Array<{ value: string; added?: boolean; removed?: boolean }>;
+  }> {
+    return this.wrapFailure("compare workflow revisions", async () => {
+      const response = await this.client.get<
+        ApiResponse<{
+          from: number;
+          to: number;
+          parts: Array<{ value: string; added?: boolean; removed?: boolean }>;
+        }>
+      >(this.buildWorkflowHistoryPath(workflowId, "compare"), { params: { from, to } });
+      return response.data.data!;
+    });
+  }
+
+  async rollbackWorkflow(
+    workflowId: string,
+    revision: number,
+    expectedRevision: number,
+  ): Promise<{
+    workflowId: string;
+    revision: number;
+    historyRevision: number;
+    restoredFrom: number;
+  }> {
+    return this.wrapFailure("restore workflow revision", async () => {
+      const response = await this.client.post<
+        ApiResponse<{
+          workflowId: string;
+          revision: number;
+          historyRevision: number;
+          restoredFrom: number;
+        }>
+      >(this.buildWorkflowHistoryPath(workflowId, "rollback"), { revision, expectedRevision });
+      return response.data.data!;
+    });
+  }
 
   /**
    * Create an invite link for a workflow

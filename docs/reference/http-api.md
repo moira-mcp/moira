@@ -126,6 +126,49 @@ Sources: [workflow routes](../../packages/web-backend/src/routes/workflows.ts),
 [sharing](../../packages/web-backend/src/routes/workflow-sharing.ts),
 [token routes](../../packages/web-backend/src/routes/workflow-tokens.ts).
 
+### Workflow content history
+
+History requires the workflow owner's editing authority. Reading or using a current public/shared
+definition does not grant historical access. These operations use an explicit identity base:
+
+- `/api/workflows/by-id/:id` accepts a UUID only, without slug fallback;
+- `/api/workflows/by-reference/:handle/:slug` resolves the named owner's workflow;
+- `/api/workflows/by-slug/:slug` resolves the current user's workflow.
+
+Append one operation suffix to that base:
+
+| Request suffix             | Inputs and `data` result                                                                            |
+| -------------------------- | --------------------------------------------------------------------------------------------------- |
+| `GET /history`             | `{revisions}` newest first; each summary has `revision`, `size`, `preview`, `authorId`, `createdAt` |
+| `GET /revisions/:revision` | `{revision,content,size,authorId,createdAt}`; content is the complete definition as JSON text       |
+| `GET /compare?from=N&to=N` | `{from,to,parts}`; diff parts contain `value` and optional `added`/`removed` flags                  |
+| `POST /rollback`           | Body `{revision,expectedRevision}`; result `{workflowId,revision,historyRevision,restoredFrom}`     |
+
+The history number is a positive safe integer. It is distinct from authored `metadata.version`
+and the nonnegative optimistic write revision in a current definition's `fileInfo.revision`.
+Rollback's body `revision` selects a snapshot; `expectedRevision` must be that current write token.
+The returned `revision` is the new write token, `historyRevision` is the appended snapshot number,
+and `restoredFrom` is the selected history number. Separate writes remain separate snapshots even
+when semantic versions repeat. A definition without recorded history acquires its actual baseline
+before its next content write; earlier unrecorded saves are unavailable.
+
+Malformed numbers/UUIDs are 400; absent snapshots or comparison pairs are 404, while comparing equal
+content succeeds with unchanged diff parts. An unreadable current workflow is 404; a readable one
+without editing authority is 403. A stale rollback is 409, with
+`error.details.{code,workflowId,expectedRevision,currentRevision}` where code is
+`WORKFLOW_REVISION_CONFLICT`. That refusal changes neither the definition nor its history.
+
+Rollback validates and migrates the selected graph, preserves the existing ID, owner and current
+sharing, and appends a new snapshot atomically with the guarded definition write. Soft deletion
+retains history; permanent deletion removes it. `POST /api/admin/workflows/:id/restore` instead
+undeletes a workflow under the administrative route's authority; it does not select historical
+content. Restoration does not rewind existing executions: the normal
+[continuation](execution.md#running-execution-compatibility) and
+[diagnosis/recovery](execution.md#diagnosis-and-recovery) contracts apply.
+
+The ordinary definition readers retain their existing routes, including workflows whose slugs are
+`history`, `compare` or `revisions`; history suffixes belong to the explicit bases above.
+
 ## Execution reads and mutations
 
 ### Execution management fields

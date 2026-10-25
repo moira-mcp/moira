@@ -125,6 +125,14 @@ export const flowGuide: GuideDefinition = {
       roles: "owner",
       wide: true,
     },
+    {
+      id: "history",
+      anchor: "flow.history",
+      kind: "look",
+      revision: 1,
+      roles: "owner",
+      wide: true,
+    },
     { id: "edit-reader", anchor: "flow.header", kind: "look", revision: 1, roles: "reader" },
     {
       id: "explore",

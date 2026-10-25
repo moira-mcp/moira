@@ -139,6 +139,10 @@
     "revision": 1,
     "fingerprint": "d5ef8114"
   },
+  "flow.history": {
+    "revision": 1,
+    "fingerprint": "8b0f1cec"
+  },
   "flow.edit-reader": {
     "revision": 1,
     "fingerprint": "0e9cc2b4"
