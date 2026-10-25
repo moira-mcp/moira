@@ -40,9 +40,12 @@ belong to the thin MDX wrapper. Keep authored headings in the semantic source; f
 wrappers compose the imported Markdown heading metadata through the existing MDX processor.
 
 Quick start and MCP clients compose `.before.md` and `.after.md` around the client setup insertion.
-Client-facing text belongs to the MCP help contract; identities, configurations, tokens and
-deeplinks come from the shared registry and generators. Use that composition instead of copying a
-Claude/Cursor setup block into another guide.
+Client identities, native configurations, installation links and EN/RU setup, authentication and
+verification text belong to `packages/shared/src/mcp-clients/`. Its pure presentation API serves
+the dashboard, Starlight documentation and private landing; each keeps its own native controls.
+The MCP help adapter renders that same presentation as Markdown. Keep official vendor links with
+each client and check them before changing its instructions. Use this composition instead of
+copying configuration output or client-specific prose into another guide or locale file.
 
 Use `{MCP_URL}`, `{MOIRA_URL}`, `{STATIC_DOMAIN}` and supported `{{MCP_DEEPLINK:…}}` tokens for
 configured addresses. Runtime and public consumers use the shared portable-token renderer. Use

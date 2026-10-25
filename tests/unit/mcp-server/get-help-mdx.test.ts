@@ -366,6 +366,12 @@ tags:
           const sectionStart = `### ${presentation.label}`;
           const section = markdown.split(sectionStart)[1]?.split("\n### ")[0];
           expect(section).toBeDefined();
+          expect(section).toContain(presentation.setup);
+          expect(section).toContain(presentation.authIntro);
+          expect(section).toContain(presentation.verification);
+          expect(section).toContain(
+            `[${presentation.officialDocs.label}](${presentation.officialDocs.url})`,
+          );
           const titles = [
             presentation.primary?.title,
             presentation.auth?.title,
@@ -391,6 +397,16 @@ tags:
           }
         }
       }
+    });
+
+    it("expands ChatGPT's direct setup link and preserves replacement characters in the configured GUI URL", () => {
+      const chatgpt = mcpClients.find(({ id }) => id === "chatgpt")!;
+      const mcpUrl = "https://self.example/путь?x=a'b&value=$&";
+      const generated = renderClientSetupMarkdown("en", "{MCP_URL}", [chatgpt]);
+      const rendered = renderPortableHelpTokens(generated, { mcpUrl });
+      expect(rendered).toContain("[Open ChatGPT plugins](https://chatgpt.com/plugins)");
+      expect(rendered).toContain(`\`\`\`text\n${mcpUrl}\n\`\`\``);
+      expect(rendered).not.toContain("{{MCP_DEEPLINK:");
     });
 
     it("propagates an injected registry deeplink generator without a parser key inventory", () => {

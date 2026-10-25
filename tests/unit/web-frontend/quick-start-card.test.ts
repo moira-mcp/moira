@@ -1,190 +1,181 @@
-/**
- * Tests for QuickStartCard component logic:
- * - All client i18n keys exist in both locales
- * - Config generators produce valid output for each client
- * - setupType-specific fields are consistent
- */
-
-import { describe, test, expect } from "@jest/globals";
-import {
-  mcpClients,
-  configGenerators,
-  deeplinkGenerators,
-} from "../../../packages/shared/src/mcp-clients";
-import { resolveMcpUrl } from "../../../packages/web-frontend/src/components/QuickStartCard";
+/** @jest-environment jsdom */
+import React from "react";
+import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import "@testing-library/jest-dom/jest-globals";
+import { createInstance } from "i18next";
+import { I18nextProvider } from "react-i18next";
+import { getClientSetupPresentation } from "@mcp-moira/shared/mcp-clients";
 import en from "../../../packages/web-frontend/src/locales/en.json";
 import ru from "../../../packages/web-frontend/src/locales/ru.json";
 
-const MCP_URL = "http://localhost:3031/mcp";
-
-// Helper to get nested value from i18n JSON
-function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
-  return path.split(".").reduce((acc: unknown, key) => {
-    if (acc && typeof acc === "object" && key in (acc as Record<string, unknown>)) {
-      return (acc as Record<string, unknown>)[key];
-    }
-    return undefined;
-  }, obj);
-}
-
-describe("QuickStartCard i18n completeness", () => {
-  const basePath = "pages.dashboard.quickStart";
-
-  test("common quickStart keys exist in both locales", () => {
-    const commonKeys = ["title", "description", "documentation", "copy", "copied"];
-    for (const key of commonKeys) {
-      const fullPath = `${basePath}.${key}`;
-      expect(getNestedValue(en, fullPath)).toBeDefined();
-      expect(getNestedValue(ru, fullPath)).toBeDefined();
-    }
-  });
-
-  test("all clients have required i18n keys in English per setupType", () => {
-    for (const client of mcpClients) {
-      const clientPath = `${basePath}.clients.${client.id}`;
-
-      // GUI clients use description text
-      if (client.setupType === "gui") {
-        expect(getNestedValue(en, `${clientPath}.description`)).toBeDefined();
-      }
-      // CLI and deeplink clients with auth need auth keys
-      if (client.setup.auth) {
-        expect(getNestedValue(en, `${clientPath}.authIntro`)).toBeDefined();
-        expect(getNestedValue(en, `${clientPath}.authContent`)).toBeDefined();
-      }
-      // Clients with alternatives need alternativeTitle
-      if (client.setup.alternative) {
-        expect(getNestedValue(en, `${clientPath}.alternativeTitle`)).toBeDefined();
-      }
-      // Deeplink clients need deeplinkButton
-      if (client.setupType === "deeplink") {
-        expect(getNestedValue(en, `${clientPath}.deeplinkButton`)).toBeDefined();
-      }
-    }
-  });
-
-  test("all clients have required i18n keys in Russian per setupType", () => {
-    for (const client of mcpClients) {
-      const clientPath = `${basePath}.clients.${client.id}`;
-
-      if (client.setupType === "gui") {
-        expect(getNestedValue(ru, `${clientPath}.description`)).toBeDefined();
-      }
-      if (client.setup.auth) {
-        expect(getNestedValue(ru, `${clientPath}.authIntro`)).toBeDefined();
-        expect(getNestedValue(ru, `${clientPath}.authContent`)).toBeDefined();
-      }
-      if (client.setup.alternative) {
-        expect(getNestedValue(ru, `${clientPath}.alternativeTitle`)).toBeDefined();
-      }
-      if (client.setupType === "deeplink") {
-        expect(getNestedValue(ru, `${clientPath}.deeplinkButton`)).toBeDefined();
-      }
-    }
+const MCP_URL = "https://chosen.example.test:8443/mcp";
+const verbatim = { normalizer: (value: string) => value };
+let visible = true;
+jest.unstable_mockModule("../../../packages/web-frontend/src/hooks/useFeatures", () => ({
+  useFeatures: () => ({ deploymentMode: "self-host", mcpUrl: MCP_URL }),
+}));
+jest.unstable_mockModule(
+  "../../../packages/web-frontend/src/components/onboarding/beginnerPanels",
+  () => ({
+    usePanelVisible: () => visible,
+  }),
+);
+jest.unstable_mockModule(
+  "../../../packages/web-frontend/src/components/onboarding/HidePanelButton",
+  () => ({
+    HidePanelButton: () => null,
+  }),
+);
+const { QuickStartCard, resolveMcpUrl } =
+  await import("../../../packages/web-frontend/src/components/QuickStartCard");
+const translations = createInstance();
+await translations.init({
+  lng: "en",
+  fallbackLng: "en",
+  resources: { en: { translation: en }, ru: { translation: ru } },
+  interpolation: { escapeValue: false },
+});
+const originalReact = globalThis.React;
+const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+let copiedText: string | undefined;
+beforeEach(() => {
+  globalThis.React = React;
+  visible = true;
+  copiedText = undefined;
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: {
+      writeText: async (text: string) => {
+        copiedText = text;
+      },
+    },
   });
 });
+afterEach(() => {
+  cleanup();
+  globalThis.React = originalReact;
+  if (originalClipboard) Object.defineProperty(navigator, "clipboard", originalClipboard);
+  else Reflect.deleteProperty(navigator, "clipboard");
+});
+async function mount(language: "en" | "ru") {
+  await translations.changeLanguage(language);
+  return render(
+    React.createElement(
+      I18nextProvider,
+      { i18n: translations },
+      React.createElement(QuickStartCard),
+    ),
+  );
+}
+function select(label: string) {
+  const tab = screen.getByRole("tab", { name: label });
+  fireEvent.mouseDown(tab, { button: 0, ctrlKey: false });
+  fireEvent.click(tab);
+  return within(screen.getByRole("tabpanel"));
+}
 
-describe("QuickStartCard config generation", () => {
-  test("CLI clients produce valid primary commands", () => {
-    const cliClients = mcpClients.filter((c) => c.setupType === "cli");
-    expect(cliClients.length).toBeGreaterThan(0);
-
-    for (const client of cliClients) {
-      expect(client.setup.primaryGenerator).toBeDefined();
-      const generator = configGenerators[client.setup.primaryGenerator!];
-      expect(generator).toBeDefined();
-      const result = generator(MCP_URL);
-      expect(result).toContain(MCP_URL);
-      expect(result.length).toBeGreaterThan(10);
+test.each(["en", "ru"] as const)(
+  "%s tabs render complete setup, authentication, verification and official sources",
+  async (language) => {
+    await mount(language);
+    for (const presentation of getClientSetupPresentation(language, MCP_URL)) {
+      const panel = select(presentation.label);
+      expect(panel.getByText(presentation.setup, verbatim)).toBeVisible();
+      expect(panel.getByText(presentation.authIntro, verbatim)).toBeVisible();
+      expect(panel.getByText(presentation.verification, verbatim)).toBeVisible();
+      expect(panel.getByRole("link", { name: presentation.officialDocs.label })).toHaveAttribute(
+        "href",
+        presentation.officialDocs.url,
+      );
     }
-  });
+    expect(screen.getByTestId("quick-start-card")).toHaveAttribute("data-guide", "home.connect");
+    expect(screen.queryByText(/quickStart\.(clients|tabs)\./)).toBeNull();
+  },
+);
 
-  test("Config clients produce valid JSON configs", () => {
-    const configClients = mcpClients.filter((c) => c.setupType === "config");
-    expect(configClients.length).toBeGreaterThan(0);
+test.each(["en", "ru"] as const)(
+  "%s GUI URL copies the self-host endpoint and install links preserve it",
+  async (language) => {
+    await mount(language);
+    const panel = select("ChatGPT");
+    expect(panel.getByText(MCP_URL)).toBeVisible();
+    expect(
+      panel.getByRole("link", {
+        name:
+          language === "ru"
+            ? "Открыть плагины ChatGPT для добавления пользовательского MCP-сервера"
+            : "Open ChatGPT plugins to add a custom MCP server",
+      }),
+    ).toHaveAttribute("href", "https://chatgpt.com/plugins");
+    await act(async () => {
+      fireEvent.click(
+        panel.getByRole("button", { name: translations.t("pages.dashboard.quickStart.copy") }),
+      );
+    });
+    expect(copiedText).toBe(MCP_URL);
+    expect(panel.getByText(translations.t("pages.dashboard.quickStart.copied"))).toBeVisible();
+    const cursor = select("Cursor");
+    const cursorLink = cursor
+      .getAllByRole("link")
+      .find((item) => item.getAttribute("href")?.startsWith("cursor:"));
+    if (!cursorLink) throw new Error("Cursor install link missing");
+    const encoded = new URL(cursorLink.getAttribute("href") ?? "").searchParams.get("config");
+    if (!encoded) throw new Error("Cursor configuration missing");
+    expect(JSON.parse(atob(encoded))).toEqual({ url: MCP_URL });
+    const vscode = select("VS Code");
+    const vscodeLink = vscode
+      .getAllByRole("link")
+      .find((item) => item.getAttribute("href")?.startsWith("vscode:"));
+    if (!vscodeLink) throw new Error("VS Code install link missing");
+    expect(
+      JSON.parse(decodeURIComponent((vscodeLink.getAttribute("href") ?? "").split("?")[1])),
+    ).toEqual({ name: "moira", type: "http", url: MCP_URL });
+  },
+);
 
-    for (const client of configClients) {
-      expect(client.setup.primaryGenerator).toBeDefined();
-      const generator = configGenerators[client.setup.primaryGenerator!];
-      const result = generator(MCP_URL);
-      expect(result).toContain(MCP_URL);
-    }
-  });
+test.each(["en", "ru"] as const)(
+  "%s alternatives expose token configuration and the hosted Kimi warning",
+  async (language) => {
+    await mount(language);
+    const presentations = getClientSetupPresentation(language, MCP_URL);
+    const kimi = presentations.find((item) => item.client.id === "kimi-code");
+    if (!kimi?.alternative || !kimi.alternativeDescription)
+      throw new Error("Kimi hosted alternative fixture missing");
+    const kimiPanel = select(kimi.label);
+    expect(kimiPanel.queryByText(kimi.alternative.code, verbatim)).toBeNull();
+    fireEvent.click(kimiPanel.getByRole("button", { name: kimi.alternativeTitle }));
+    expect(kimiPanel.getByText(kimi.alternativeDescription, verbatim)).toBeVisible();
+    expect(kimiPanel.getByText(kimi.alternative.code, verbatim)).toBeVisible();
+    const codex = presentations.find((item) => item.client.id === "codex");
+    if (!codex?.tokenAuth) throw new Error("Codex token alternative fixture missing");
+    const codexPanel = select(codex.label);
+    fireEvent.click(codexPanel.getByRole("button", { name: codex.tokenAuth.sectionTitle }));
+    expect(codexPanel.getByText(codex.tokenAuth.description, verbatim)).toBeVisible();
+    expect(codexPanel.getByText(codex.tokenAuth.steps, verbatim)).toBeVisible();
+    expect(codexPanel.getByText(codex.tokenAuth.code.code, verbatim)).toBeVisible();
+  },
+);
 
-  test("Deeplink clients produce valid URLs", () => {
-    const deeplinkClients = mcpClients.filter((c) => c.setupType === "deeplink");
-    expect(deeplinkClients.length).toBeGreaterThan(0);
-
-    for (const client of deeplinkClients) {
-      expect(client.deeplinkGenerator).toBeDefined();
-      const generator = deeplinkGenerators[client.deeplinkGenerator!];
-      expect(generator).toBeDefined();
-      const url = generator(MCP_URL);
-      expect(url.length).toBeGreaterThan(10);
-    }
-  });
-
-  test("clients with alternatives have valid alternative generators", () => {
-    const clientsWithAlts = mcpClients.filter((c) => c.setup.alternative?.generator);
-    expect(clientsWithAlts.length).toBeGreaterThan(0);
-
-    for (const client of clientsWithAlts) {
-      const gen = configGenerators[client.setup.alternative!.generator!];
-      expect(gen).toBeDefined();
-      const result = gen(MCP_URL);
-      expect(result).toContain(MCP_URL);
-    }
-  });
+test("a hidden beginner panel remains hidden", async () => {
+  visible = false;
+  await mount("en");
+  expect(screen.queryByTestId("quick-start-card")).toBeNull();
 });
 
 describe("resolveMcpUrl deployment-mode gating", () => {
   const BAKED = "https://example.com/mcp";
   const RUNTIME = "http://localhost:8077/mcp";
-
   test("self-host uses the runtime URL when available", () => {
     expect(resolveMcpUrl("self-host", RUNTIME, BAKED)).toBe(RUNTIME);
   });
-
-  test("self-host falls back to the baked URL while runtime is still loading", () => {
+  test("self-host falls back while runtime is loading", () => {
     expect(resolveMcpUrl("self-host", null, BAKED)).toBe(BAKED);
   });
-
-  test("saas keeps the build-time-baked URL even if a runtime URL is present", () => {
+  test("saas keeps the build-time URL", () => {
     expect(resolveMcpUrl("saas", RUNTIME, BAKED)).toBe(BAKED);
   });
-
-  test("unknown mode (not yet loaded) keeps the baked URL", () => {
+  test("unknown mode keeps the baked URL", () => {
     expect(resolveMcpUrl(null, RUNTIME, BAKED)).toBe(BAKED);
-  });
-});
-
-describe("QuickStartCard setupType consistency", () => {
-  test("GUI clients have no generators", () => {
-    const guiClients = mcpClients.filter((c) => c.setupType === "gui");
-    for (const client of guiClients) {
-      expect(client.setup.primaryGenerator).toBeUndefined();
-      expect(client.deeplinkGenerator).toBeUndefined();
-    }
-  });
-
-  test("deeplink clients have deeplinkGenerator set", () => {
-    const deeplinkClients = mcpClients.filter((c) => c.setupType === "deeplink");
-    for (const client of deeplinkClients) {
-      expect(client.deeplinkGenerator).toBeDefined();
-    }
-  });
-
-  test("all 11 clients are present", () => {
-    expect(mcpClients.length).toBe(11);
-    const ids = mcpClients.map((c) => c.id);
-    expect(ids).toContain("claude-web");
-    expect(ids).toContain("chatgpt");
-    expect(ids).toContain("claude-code");
-    expect(ids).toContain("copilot-cli");
-    expect(ids).toContain("claude-desktop");
-    expect(ids).toContain("cursor");
-    expect(ids).toContain("vscode");
-    expect(ids).toContain("perplexity");
-    expect(ids).toContain("continue");
   });
 });

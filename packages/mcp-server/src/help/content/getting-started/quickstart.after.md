@@ -1,13 +1,16 @@
 3.  **Authenticate the MCP server**
 
-    After adding the server configuration, complete OAuth authentication.
-    Most clients will prompt you automatically or have an "Authenticate" button.
+    Check the selected client's connection status using its instructions above. If Moira already
+    works, keep that connection. Otherwise complete the client's supported authentication path:
+    browser OAuth when offered, or its native API-token configuration. Saving a configuration
+    alone does not establish authentication.
 
     :::tip[No OAuth support?]
     If your client cannot open a browser for OAuth, create an API token instead:
     1. Log in to Moira web UI → **Settings → Apps & tokens → API tokens**
     2. Create a token and copy it (starts with `moira_`)
-    3. Add it as `Authorization: Bearer moira_...` header in your client config
+    3. Use the selected client's token example above; header placement differs between clients,
+       and Codex references an environment variable. Keep the token out of Git and logs.
 
     See [MCP Clients → API Tokens](/docs/integration/mcp-clients/#api-tokens) for details.
     :::

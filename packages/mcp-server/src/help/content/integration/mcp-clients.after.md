@@ -38,24 +38,14 @@ For MCP clients that do not support OAuth (custom scripts, CI/CD pipelines, head
 4. Copy the token, shown once and starting with `moira_`.
 5. Configure the client with Bearer authorization; keep the token out of committed files and logs.
 
-Example configuration for a custom MCP client:
-
-```json
-{
-  "mcpServers": {
-    "moira": {
-      "url": "YOUR_MCP_ENDPOINT",
-      "headers": {
-        "Authorization": "Bearer moira_your_token_here"
-      }
-    }
-  }
-}
-```
+Use the selected client's token example above. JSON, YAML and TOML clients store authorization
+differently; do not copy another client's format. For a custom SDK client, configure
+`Authorization: Bearer moira_...` on its HTTP transport to `{MCP_URL}`.
 
 :::tip
-Replace `YOUR_MCP_ENDPOINT` with your Moira MCP endpoint: `{MCP_URL}`. API tokens
-skip the OAuth flow entirely — use them when your client cannot open a browser for authentication.
+API tokens skip the OAuth flow entirely. Use the configured endpoint `{MCP_URL}` and preserve
+other server entries when merging a token alternative. An already working connection needs no
+new token or login.
 :::
 
 ## Static Catalog Refresh
@@ -179,14 +169,15 @@ For self-hosted Moira:
 
 - Reconnect the Moira MCP server so the client runs `initialize` again
 - Keep the existing OAuth or API-token credential unless it is invalid or expired
-- Verify JSON syntax in config
+- Check the selected client's configuration format and diagnostics in its official guide above
 - Check client logs for errors
 
 ### Authentication Loop
 
-- Clear stored tokens
-- Check OAuth configuration
-- Verify redirect URIs
+- Check the selected server URL, account and client status before changing credentials
+- Distinguish authentication refusal from HTTP 426: the latter requires initialization with the same credential
+- Inspect client diagnostics and the official OAuth instructions, including redirect requirements
+- Reauthenticate only when the existing credential is invalid or expired and refresh cannot recover it; do not clear unrelated connections
 
 ## Related
 

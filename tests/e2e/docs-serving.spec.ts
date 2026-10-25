@@ -28,6 +28,33 @@ test.describe("Docs site served at /docs", () => {
     await expect(page).toHaveTitle(/Moira Documentation/);
   });
 
+  for (const width of [390, 1440]) {
+    test(`client install links keep compact icons at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(`${BASE_URL}/docs/getting-started/quickstart/`);
+      for (const client of ["Cursor", "VS Code", "ChatGPT"]) {
+        await page.getByRole("tab", { name: client, exact: true }).click();
+        const panel = page.getByRole("tabpanel").filter({
+          has: page.getByRole("link", { name: "Official client documentation", exact: true }),
+        });
+        const link = panel.locator("a[aria-label]");
+        await expect(link).toHaveCount(1);
+        const geometry = await link.evaluate((element) => {
+          const icon = element.querySelector("svg")!;
+          return {
+            iconWidth: icon.getBoundingClientRect().width,
+            iconHeight: icon.getBoundingClientRect().height,
+            linkHeight: element.getBoundingClientRect().height,
+          };
+        });
+        expect(geometry.iconWidth).toBeGreaterThanOrEqual(12);
+        expect(geometry.iconWidth).toBeLessThanOrEqual(32);
+        expect(geometry.iconHeight).toBeLessThanOrEqual(32);
+        expect(geometry.linkHeight).toBeLessThanOrEqual(80);
+      }
+    });
+  }
+
   // Starlight keeps its palette in a cascade layer, so an unlayered site palette must be scoped to
   // the dark theme; otherwise the light theme renders the dark page background.
   for (const { theme, background } of [

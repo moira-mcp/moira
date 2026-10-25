@@ -13,7 +13,7 @@ Claude Code is Anthropic's official CLI and VS Code extension for Claude. This g
 
 ## Configuration
 
-Use the Claude Code entry in [MCP Clients](/docs/integration/mcp-clients/) for the server's generated setup and current transport/authentication configuration. Complete OAuth authentication, or use the documented API-token header when OAuth is unavailable. Do not copy credentials into project instructions.
+Use the Claude Code entry in [MCP Clients](/docs/integration/mcp-clients/) for generated setup, scope, current authentication and official vendor instructions. Check the existing connection first; when authentication is required, use its OAuth path or native API-token alternative. Keep other servers and do not copy credentials into project instructions.
 
 ## Verify Connection
 

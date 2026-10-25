@@ -122,46 +122,7 @@
         "copy": "Copy",
         "copied": "Copied!",
         "learnMore": "Need help?",
-        "documentation": "Read the documentation",
-        "clients": {
-          "claude-web": {
-            "description": "1. Go to claude.ai → Settings → Connectors\n2. Click \"Add custom connector\"\n3. Enter server URL and click \"Connect\"\n4. Complete OAuth in browser\n\nRequires Pro/Max/Team/Enterprise plan."
-          },
-          "chatgpt": {
-            "description": "1. Go to chat.openai.com → Settings → Connectors\n2. Click \"Add connector\"\n3. Enter name \"MCP Moira\" and server URL\n4. Complete OAuth authentication\n\nRequires Plus or Pro plan."
-          },
-          "claude-code": {
-            "authIntro": "Then authenticate with your MCP Moira account:",
-            "authContent": "Browser will open for OAuth authentication.\nAuthorize and return to terminal.",
-            "alternativeTitle": "Alternative: manual config file"
-          },
-          "claude-desktop": {
-            "description": "1. Open Settings (⌘+,) → Connectors tab\n2. Click \"Add custom connector\"\n3. Enter server URL and click \"Connect\"\n4. Browser opens for OAuth → Done\n\nNo config file editing needed."
-          },
-          "cursor": {
-            "deeplinkButton": "Add to Cursor",
-            "authIntro": "Then authenticate with your MCP Moira account:",
-            "authContent": "Browser will open for OAuth authentication.\nAuthorize and return to Cursor.",
-            "alternativeTitle": "Alternative: manual config file"
-          },
-          "vscode": {
-            "deeplinkButton": "Add to VS Code",
-            "authIntro": "Then authenticate with your MCP Moira account:",
-            "authContent": "Browser will open for OAuth authentication.\nAuthorize and return to VS Code.",
-            "alternativeTitle": "Alternative: manual config file"
-          },
-          "perplexity": {
-            "description": "1. Install PerplexityXPC helper (Settings → Connectors → Install Helper)\n2. Click \"Add Connector\"\n3. Enter server name and MCP command\n4. Complete OAuth authentication\n\nPaid plan recommended. Uses mcp-remote bridge."
-          },
-          "continue": {},
-          "copilot-cli": {
-            "authIntro": "After saving the config file, authenticate:",
-            "authContent": "1. Start a Copilot CLI session\n2. Type /mcp\n3. Select \"moira\" → Authenticate\n→ Browser opens for OAuth",
-            "alternativeTitle": "Alternative: interactive /mcp setup"
-          },
-          "zed": {},
-          "gemini-cli": {}
-        }
+        "documentation": "Read the documentation"
       },
       "how": {
         "title": "Your agent does the work. Moira keeps it on track.",

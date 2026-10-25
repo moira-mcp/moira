@@ -122,46 +122,7 @@
         "copy": "Копировать",
         "copied": "Скопировано!",
         "learnMore": "Нужна помощь?",
-        "documentation": "Читать документацию",
-        "clients": {
-          "claude-web": {
-            "description": "1. Откройте claude.ai → Настройки → Коннекторы\n2. Нажмите \"Add custom connector\"\n3. Введите URL сервера и нажмите \"Connect\"\n4. Завершите OAuth в браузере\n\nТребуется тариф Pro/Max/Team/Enterprise."
-          },
-          "chatgpt": {
-            "description": "1. Откройте chat.openai.com → Настройки → Коннекторы\n2. Нажмите \"Add connector\"\n3. Введите имя \"MCP Moira\" и URL сервера\n4. Завершите OAuth-аутентификацию\n\nТребуется тариф Plus или Pro."
-          },
-          "claude-code": {
-            "authIntro": "Затем авторизуйтесь в MCP Moira:",
-            "authContent": "Браузер откроется для OAuth-авторизации.\nАвторизуйтесь и вернитесь в терминал.",
-            "alternativeTitle": "Альтернатива: ручная настройка"
-          },
-          "claude-desktop": {
-            "description": "1. Откройте Настройки (⌘+,) → вкладка Connectors\n2. Нажмите \"Add custom connector\"\n3. Введите URL сервера и нажмите \"Connect\"\n4. Браузер откроется для OAuth → Готово\n\nРедактировать файлы не нужно."
-          },
-          "cursor": {
-            "deeplinkButton": "Добавить в Cursor",
-            "authIntro": "Затем авторизуйтесь в MCP Moira:",
-            "authContent": "Браузер откроется для OAuth-авторизации.\nАвторизуйтесь и вернитесь в Cursor.",
-            "alternativeTitle": "Альтернатива: ручная настройка"
-          },
-          "vscode": {
-            "deeplinkButton": "Добавить в VS Code",
-            "authIntro": "Затем авторизуйтесь в MCP Moira:",
-            "authContent": "Браузер откроется для OAuth-авторизации.\nАвторизуйтесь и вернитесь в VS Code.",
-            "alternativeTitle": "Альтернатива: ручная настройка"
-          },
-          "perplexity": {
-            "description": "1. Установите PerplexityXPC хелпер (Настройки → Connectors → Install Helper)\n2. Нажмите \"Add Connector\"\n3. Введите имя сервера и MCP-команду\n4. Завершите OAuth-аутентификацию\n\nРекомендуется платный тариф. Использует мост mcp-remote."
-          },
-          "continue": {},
-          "copilot-cli": {
-            "authIntro": "После сохранения конфигурации авторизуйтесь:",
-            "authContent": "1. Запустите сессию Copilot CLI\n2. Введите /mcp\n3. Выберите \"moira\" → Authenticate\n→ Откроется браузер для OAuth",
-            "alternativeTitle": "Альтернатива: интерактивная настройка /mcp"
-          },
-          "zed": {},
-          "gemini-cli": {}
-        }
+        "documentation": "Читать документацию"
       },
       "how": {
         "title": "Работу делает ваш агент. Мойра не даёт ему сбиться.",

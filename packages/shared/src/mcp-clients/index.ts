@@ -21,6 +21,12 @@ export {
 export {
   generateMcpConfig,
   generateClaudeCodeCommand,
+  generateClaudeCodeConfig,
+  generateCopilotCliCommand,
+  generateGeminiCliCommand,
+  generateCodexCommand,
+  generateCodexConfig,
+  generateVSCodeConfig,
   generateCopilotCliConfig,
   generateCursorDeeplink,
   generateVSCodeDeeplink,
@@ -30,9 +36,14 @@ export {
   configGenerators,
   deeplinkGenerators,
   generateMcpConfigWithToken,
+  generateClaudeCodeConfigWithToken,
+  generateVSCodeConfigWithToken,
+  generateCodexConfigWithToken,
   generateCopilotCliConfigWithToken,
   generateContinueConfigWithToken,
   generateZedConfigWithToken,
   generateGeminiCliConfigWithToken,
   tokenConfigGenerators,
 } from "./config.js";
+export { getClientSetupPresentation, resolveClientDeeplink } from "./presentation.js";
+export type { ClientCodeBlock, ClientSetupPresentation, HelpLanguage } from "./presentation.js";
