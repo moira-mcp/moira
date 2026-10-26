@@ -229,7 +229,7 @@ describe("Local cloud facade routes to the authoritative owner", () => {
     expect(await resource.listRepositories("owner")).toEqual([
       { id: target, fullName: owner!.policy.repositories[0].fullName, private: false },
     ]);
-    db.prepare("UPDATE user SET approvedAt=NULL WHERE id='owner'").run();
+    db.prepare("UPDATE user SET blocked=1 WHERE id='owner'").run();
     await expect(devices.listOwned("owner")).rejects.toMatchObject({ code: "LOCAL_UNAUTHORIZED" });
   });
   test("pending native inventory cannot block management or exact Git authority in the same request", async () => {
@@ -412,7 +412,7 @@ describe("Local cloud facade routes to the authoritative owner", () => {
       state: "unavailable",
       code: "LOCAL_UNAUTHORIZED",
     });
-    db.prepare("UPDATE user SET approvedAt=NULL WHERE id='owner'").run();
+    db.prepare("UPDATE user SET blocked=1 WHERE id='owner'").run();
     await expect(observation.listOwned()).rejects.toMatchObject({ code: "LOCAL_UNAUTHORIZED" });
   });
   test("actionable setup, unknown diagnostics and proven retirement stay separate without changing original records", async () => {
