@@ -13,6 +13,7 @@ import {
   DatabaseRepository,
   ExecutionMutationCoordinator,
   currentAttemptGuidance,
+  withAgentLanguageReminder,
 } from "@mcp-moira/workflow-engine";
 import type {
   ExecutionAttempt,
@@ -147,13 +148,15 @@ class MCPEngineClass {
       });
     }
     const attempt = await this.mutationCoordinator.prepareStart(userId, resolved.workflow, payload);
-    return [
-      `Process ID: ${attempt.reservedExecutionId}`,
-      `Start attempt ID: ${attempt.attemptId}`,
-      `Expires at: ${new Date(attempt.expiresAt).toISOString()}`,
-      "",
-      `Execute exactly: start({ action: "execute", startAttemptId: "${attempt.attemptId}" })`,
-    ].join("\n");
+    return withAgentLanguageReminder(
+      [
+        `Process ID: ${attempt.reservedExecutionId}`,
+        `Start attempt ID: ${attempt.attemptId}`,
+        `Expires at: ${new Date(attempt.expiresAt).toISOString()}`,
+        "",
+        `Execute exactly: execution({ action: "execute", startAttemptId: "${attempt.attemptId}" })`,
+      ].join("\n"),
+    );
   }
 
   async getPreparedWorkflowStart(startAttemptId: string): Promise<{
@@ -192,7 +195,7 @@ class MCPEngineClass {
       result.outcome,
       "start",
     );
-    return result.response;
+    return withAgentLanguageReminder(result.response);
   }
 
   async replayPreparedWorkflowStart(attempt: ExecutionAttempt): Promise<string> {
@@ -206,7 +209,7 @@ class MCPEngineClass {
       "start",
     );
     if (attempt.state === "outcome_unknown") return currentAttemptGuidance(attempt);
-    if (attempt.response !== null) return attempt.response;
+    if (attempt.response !== null) return withAgentLanguageReminder(attempt.response);
     throw new ValidationError("ATTEMPT_INVALID_OR_EXPIRED: the replay receipt is unavailable.");
   }
 
@@ -245,7 +248,7 @@ class MCPEngineClass {
         claim.kind === "replay" ? "safe_replay" : "outcome_unknown",
         "start",
       );
-      return claim.response;
+      return withAgentLanguageReminder(claim.response);
     }
 
     let lease: Awaited<ReturnType<ExecutionMutationCoordinator["openLease"]>> | undefined;
@@ -356,7 +359,7 @@ class MCPEngineClass {
           executionMutationAttemptsTotal.inc({ operation: "step", outcome: "stale_rejection" });
           await this.logExecutionAttemptOutcome(processId, userId, "stale_rejection");
           throw new ValidationError(
-            "ATTEMPT_INVALID_OR_EXPIRED: the attempt is unavailable. Read session current_step and use its current attempt.",
+            "ATTEMPT_INVALID_OR_EXPIRED: the attempt is unavailable. Read execution action current_step and use its current attempt.",
             { attemptOutcome: "stale_rejection" },
           );
         }
@@ -385,7 +388,7 @@ class MCPEngineClass {
           }
           if (!isLockNode) {
             throw new ValidationError(
-              `Execution is locked (reason: "${activeLock.reason}"). Use lock({ action: "unlock", executionId: "${processId}", pin: "<PIN>" }) to unlock before continuing.`,
+              `Execution is locked (reason: "${activeLock.reason}"). Use execution({ action: "unlock", executionId: "${processId}", pin: "<PIN>" }) to unlock before continuing.`,
               { executionId: processId, lockId: activeLock.id },
             );
           }

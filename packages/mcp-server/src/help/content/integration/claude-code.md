@@ -35,11 +35,11 @@ Find the current software development workflow in Moira and start it for this ta
 
 Claude will:
 
-1. Call `start` with `action: "prepare"` and the workflow ID
-2. Call `start` with `action: "execute"` and the returned Start attempt ID
+1. Call `execution` with `action: "prepare"` and the workflow ID
+2. Call `execution` with `action: "execute"` and the returned Start attempt ID
 3. Receive the Process ID, Step attempt ID, and first directive
 4. Execute the directive
-5. Submit results via `step`
+5. Submit results via `execution` (`step`)
 6. Continue until workflow completes
 
 ### Continuing a Session
@@ -89,14 +89,14 @@ Keep project-wide workflow selection rules in CLAUDE.md. Store an active Process
 
 The core workflow lifecycle uses these tools:
 
-| Tool       | Description                                     |
-| ---------- | ----------------------------------------------- |
-| `list`     | List available workflows                        |
-| `start`    | Prepare or execute a replay-safe workflow start |
-| `step`     | Submit result, get next directive               |
-| `help`     | Get documentation                               |
-| `settings` | User settings management                        |
-| `session`  | Session and execution info                      |
+| Tool                               | Description                                     |
+| ---------------------------------- | ----------------------------------------------- |
+| `workflow` (`list`)                | List available workflows                        |
+| `execution` (`prepare`, `execute`) | Prepare or execute a replay-safe workflow start |
+| `execution` (`step`)               | Submit result, get next directive               |
+| `help`                             | Get documentation                               |
+| `settings`                         | User settings management                        |
+| `execution`                        | Session and execution info                      |
 
 See the [MCP tools reference](/docs/reference/tools/) for the complete current catalog,
 input schemas, actions, and examples.
@@ -112,7 +112,7 @@ input schemas, actions, and examples.
 
 ### Workflow Not Starting
 
-1. Verify workflow ID exists: `list`
+1. Verify workflow ID exists: `workflow` with `action: "list"`
 2. Check workflow visibility permissions
 3. Ensure you have access to the workflow
 
@@ -120,7 +120,7 @@ input schemas, actions, and examples.
 
 If process ID is lost:
 
-1. Check `session({ action: "executions" })` for active executions
+1. Check `execution({ action: "executions" })` for active executions
 2. Resume with the correct process ID
 3. Retain the selected Process ID in the task's ignored workspace/handoff
 

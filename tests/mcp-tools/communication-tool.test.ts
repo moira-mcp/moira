@@ -35,7 +35,8 @@ describe("MCP communication tool", () => {
 
   test("ordinary configured-channel text remains callable without a file owner", async () => {
     expect(
-      await callMCPTool(clients[0]!.client, "communication_send", {
+      await callMCPTool(clients[0]!.client, "communication", {
+        action: "send",
         message: "Test-only notification",
       }),
     ).toMatchObject({ status: "no_configured_channels", deliveredChannels: 0 });
@@ -54,8 +55,8 @@ describe("MCP communication tool", () => {
         id: 67,
         method: "tools/call",
         params: {
-          name: "communication_send",
-          arguments: { message: "private", recipient: "someone-else" },
+          name: "communication",
+          arguments: { action: "send", message: "private", recipient: "someone-else" },
         },
       }),
     });
@@ -64,7 +65,8 @@ describe("MCP communication tool", () => {
   });
 
   test("native delivery without a paired owner refuses before admission without fabricating an operation", async () => {
-    const result = await callMCPTool(clients[0]!.client, "communication_deliver", {
+    const result = await callMCPTool(clients[0]!.client, "communication", {
+      action: "deliver",
       kind: "document",
       message: "Report",
       file: {
@@ -85,13 +87,13 @@ describe("MCP communication tool", () => {
   test("raw request IDs cannot collect a delivery or create an upload grant", async () => {
     await expect(
       clients[1]!.client.callTool({
-        name: "operation_get",
-        arguments: { reference: "ws1-3669eb26-6af3-4e9e-a722-dcc43efa1792" },
+        name: "communication",
+        arguments: { action: "collect", reference: "ws1-3669eb26-6af3-4e9e-a722-dcc43efa1792" },
       }),
     ).rejects.toMatchObject({
       code: 400,
       message: expect.stringContaining(
-        '"error":{"code":-32602,"message":"Invalid workspace purpose parameters"}',
+        '"error":{"code":-32602,"message":"Invalid tool action parameters"}',
       ),
     });
     expect(
@@ -102,11 +104,12 @@ describe("MCP communication tool", () => {
   });
 
   test("the old binary grant action and upload endpoint cannot revive cloud attachment storage", async () => {
-    const result = await clients[0]!.client.callTool({
-      name: "communication",
-      arguments: { action: "attachment-token", message: "Report" },
-    });
-    expect(result.isError).toBe(true);
+    await expect(
+      clients[0]!.client.callTool({
+        name: "communication",
+        arguments: { action: "attachment-token", message: "Report" },
+      }),
+    ).rejects.toMatchObject({ code: 400 });
     const response = await fetch(`${baseUrl}/api/communication/attachments`, {
       method: "POST",
       headers: {

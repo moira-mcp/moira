@@ -229,7 +229,7 @@ autonomous mode also enters and decides by itself, so an unattended run is not s
 someone. A step that waits for the person in either mode — an external blocker only the person can
 clear, say — needs no condition. A step where the agent does long work first and asks only at the end
 is better left unmarked, since the mark would show the run as waiting for you during that work; its
-directive has the agent raise the question with `session await-user` when it asks.
+directive has the agent raise the question with `execution` (`await-user`) when it asks.
 Marking, unmarking or changing the gate of a step in a new version of the workflow re-decides it for
 runs already paused on that step, and they continue with their current step attempt; a new version
 that leaves the gate alone does not re-evaluate the condition.
@@ -529,8 +529,8 @@ still attempts the ordinary text notification independently. Text, waiting remin
 trusted lock PIN delivery do not require a file owner.
 
 The result exposes `attachmentStatus` and, when the original owner is known, an `operation`
-reference. Pass that reference unchanged to `operation_get` to inspect an uncertain delivery.
-If the first reply was lost, use `operation_find` to discover original candidates and choose
+reference. Pass that reference unchanged to `communication` (`collect`) to inspect an uncertain delivery.
+If the first reply was lost, use `communication` (`find`) to discover original candidates and choose
 explicitly. Do not rerun a workflow visit to resend it: a new visit is a distinct intent.
 Collection cannot send again, and current execution and task-name bindings are rechecked
 before vendor delivery.
@@ -587,10 +587,10 @@ unreachable node warnings during validation.
 
 ### Using Teleport at Runtime
 
-When a workflow contains teleport nodes, their hints are automatically appended to each step response under "Available Teleport Jumps". To jump to a teleport node, use the `teleportTo` parameter in `step()`:
+When a workflow contains teleport nodes, their hints are automatically appended to each step response under "Available Teleport Jumps". To jump to a teleport node, call `execution` with `action: "step"`, `processId`, `attemptId` and `teleportTo`, omitting `input`:
 
 ```
-step({ processId: "abc123", attemptId: "attempt-current", teleportTo: "teleport-replan" })
+execution({ action: "step", processId: "abc123", attemptId: "attempt-current", teleportTo: "teleport-replan" })
 ```
 
 - Only teleport-type nodes can be targets
@@ -686,8 +686,8 @@ The URL expires after five minutes and is bound to the current user, execution, 
 downloaded repeatedly while the execution remains waiting on that node and is invalid immediately
 after the execution advances. The generated directive explains this retry window and reminds the
 agent that delivery does not prove reading; each later consumer must still explicitly require the
-files it uses to be read. Calling `session({ action: "current_step" })` while paused issues a fresh
-URL without advancing the graph. Hosts unable to execute the command use `session materialize`
+files it uses to be read. Calling `execution({ action: "current_step" })` while paused issues a fresh
+URL without advancing the graph. Hosts unable to execute the command use `execution` (`materialize`)
 for the existing bounded context-delivery fallback. Recovery to this node re-presents its delivery
 without advancing it; delivery resolves current registry defaults, while changing context alone
 does not rewrite the caller's files.

@@ -141,7 +141,7 @@ describe("MCP Lock Tool", () => {
     attemptId: string;
     workflowId: string;
   }> {
-    const result = await callMCPTool(client, "manage", {
+    const result = await callMCPTool(client, "workflow", {
       action: "create",
       workflow: buildWaitingWorkflow(),
     });
@@ -188,8 +188,8 @@ describe("MCP Lock Tool", () => {
     test("returns locked=true for execution with active lock", async () => {
       const { processId } = await createLockedExecution();
 
-      const result = await callMCPTool(client, "lock", {
-        action: "status",
+      const result = await callMCPTool(client, "execution", {
+        action: "lock_status",
         executionId: processId,
       });
 
@@ -224,7 +224,7 @@ describe("MCP Lock Tool", () => {
         ],
       };
 
-      const createResult = await callMCPTool(client, "manage", {
+      const createResult = await callMCPTool(client, "workflow", {
         action: "create",
         workflow: simpleWorkflow,
       });
@@ -234,8 +234,8 @@ describe("MCP Lock Tool", () => {
       const processIdMatch = startRaw.match(/Process ID:\s*([a-f0-9-]+)/i);
       const processId = processIdMatch![1];
 
-      const result = await callMCPTool(client, "lock", {
-        action: "status",
+      const result = await callMCPTool(client, "execution", {
+        action: "lock_status",
         executionId: processId,
       });
 
@@ -248,8 +248,8 @@ describe("MCP Lock Tool", () => {
     test("lists locks for execution with active lock", async () => {
       const { processId } = await createLockedExecution();
 
-      const result = await callMCPTool(client, "lock", {
-        action: "list",
+      const result = await callMCPTool(client, "execution", {
+        action: "lock_list",
         executionId: processId,
       });
 
@@ -268,7 +268,7 @@ describe("MCP Lock Tool", () => {
     test("rejects invalid PIN", async () => {
       const { processId } = await createLockedExecution();
 
-      const result = await callMCPToolRaw(client, "lock", {
+      const result = await callMCPToolRaw(client, "execution", {
         action: "unlock",
         executionId: processId,
         pin: "000000",
@@ -281,12 +281,12 @@ describe("MCP Lock Tool", () => {
     test("requires PIN parameter", async () => {
       const { processId } = await createLockedExecution();
 
-      const result = await callMCPToolRaw(client, "lock", {
-        action: "unlock",
-        executionId: processId,
-      });
-
-      expect(result).toContain("PIN is required");
+      await expect(
+        callMCPToolRaw(client, "execution", {
+          action: "unlock",
+          executionId: processId,
+        }),
+      ).rejects.toMatchObject({ code: 400 });
     });
   });
 
@@ -305,7 +305,7 @@ describe("MCP Lock Tool", () => {
         value: "12345",
       });
 
-      const result = await callMCPToolRaw(client, "lock", {
+      const result = await callMCPToolRaw(client, "execution", {
         action: "lock",
         executionId: processId,
         reason: "Agent review needed",
@@ -314,8 +314,8 @@ describe("MCP Lock Tool", () => {
       expect(result).toContain("Trusted Telegram PIN delivery");
       expect(result).not.toMatch(/\b\d{6}\b/);
 
-      const status = await callMCPTool(client, "lock", {
-        action: "status",
+      const status = await callMCPTool(client, "execution", {
+        action: "lock_status",
         executionId: processId,
       });
       expect(status.locked).toBe(false);
@@ -325,7 +325,7 @@ describe("MCP Lock Tool", () => {
       const { processId } = await createLockedExecution();
 
       // Second lock fails
-      const result = await callMCPToolRaw(client, "lock", {
+      const result = await callMCPToolRaw(client, "execution", {
         action: "lock",
         executionId: processId,
         reason: "Second lock",
@@ -336,18 +336,20 @@ describe("MCP Lock Tool", () => {
     test("requires reason parameter", async () => {
       const { processId } = await createUnlockedExecution();
 
-      const result = await callMCPToolRaw(client, "lock", {
-        action: "lock",
-        executionId: processId,
-      });
-      expect(result).toContain("reason is required");
+      await expect(
+        callMCPToolRaw(client, "execution", {
+          action: "lock",
+          executionId: processId,
+        }),
+      ).rejects.toMatchObject({ code: 400 });
     });
 
     test("step() is blocked when an owner-created lock is active", async () => {
       const { processId, attemptId } = await createLockedExecution();
 
       // Try to execute step — should be blocked
-      const stepResult = await callMCPToolRaw(client, "step", {
+      const stepResult = await callMCPToolRaw(client, "execution", {
+        action: "step",
         processId,
         attemptId,
         input: "anything",
@@ -387,7 +389,7 @@ describe("MCP Session Lock Enrichment", () => {
    * Helper: create locked execution
    */
   async function createLockedExecution(): Promise<string> {
-    const createResult = await callMCPTool(client, "manage", {
+    const createResult = await callMCPTool(client, "workflow", {
       action: "create",
       workflow: buildWaitingWorkflow(),
     });
@@ -417,7 +419,7 @@ describe("MCP Session Lock Enrichment", () => {
     test("locked execution shows status 'locked' in executions list", async () => {
       const processId = await createLockedExecution();
 
-      const result = await callMCPTool(client, "session", {
+      const result = await callMCPTool(client, "execution", {
         action: "executions",
         status: ["locked"],
       });
@@ -436,7 +438,7 @@ describe("MCP Session Lock Enrichment", () => {
     test("execution_context returns locked status and activeLock object", async () => {
       const processId = await createLockedExecution();
 
-      const result = await callMCPToolRaw(client, "session", {
+      const result = await callMCPToolRaw(client, "execution", {
         action: "execution_context",
         executionId: processId,
       });

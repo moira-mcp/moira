@@ -263,6 +263,24 @@ interface MCPTestClient {
   cleanup: () => Promise<void>;
 }
 
+// Workflow deletion is an authenticated HTTP operation, not a public MCP action.
+// Retain the same owner's session established by this helper; never sign in as another
+// account or translate an unsupported tool name during test cleanup.
+const ownerSessions = new WeakMap<Client, string>();
+
+export async function deleteOwnedTestWorkflow(client: Client, workflowId: string): Promise<void> {
+  const sessionCookie = ownerSessions.get(client);
+  if (!sessionCookie) throw new Error("No authenticated owner session for workflow cleanup");
+  const response = await fetch(
+    `${getTestFetchUrl()}/api/workflows/${encodeURIComponent(workflowId)}`,
+    {
+      method: "DELETE",
+      headers: { Cookie: formatSessionCookie(getTestFetchUrl(), sessionCookie) },
+    },
+  );
+  if (!response.ok) throw new Error(`Owned workflow cleanup failed: ${response.status}`);
+}
+
 interface CreateMCPClientOptions {
   email: string;
   password: string;
@@ -426,13 +444,13 @@ async function getAuthorizationCode(
     }
 
     const location = response.headers.get("location");
-    console.log("[OAuth] Redirect location:", location?.substring(0, 100) + "...");
+    console.log("[OAuth] Authorization redirect received:", Boolean(location));
 
     if (location && location.includes("code=")) {
       const locationUrl = new URL(location, baseUrl);
       const code = locationUrl.searchParams.get("code");
       if (code) {
-        console.log("[OAuth] ✓ Got code:", code.substring(0, 20) + "...");
+        console.log("[OAuth] ✓ Authorization code received");
         return code;
       }
     }
@@ -490,7 +508,7 @@ async function exchangeCodeForToken(
   }
 
   const tokenData = (await response.json()) as { access_token: string };
-  console.log("[OAuth] ✓ Access token:", tokenData.access_token.substring(0, 20) + "...");
+  console.log("[OAuth] ✓ Access token received");
   return tokenData.access_token;
 }
 
@@ -503,7 +521,7 @@ async function exchangeCodeForToken(
  * @example
  * const { client, cleanup } = await createAuthenticatedMCPClient();
  * try {
- *   const result = await client.callTool({ name: 'list', arguments: {} });
+ *   const result = await client.callTool({ name: 'workflow', arguments: { action: 'list' } });
  *   // ... test assertions
  * } finally {
  *   await cleanup();
@@ -550,6 +568,7 @@ export async function createAuthenticatedMCPClient(
   // Step 1+2+3: Register client, sign in, get auth code (with retry on race conditions)
   // Assigned inside the retry loop below; the loop either assigns it or throws.
   let authCode = "";
+  let ownerSessionCookie = "";
   let clientData: { client_id: string; client_secret: string } | null = null;
   const maxOAuthAttempts = 3;
   for (let oauthAttempt = 1; oauthAttempt <= maxOAuthAttempts; oauthAttempt++) {
@@ -560,9 +579,10 @@ export async function createAuthenticatedMCPClient(
         console.log("[mcp-auth] ✓ OAuth client registered:", clientData.client_id);
       }
       const sessionCookie = await signInUser(fetchUrl, credentials.email, credentials.password);
+      ownerSessionCookie = sessionCookie;
       console.log("[mcp-auth] ✓ Signed in, got session cookie");
       authCode = await getAuthorizationCode(fetchUrl, clientData.client_id, sessionCookie);
-      console.log("[mcp-auth] ✓ Got authorization code:", authCode.substring(0, 20) + "...");
+      console.log("[mcp-auth] ✓ Authorization code received");
       break;
     } catch (err) {
       if (oauthAttempt < maxOAuthAttempts) {
@@ -592,7 +612,7 @@ export async function createAuthenticatedMCPClient(
     clientData!.client_id,
     clientData!.client_secret,
   );
-  console.log("[mcp-auth] ✓ Got access token:", accessToken.substring(0, 20) + "...");
+  console.log("[mcp-auth] ✓ Access token received");
 
   // Step 5: Connect MCP client with retry — SQLite WAL may delay session visibility
   const maxConnectRetries = 5;
@@ -612,6 +632,8 @@ export async function createAuthenticatedMCPClient(
       );
       await mcpClient.connect(mcpTransport);
       console.log("[OAuth] ✓ MCP client connected");
+
+      ownerSessions.set(mcpClient, ownerSessionCookie);
 
       return {
         client: mcpClient,
@@ -651,7 +673,7 @@ export async function createAuthenticatedMCPClient(
  * @returns Parsed first text block, or its text when it is not JSON
  *
  * @example
- * const result = await callMCPTool(client, 'list', {});
+ * const result = await callMCPTool(client, 'workflow', { action: 'list' });
  * expect(result.workflows).toBeDefined();
  *
  * @example
@@ -725,7 +747,7 @@ export async function startWorkflowExecution(
     skipTelegramCheck?: boolean;
   } = {},
 ): Promise<string> {
-  const prepared = await callMCPToolRaw(client, "start", {
+  const prepared = await callMCPToolRaw(client, "execution", {
     action: "prepare",
     workflowId,
     parentExecutionId: options.parentExecutionId ?? "none",
@@ -737,7 +759,7 @@ export async function startWorkflowExecution(
   if (!startAttemptId) {
     throw new Error(`Start attempt ID missing from response: ${prepared}`);
   }
-  return callMCPToolRaw(client, "start", {
+  return callMCPToolRaw(client, "execution", {
     action: "execute",
     startAttemptId,
   });
@@ -776,7 +798,8 @@ export async function advanceWorkflowExecution(
   execution: RunningWorkflowExecution,
   input: unknown,
 ): Promise<string> {
-  const response = await callMCPToolRaw(client, "step", {
+  const response = await callMCPToolRaw(client, "execution", {
+    action: "step",
     processId: execution.processId,
     attemptId: execution.attemptId,
     input,

@@ -6,12 +6,12 @@ description: Durable evidence-aware workflow authoring with optional static prog
 Workflow Management Flow creates a new Moira workflow or edits one complete existing definition through source preparation, requirements, design, official tooling, independent review, and explicitly authorized publication.
 
 ```bash
-mcp__moira__start({
+mcp__moira__execution({
   action: "prepare",
   workflowId: "moira/workflow-management-flow",
   parentExecutionId: "none"
 })
-mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
+mcp__moira__execution({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 ## Authoring lifecycle
@@ -80,7 +80,7 @@ WMF teaches the same rules for every notification in a workflow it creates or ed
 live in the engine reference, `reference/engine.md`:
 
 - The engine adds the heading from the independently persisted task name. Intake sets it through
-  [guarded Progress/session metadata](/docs/concepts/workflows/#execution-task-name) before
+  [guarded Progress/execution metadata](/docs/concepts/workflows/#execution-task-name) before
   completing; bootstrap then delivers `reference/progress.md` as the canonical naming guide for
   authoring consumers. Authorized actual scope changes update the same name; ordinary progress
   and tactical repair retain it. A message does not repeat the heading.
@@ -109,7 +109,7 @@ about the wait; if nobody answers for a day, Moira sends one reminder with a lin
 autonomous run answers the audit, save and saving-failed questions itself and is not shown as waiting
 for you there. The full audit is not marked: it is mostly the agent's own work and asks only at its
 end which repairs join the edit, so in an interactive run the agent raises that question itself
-(`session await-user`), and the run shows it as waiting for you, with the question, only then.
+(through `execution` with `action: "await-user"`), and the run shows it as waiting for you, with the question, only then.
 
 WMF also carries these rules into the workflows it builds and edits: a workflow of more than one stage
 declares progress blocks unless the design records why not, a stage that works through a list binds

@@ -139,7 +139,7 @@ describe("GET /api/executions/overview", () => {
   }
 
   async function create(workflow: object): Promise<string> {
-    const created = await callMCPTool<{ workflowId: string }>(client, "manage", {
+    const created = await callMCPTool<{ workflowId: string }>(client, "workflow", {
       action: "create",
       workflow,
     });
@@ -194,7 +194,7 @@ describe("GET /api/executions/overview", () => {
 
     // A run whose agent raised its own question, and a marked step that is also locked.
     const asking = await start(plain, "agent question");
-    const raised = await callMCPTool<unknown>(client, "session", {
+    const raised = await callMCPTool<unknown>(client, "execution", {
       action: "await-user",
       executionId: asking.processId,
       question: "Which currency do the prices use?",
@@ -509,7 +509,7 @@ describe("GET /api/executions/overview", () => {
           },
           nodes: plain.nodes.map((node) => ({ ...node, progressNodeId: "work" })),
         };
-        const created = await callMCPTool<{ workflowId: string }>(headingMCP.client, "manage", {
+        const created = await callMCPTool<{ workflowId: string }>(headingMCP.client, "workflow", {
           action: "create",
           workflow: definition,
         });

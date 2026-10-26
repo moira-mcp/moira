@@ -189,12 +189,23 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 Запуск любого workflow:
 
 ```bash
-mcp__moira__start({ action: "prepare", workflowId: "moira/quick-task", parentExecutionId: "none" })
-mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
+mcp__moira__execution({ action: "prepare", workflowId: "moira/quick-task", parentExecutionId: "none" })
+mcp__moira__execution({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ```
+
+Передайте выданный Start attempt ID в `startAttemptId` без изменений. Подготовка резервирует
+попытку и Process ID, но не создаёт выполнение. Только успешный execute подтверждает запуск и
+возвращает текущую Step attempt. В `parentExecutionId` укажите реальный ID выполняющегося
+родителя или `"none"` для самостоятельного запуска.
+
+Если ответ execute потерян, получите исход той же попытки запуска вместо новой подготовки.
+`ATTEMPT_PROCESSING` сохраняет эту попытку. При `ATTEMPT_OUTCOME_UNKNOWN` проверьте
+зарезервированный Process ID через `execution` с `action: "current_step"` или
+`action: "execution_context"` и следуйте диагнозу; не повторяйте execute автоматически и не
+создавайте новую попытку.
 
 Список доступных workflows:
 
 ```bash
-mcp__moira__list()
+mcp__moira__workflow({ action: "list" })
 ```

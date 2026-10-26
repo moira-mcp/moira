@@ -379,7 +379,7 @@ Kebab-case поддерживается в первом сегменте ссы�
 
 ```
 Агент: Какие текущие переменные контекста?
-[вызывает `session({ action: "execution_context", executionId: "..." })`]
+[вызывает `execution({ action: "execution_context", executionId: "..." })`]
 ```
 
 ## Связанное

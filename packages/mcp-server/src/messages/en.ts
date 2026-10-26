@@ -118,16 +118,16 @@ export const TELEGRAM = {
     `1. Create a Telegram bot via @BotFather\n` +
     `2. Send any message to your bot (so it can message you back)\n` +
     `3. Configure your bot token and chat ID in Settings > Notifications\n\n` +
-    `You can prepare the guided setup workflow with: start({ action: "prepare", workflowId: "moira/telegram-setup", parentExecutionId: "none", skipNotificationCheck: true }), then execute its returned Start attempt ID.\n\n` +
+    `You can prepare the guided setup workflow with: execution({ action: "prepare", workflowId: "moira/telegram-setup", parentExecutionId: "none", skipNotificationCheck: true }), then execute its returned Start attempt ID.\n\n` +
     `Or prepare this workflow without optional Telegram checks, then execute its returned Start attempt ID:\n` +
-    `start({ action: "prepare", workflowId: "${workflowId}", skipNotificationCheck: true, parentExecutionId: "none" })`,
+    `execution({ action: "prepare", workflowId: "${workflowId}", skipNotificationCheck: true, parentExecutionId: "none" })`,
 
   preflight_completion_condition:
     "Configure Telegram integration via Settings > Notifications or the telegram-setup workflow, then start this workflow again. Or use skipNotificationCheck: true to proceed without Telegram notifications.",
 
   /** Handler error messages - shown to agents during workflow execution via messageQueue */
   handler_not_configured:
-    'Telegram notifications are not configured. Set up in Settings > Notifications or prepare the guided setup workflow with start({ action: "prepare", workflowId: "moira/telegram-setup", parentExecutionId: "none", skipNotificationCheck: true }), then execute the returned Start attempt ID.',
+    'Telegram notifications are not configured. Set up in Settings > Notifications or prepare the guided setup workflow with execution({ action: "prepare", workflowId: "moira/telegram-setup", parentExecutionId: "none", skipNotificationCheck: true }), then execute the returned Start attempt ID.',
   handler_chat_not_found:
     "Chat not found. You need to send any message to your bot first, then try again.",
   handler_invalid_token:
@@ -178,13 +178,13 @@ export const VALIDATION_HELP = {
   // Workflow not found errors
   workflow_troubleshooting: [
     "Verify workflow ID is correct",
-    "Use list() to see available workflows",
+    "Use workflow({ action: 'list' }) to see available workflows",
     "Check if workflow was created successfully",
   ],
   // Process/execution not found errors
   process_troubleshooting: [
     "Verify process ID is correct",
-    "Use session({ action: 'executions' }) to list active executions",
+    "Use execution({ action: 'executions' }) to list active executions",
     "Check if workflow execution is still active",
   ],
   // Authentication errors (401/403)
@@ -233,7 +233,7 @@ export const AGENT_INSTRUCTIONS = {
   stale_attempt: `
 AGENT INSTRUCTIONS:
 1. This stale attempt was rejected before workflow handler work
-2. Call session({ action: 'current_step', executionId: '<Process ID>' }) automatically
+2. Call execution({ action: 'current_step', executionId: '<Process ID>' }) automatically
 3. Retry the intended step once with the Step attempt ID returned by current_step
 Do NOT reuse the stale attempt ID. No user guidance is required for this recovery.`,
 
@@ -247,37 +247,37 @@ Do NOT create a replacement attempt or change the input. No user guidance is req
   conflicting_attempt: `
 AGENT INSTRUCTIONS:
 1. This submission was rejected before workflow handler work because the attempt ID is already bound to different input
-2. Call session({ action: 'current_step', executionId: '<Process ID>' }) automatically
+2. Call execution({ action: 'current_step', executionId: '<Process ID>' }) automatically
 3. Discard the rejected presentation and continue from the returned directive and input schema
 Do NOT reuse the conflicting attempt ID or blindly apply its input to the current presentation. No user guidance is required unless the current directive requires a user decision.`,
 
   invalid_step_attempt: `
 AGENT INSTRUCTIONS:
 1. This step attempt was rejected before workflow handler work because it is unavailable
-2. Call session({ action: 'current_step', executionId: '<Process ID>' }) automatically
+2. Call execution({ action: 'current_step', executionId: '<Process ID>' }) automatically
 3. Discard the unavailable presentation and continue from the returned directive and input schema
 Do NOT reuse the unavailable attempt ID or blindly apply its input to the current presentation. No user guidance is required unless the current directive requires a user decision.`,
 
   recovery_refused: `
 AGENT INSTRUCTIONS:
 1. This run was NOT changed
-2. Call session({ action: 'diagnose', executionId: '<Process ID>' }) and read the blocking causes
-3. Call session({ action: 'recover', executionId: '<Process ID>', nodeId: '<node to resume from>', variableValues: { ... } }) again with what the refusal says is missing — unless the refusal says this run is already over, in which case there is nothing to retry
-Recovery only touches a run that is trying to continue and cannot. A run the diagnosis reports continuable is refused on purpose: continue it with session current_step and step instead. A completed or cancelled run is refused too and stays finished: start a new run rather than retrying. Otherwise the refusal changed nothing, so retrying it costs nothing; ask the user only for a value you cannot determine yourself.`,
+2. Call execution({ action: 'diagnose', executionId: '<Process ID>' }) and read the blocking causes
+3. Call execution({ action: 'recover', executionId: '<Process ID>', nodeId: '<node to resume from>', variableValues: { ... } }) again with what the refusal says is missing — unless the refusal says this run is already over, in which case there is nothing to retry
+Recovery only touches a run that is trying to continue and cannot. A run the diagnosis reports continuable is refused on purpose: continue it with execution actions current_step and step instead. A completed or cancelled run is refused too and stays finished: start a new run rather than retrying. Otherwise the refusal changed nothing, so retrying it costs nothing; ask the user only for a value you cannot determine yourself.`,
 
   // Optimistic concurrency: the call was rejected before any write because the state it was based
   // on changed; re-reading that state and retrying resolves it.
   stale_state: `
 AGENT INSTRUCTIONS:
 1. Nothing was changed: the state this call was based on changed after you read it
-2. Re-read that state for its current revisions: session({ action: 'reminders' | 'variables' | 'execution_context', executionId: '<Process ID>' }), or the workflow itself for a workflow revision
+2. Re-read that state for its current revisions: execution({ action: 'reminders' | 'variables' | 'execution_context', executionId: '<Process ID>' }), or the workflow itself for a workflow revision
 3. Re-apply the intended change to the state you just read and retry with its current revisions
 No user guidance is required unless the re-read state shows a conflicting change that needs a user decision.`,
 
   outcome_unknown: `
 AGENT INSTRUCTIONS:
 1. STOP before retrying this workflow mutation because its effects may already have occurred
-2. Inspect the execution with session({ action: 'current_step', executionId: '<Process ID>' }) and session({ action: 'execution_context', executionId: '<Process ID>' })
+2. Inspect the execution with execution({ action: 'current_step', executionId: '<Process ID>' }) and execution({ action: 'execution_context', executionId: '<Process ID>' })
 3. Continue only from the observed current state; ask the user when resolving it requires a decision
 Do NOT retry the mutation automatically. Do NOT treat a missing response as proof that no effect occurred.`,
 
@@ -285,22 +285,22 @@ Do NOT retry the mutation automatically. Do NOT treat a missing response as proo
   workflow_not_found: `
 AGENT INSTRUCTIONS:
 1. Verify the workflow ID is correct (check spelling, case sensitivity)
-2. Use list() to see all available workflows
+2. Use workflow({ action: 'list' }) to see all available workflows
 3. If workflow truly doesn't exist - STOP and report to user
 Do NOT continue independently. Do NOT guess alternative workflows.`,
 
   // Process/execution not found or expired
   process_not_found: `
 AGENT INSTRUCTIONS:
-1. Use session({ action: 'executions' }) to list your executions and their state
-2. If the execution you meant is listed, continue it from session({ action: 'current_step', executionId: '<Process ID>' })
-3. If it has ended or expired and the task still needs the workflow, start a new run with start()
+1. Use execution({ action: 'executions' }) to list your executions and their state
+2. If the execution you meant is listed, continue it from execution({ action: 'current_step', executionId: '<Process ID>' })
+3. If it has ended or expired and the task still needs the workflow, prepare and execute a new run with execution
 Do NOT guess execution IDs. Tell the user only if an execution they gave you cannot be found or restarted.`,
 
   // Validation failed - agent should check schema and fix input
   validation_failed: `
 AGENT INSTRUCTIONS:
-1. Review what the call expects: for a workflow step, the inputSchema of the current directive (session({ action: 'current_step', executionId: '<Process ID>' }) returns it again); for any other tool, its parameters and the error details above
+1. Review what the call expects: for a workflow step, the inputSchema of the current directive (execution({ action: 'current_step', executionId: '<Process ID>' }) returns it again); for any other tool, its parameters and the error details above
 2. Correct your input so it matches the required structure exactly
 3. Retry with the corrected input
 Ask the user only when a required value is a fact or decision only the user can provide. Do NOT skip validation or submit placeholder values.`,
@@ -333,7 +333,7 @@ Do NOT continue independently. Do NOT attempt workarounds.`,
   unclassified: `
 AGENT INSTRUCTIONS:
 1. Read the error message above: it usually names what went wrong and what to do next
-2. Diagnose with the available tools: help() for usage, session({ action: 'diagnose' | 'current_step' | 'execution_context', executionId: '<Process ID>' }) for a run, list() for workflows
+2. Diagnose with the available tools: help() for usage, execution({ action: 'diagnose' | 'current_step' | 'execution_context', executionId: '<Process ID>' }) for a run, workflow({ action: 'list' }) for workflows
 3. Fix what lies within your task and authority, then retry the call
 Ask the user only for a decision, permission, credential or fact you cannot obtain yourself, and then include the full error details. Do NOT repeat an unchanged failing call.`,
 } as const;

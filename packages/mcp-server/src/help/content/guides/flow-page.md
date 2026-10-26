@@ -183,7 +183,7 @@ A change to the structure re-derives the whole process, so a problem can appear 
 did not touch — for example a return created by leading a step back to an earlier block, which
 needs its cause and exit before the save. If you rename or delete a step that one of your paused
 runs is waiting on, the edit bar names the run before you save: after the save that run no longer
-finds its step. Inspect the saved definition, execution state and unfinished work before selecting an authorized `session recover` target; moving forward must not skip unperformed responsibility or replay an uncertain effect.
+finds its step. Inspect the saved definition, execution state and unfinished work before selecting an authorized `execution` (`recover`) target; moving forward must not skip unperformed responsibility or replay an uncertain effect.
 
 Every edit goes into the page's edit log. **Undo** takes back the last one — typing into one field
 counts as one edit — and **Discard edits** drops them all. The views re-derive as you type.
@@ -214,11 +214,11 @@ with the value before and after. A structural change has a line of its own: `+ n
 `+ block` and `- block`, and `node old → new` for a rename, with the references it rewrote.
 
 **Save** sends the whole definition to the server against the revision the page loaded, and the
-server validates it once more, as `manage edit` does — including playbook references you cannot
-resolve — so the page and `manage edit` accept and refuse the same definitions. If it still refuses
+server validates it once more, as `workflow` (`edit`) does — including playbook references you cannot
+resolve — so the page and `workflow` (`edit`) accept and refuse the same definitions. If it still refuses
 — something changed after the check, such as a playbook the draft names being deleted — nothing is
 saved, the draft stays, and the refusal is shown on the definition the same way. Every stored write
-of a definition — from this page, from `manage`, from a bundled-catalog sync — advances its
+of a definition — from this page, from `workflow`, from a bundled-catalog sync — advances its
 **revision**. If someone else changed the workflow since the page loaded, the save is refused with a
 conflict and your edits stay on the page: reload and apply them again. A run reads the stored
 definition at every step, so a run that is already in progress follows the saved edits from its next
@@ -254,7 +254,7 @@ Save or discard unsaved edits before restoring. A draft does not prevent inspect
 comparison, but disables restoration with an explanation; opening history does not discard it.
 Restoring content does not rewind a run or restore a deleted workflow. Already running processes
 use the saved definition under the usual continuation checks; inspect an incompatible paused step
-with `session diagnose` before choosing an authorized `session recover` target. See
+with `execution` (`diagnose`) before choosing an authorized `execution` (`recover`) target. See
 [stale presentation recovery](/docs/integration/troubleshooting/#current_presentation_stale).
 
 ## Explaining the page

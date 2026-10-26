@@ -4,7 +4,7 @@ For custom MCP client implementations, use the MCP SDK with URL: `{MCP_URL}`
 
 ## Available Tools
 
-The core lifecycle is `list` → `start` prepare → `start` execute → repeated `step` calls, with `session` for inspecting or
+Use `workflow` with `action: "list"`, then `execution` with `prepare`, `execute` and repeated `step` actions. The same `execution` group handles inspecting or
 resuming executions and `help` for runtime documentation. The
 [MCP tools reference](/docs/reference/tools/) is the source for the complete current
 catalog, exact input schemas, actions, and examples.
@@ -73,8 +73,8 @@ an account that cannot access MCP, still receives its normal authentication or a
 {
   "method": "tools/call",
   "params": {
-    "name": "list",
-    "arguments": {}
+    "name": "workflow",
+    "arguments": { "action": "list" }
   }
 }
 ```
@@ -85,7 +85,7 @@ an account that cannot access MCP, still receives its normal authentication or a
 {
   "method": "tools/call",
   "params": {
-    "name": "start",
+    "name": "execution",
     "arguments": {
       "action": "prepare",
       "workflowId": "moira/software-development-flow",
@@ -101,7 +101,7 @@ Preparation returns a `startAttemptId` without creating an execution. Execute it
 {
   "method": "tools/call",
   "params": {
-    "name": "start",
+    "name": "execution",
     "arguments": {
       "action": "execute",
       "startAttemptId": "start-attempt-current"
@@ -116,8 +116,9 @@ Preparation returns a `startAttemptId` without creating an execution. Execute it
 {
   "method": "tools/call",
   "params": {
-    "name": "step",
+    "name": "execution",
     "arguments": {
+      "action": "step",
       "processId": "abc-123",
       "attemptId": "attempt-current",
       "input": {

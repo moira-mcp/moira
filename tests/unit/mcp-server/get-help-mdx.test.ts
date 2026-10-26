@@ -215,7 +215,7 @@ tags:
 
       // Verify workflow mapping section exists
       expect(result).toContain("## Task → Workflow Mapping");
-      expect(result).toContain("complete authorized catalog with `list()`");
+      expect(result).toContain('complete authorized catalog with `workflow({ action: "list" })`');
     });
 
     it("should include key workflow trigger mappings", () => {
@@ -263,7 +263,7 @@ tags:
       const result = getTopicList();
 
       // Verify correct start command format for non-Claude agents
-      expect(result).toContain('mcp__moira__start({ action: "prepare", workflowId:');
+      expect(result).toContain('execution({ action: "prepare", workflowId:');
       expect(result).toContain('parentExecutionId: "none"');
       expect(result).toContain('action: "execute"');
     });
@@ -522,7 +522,8 @@ tags:
 
       expect(direct).toBe(alias);
       expect(direct).toContain("# MCP tools");
-      expect(direct).toContain("## `reconciliation`");
+      expect(direct).toContain("## `workflow`");
+      expect(direct).toContain("reconciliation_status");
       expect(direct).toContain("`set-visibility`");
       expect(direct).toContain("### Input schema");
       expect(direct).toContain('"parentExecutionId"');

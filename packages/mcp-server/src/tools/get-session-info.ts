@@ -215,7 +215,7 @@ function describeRecoveryRefusal(
     case "missing_variables":
       return `RECOVERY_REFUSED: node '${refusal.nodeId}' still needs values for unresolved references or expressions. Nothing was changed. Supply these in variableValues: ${refusal.references.join(", ")}.`;
     case "invalid_variable_values":
-      return `RECOVERY_REFUSED: ${refusal.message}. Nothing was changed. Read the declared schema with session({ action: "variables", executionId: "<Process ID>" }) and supply a matching value.`;
+      return `RECOVERY_REFUSED: ${refusal.message}. Nothing was changed. Read the declared schema with execution({ action: "variables", executionId: "<Process ID>" }) and supply a matching value.`;
     case "attempt_in_progress":
       return "RECOVERY_REFUSED: an agent step is in progress on this execution, or its outcome is unknown. Nothing was changed.";
     case "execution_changed":
@@ -570,8 +570,8 @@ export async function getSessionInfo(
           missingState && !formattedText.includes("STEP_BLOCKED:")
             ? `${formattedText}\n\nRECOVERY REQUIRED: This step cannot advance because its expression needs saved ` +
               `variables the answer cannot provide: ${missingState.variables.join(", ")}. ` +
-              `Call session({ action: "diagnose", executionId: "${executionId}" }), then ` +
-              `session({ action: "recover", executionId: "${executionId}", ` +
+              `Call execution({ action: "diagnose", executionId: "${executionId}" }), then ` +
+              `execution({ action: "recover", executionId: "${executionId}", ` +
               `nodeId: "${missingState.nodeId}", variableValues: { ... } }) with those values.`
             : formattedText;
 

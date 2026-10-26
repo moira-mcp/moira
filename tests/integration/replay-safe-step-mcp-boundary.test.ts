@@ -60,7 +60,7 @@ describe("replay-safe step MCP boundary", () => {
     );
     expect(stale.success).toBe(false);
     expect(stale.error).toContain("ATTEMPT_STALE");
-    expect(stale.error).toContain("session({ action: 'current_step'");
+    expect(stale.error).toContain("execution({ action: 'current_step'");
     expect(stale.error?.toLowerCase()).not.toContain("stop");
     const recovered = await requestContext.run({ userId: USER_ID }, () =>
       engine.getCurrentStep(executionId),
@@ -88,7 +88,7 @@ describe("replay-safe step MCP boundary", () => {
     );
     expect(conflict.success).toBe(false);
     expect(conflict.error).toContain("ATTEMPT_CONFLICT");
-    expect(conflict.error).toContain("session({ action: 'current_step'");
+    expect(conflict.error).toContain("execution({ action: 'current_step'");
     expect(conflict.error).toContain("Do NOT reuse the conflicting attempt ID");
     expect(conflict.error).toContain("returned directive and input schema");
     expect(conflict.error?.toLowerCase()).not.toContain("stop");
@@ -106,7 +106,7 @@ describe("replay-safe step MCP boundary", () => {
     );
     expect(expired.success).toBe(false);
     expect(expired.error).toContain("ATTEMPT_INVALID_OR_EXPIRED");
-    expect(expired.error).toContain("session({ action: 'current_step'");
+    expect(expired.error).toContain("execution({ action: 'current_step'");
     expect(expired.error).toContain("Do NOT reuse the unavailable attempt ID");
     expect(expired.error).toContain("returned directive and input schema");
     expect(expired.error?.toLowerCase()).not.toContain("stop");

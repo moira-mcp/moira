@@ -52,8 +52,8 @@ describe("Workflow Management Flow teaches the notification content rules", () =
       "opens every message with the flow name and the run's canonical task\n    name, linked to the run page; the message does not repeat them",
     ],
     [
-      "task naming uses independent Progress/session identity",
-      "uses execution-owned Progress/session identity as specified in the canonical\n    progress reference. Arbitrary execution notes never determine that heading.",
+      "task naming uses independent execution-owned identity",
+      "uses execution-owned task identity as specified in the canonical\n    progress reference. Arbitrary execution notes never determine that heading.",
     ],
     [
       "the list comes from the binding",
@@ -90,9 +90,9 @@ describe("Workflow Management Flow teaches the notification content rules", () =
 
   test("the materialized progress reference names the real guarded API and keeps notes independent", async () => {
     const text = await materializedReference("progress");
-    expect(text).toContain('Read session({ action: "execution_context", executionId })');
+    expect(text).toContain('Read execution({ action: "execution_context", executionId })');
     expect(text).toContain(
-      'session({ action: "update-task-title", executionId, taskTitle, expectedRevision,\nexpectedTaskIdentityRevision })',
+      'execution({ action: "update-task-title", executionId, taskTitle, expectedRevision,\nexpectedTaskIdentityRevision })',
     );
     expect(text).toContain("metadataRevisions.taskIdentity");
     expect(text).toContain("They never extract a title from execution.note.");

@@ -88,13 +88,13 @@ automatically resend the event.
 If you're using Moira through an MCP client (Claude Code, Claude Desktop), you can start the guided setup workflow:
 
 ```
-start({
+execution({
   action: "prepare",
   workflowId: "moira/telegram-setup",
   parentExecutionId: "none",
   skipNotificationCheck: true
 })
-start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
+execution({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 Set `skipNotificationCheck: true` while preparing this bootstrap workflow when Telegram is not configured; otherwise execute returns a stable `START_PRECONDITION_CHANGED` receipt because of its legacy `telegram-notification` test node. The flag bypasses only optional ordinary-notification preflight. `skipTelegramCheck` remains a deprecated alias with the same behavior. Neither field can bypass trusted PIN delivery for a `lock` node.

@@ -172,7 +172,7 @@ describe("todo-list minimal sequential checklist", () => {
       globalInputs: ["progress_execution_outcome"],
     });
     expect(execute.directive).toContain(
-      "If the task is incomplete or blocked, do not call `step()`",
+      'If the task is incomplete or blocked, do not call `execution({ action: "step", processId, attemptId, input })`',
     );
     expect(execute.expressions).toEqual(["current_task = current_task + 1"]);
     expect(execute.connections).toEqual({ success: "check-tasks-remaining" });

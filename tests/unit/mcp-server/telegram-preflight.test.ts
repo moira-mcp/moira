@@ -201,7 +201,7 @@ describe("Telegram Pre-flight Check", () => {
     it("includes setup workflow reference", () => {
       const response = formatTelegramPreflightResponse("moira/test");
       expect(response).toContain(
-        'start({ action: "prepare", workflowId: "moira/telegram-setup", parentExecutionId: "none", skipNotificationCheck: true })',
+        'execution({ action: "prepare", workflowId: "moira/telegram-setup", parentExecutionId: "none", skipNotificationCheck: true })',
       );
       expect(response).toContain("execute its returned Start attempt ID");
     });

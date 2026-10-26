@@ -9,7 +9,7 @@ import { z } from "zod";
 import { openLocalState, initializeLocal, approveRepository, setEnabled } from "./config.js";
 import { LocalRecords } from "./space-record.js";
 import { LocalManager } from "./manager.js";
-import { LocalRelay } from "./relay.js";
+import { LocalRelay, localConnectionSchema } from "./relay.js";
 import { controllerRequest } from "./controller.js";
 import {
   controllerIdentitySchema,
@@ -24,6 +24,7 @@ import {
 } from "../../shared/src/codespaces/workspace-references.mjs";
 import { createWorkspaceRequestId } from "../../shared/src/codespaces/workspace-request-id.js";
 import { operationState } from "../../shared/src/codespaces/workspace-operation-state.mjs";
+import { canonicalJson } from "../../shared/src/utils/canonical-json.js";
 import { LocalWebControl } from "./web-control.js";
 import { runLocalService, serviceRequest, collectServiceMaintenance } from "./service.js";
 import { serviceFailure, clearAuthenticatedFailure } from "./service-failure.js";
@@ -186,10 +187,20 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
   const records = new LocalRecords(state);
   const controllerSocket = async () => join((await state.ipcDirectory()).root, "controller.sock");
   const currentController = async () => {
-    const connection = await state.read("connection.json", controllerIdentitySchema.parse);
+    const connection = await state.read(
+      "connection.json",
+      controllerIdentitySchema.extend({
+        authorityRefused: localConnectionSchema.shape.authorityRefused,
+      }).parse,
+    );
     if (!connection)
       throw new LocalRefusal("LOCAL_NOT_ENROLLED", "Pair the running controller first.");
-    return connection;
+    if (connection.authorityRefused)
+      throw new LocalRefusal(
+        "LOCAL_UNAUTHORIZED",
+        "Current paired controller authority was refused.",
+      );
+    return controllerIdentitySchema.parse(connection);
   };
   const controllerResult = (value: unknown, operation: string) => {
     const original = controllerOperationSchema.strip().parse(value);
@@ -238,7 +249,11 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
     const snapshot = (await controllerRequest(
       await controllerSocket(),
       "GET",
-      "/v1/controller",
+      selected
+        ? selected.provider === "local-sandboxes"
+          ? `/v1/controller/resources/${selected.resourceId}`
+          : "/v1/controller/management"
+        : "/v1/controller",
     )) as {
       local: {
         state: string;
@@ -247,6 +262,7 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
           resourceGeneration: number;
           space: Record<string, unknown> | null;
         }>;
+        resourceObservation?: { state: "available" | "unavailable"; code?: string };
       };
       github: {
         resources: Array<{
@@ -259,6 +275,24 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
         }>;
       };
     };
+    // A reference addresses retained work; only the current private owner may refresh it.
+    const current = await currentController();
+    if (
+      canonicalJson(current) !== canonicalJson(connection) ||
+      canonicalJson(controllerIdentitySchema.parse(snapshot)) !== canonicalJson(connection)
+    )
+      throw new LocalRefusal(
+        "LOCAL_UNAUTHORIZED",
+        "Controller authority changed during observation.",
+      );
+    if (
+      selected?.provider === "local-sandboxes" &&
+      snapshot.local.resourceObservation?.state === "unavailable"
+    )
+      throw new LocalRefusal(
+        snapshot.local.resourceObservation.code ?? "LOCAL_RUNTIME_UNAVAILABLE",
+        "The selected workspace observation is unavailable.",
+      );
     const local = (snapshot.local.resources ?? []).map((row) => ({
       ...(row.space && row.space.state !== "unknown"
         ? {
@@ -300,6 +334,11 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
           (row.resourceId === selected.resourceId && row.provider === selected.provider),
       )
       .map(({ resourceId: _resourceId, ...row }) => row);
+    if (selected && rows.length !== 1)
+      throw new LocalRefusal(
+        "LOCAL_IDENTITY_CHANGED",
+        "The selected workspace has no matching current owner binding.",
+      );
     output({
       controller: encodeReference("controller", {
         deviceId: connection.deviceId,

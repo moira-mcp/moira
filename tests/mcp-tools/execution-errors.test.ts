@@ -25,7 +25,7 @@ describe("MCP Execution Errors Array E2E", () => {
     cleanup = mcpClient.cleanup;
 
     // Create a test workflow with input validation
-    const createResult = await callMCPTool(client, "manage", {
+    const createResult = await callMCPTool(client, "workflow", {
       action: "create",
       workflow: {
         id: `test-errors-${Date.now()}`,
@@ -75,7 +75,7 @@ describe("MCP Execution Errors Array E2E", () => {
   });
 
   test("execution_context includes errors array (initially empty)", async () => {
-    const context = await callMCPTool(client, "session", {
+    const context = await callMCPTool(client, "execution", {
       action: "execution_context",
       executionId: testExecutionId,
     });
@@ -92,7 +92,7 @@ describe("MCP Execution Errors Array E2E", () => {
     await advanceWorkflowExecution(client, execution, { wrongField: "value" });
 
     // Check execution context for error
-    const context = await callMCPTool(client, "session", {
+    const context = await callMCPTool(client, "execution", {
       action: "execution_context",
       executionId: testExecutionId,
     });
@@ -110,7 +110,7 @@ describe("MCP Execution Errors Array E2E", () => {
   });
 
   test("executions list includes errorCount", async () => {
-    const result = await callMCPTool(client, "session", {
+    const result = await callMCPTool(client, "execution", {
       action: "executions",
       status: ["running", "waiting", "completed"],
     });
@@ -129,7 +129,7 @@ describe("MCP Execution Errors Array E2E", () => {
 
   test("multiple errors accumulate in errors array", async () => {
     // Get current error count
-    const contextBefore = await callMCPTool(client, "session", {
+    const contextBefore = await callMCPTool(client, "execution", {
       action: "execution_context",
       executionId: testExecutionId,
     });
@@ -139,7 +139,7 @@ describe("MCP Execution Errors Array E2E", () => {
     await advanceWorkflowExecution(client, execution, { anotherWrongField: 123 });
 
     // Check that error was added
-    const contextAfter = await callMCPTool(client, "session", {
+    const contextAfter = await callMCPTool(client, "execution", {
       action: "execution_context",
       executionId: testExecutionId,
     });
@@ -149,7 +149,7 @@ describe("MCP Execution Errors Array E2E", () => {
 
   test("status filter backward compatibility - waiting maps to running", async () => {
     // Old clients may send 'waiting' - should work due to backward compatibility
-    const result = await callMCPTool(client, "session", {
+    const result = await callMCPTool(client, "execution", {
       action: "executions",
       status: ["waiting"],
     });

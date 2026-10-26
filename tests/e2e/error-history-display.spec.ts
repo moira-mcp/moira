@@ -6,6 +6,7 @@
 import { test, expect } from "./fixtures.js";
 import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
 import {
+  deleteOwnedTestWorkflow,
   advanceWorkflowExecution,
   createAuthenticatedMCPClient,
   callMCPTool,
@@ -32,7 +33,7 @@ test.describe("Error History Display - Step 13", () => {
     cleanup = mcpResult.cleanup;
 
     // Create a test workflow with strict schema for validation errors
-    const createResult = await callMCPTool(mcpClient, "manage", {
+    const createResult = await callMCPTool(mcpClient, "workflow", {
       action: "create",
       workflow: {
         id: `test-error-display-${Date.now()}`,
@@ -96,20 +97,7 @@ test.describe("Error History Display - Step 13", () => {
   test.afterAll(async () => {
     // Delete test workflow to prevent database accumulation
     if (testWorkflowId && mcpClient) {
-      try {
-        // Use manage tool to delete the workflow
-        await callMCPTool(mcpClient, "manage", {
-          action: "edit",
-          workflowId: testWorkflowId,
-          changes: {
-            removeNodes: ["start", "step1", "end"],
-          },
-        });
-        console.log(`✓ Cleaned up test workflow: ${testWorkflowId}`);
-      } catch (error) {
-        // Ignore cleanup errors - workflow may already be deleted
-        console.log(`Note: Could not cleanup workflow ${testWorkflowId}: ${error}`);
-      }
+      await deleteOwnedTestWorkflow(mcpClient, testWorkflowId);
     }
 
     if (cleanup) {

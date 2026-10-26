@@ -11,28 +11,28 @@ This guide explains how AI agents use MCP Moira tools to execute workflows.
 
 Workflow and delivery tools include:
 
-| Tool                                | Purpose                                                  |
-| ----------------------------------- | -------------------------------------------------------- |
-| `list`                              | List available workflows                                 |
-| `start`                             | Prepare or execute a start                               |
-| `step`                              | Advance workflow with input                              |
-| `manage`                            | CRUD operations on workflows                             |
-| `session`                           | User info and execution state                            |
-| `settings`                          | User settings                                            |
-| `communication_send`                | Text through configured user channels                    |
-| `communication_deliver`             | Native attachment through its owner                      |
-| `communication_deliver_publication` | Existing immutable owner publication                     |
-| `operation_get`                     | Inspect an original operation by its returned reference  |
-| `operation_find`                    | Discover original owner operations and choose explicitly |
-| `token`                             | Upload/download tokens                                   |
-| `help`                              | Documentation                                            |
+| Tool                                    | Purpose                                                  |
+| --------------------------------------- | -------------------------------------------------------- |
+| `workflow` (`list`)                     | List available workflows                                 |
+| `execution` (`prepare`, `execute`)      | Prepare or execute a start                               |
+| `execution` (`step`)                    | Advance workflow with input                              |
+| `workflow`                              | CRUD operations on workflows                             |
+| `execution`                             | User info and execution state                            |
+| `settings`                              | User settings                                            |
+| `communication` (`send`)                | Text through configured user channels                    |
+| `communication` (`deliver`)             | Native attachment through its owner                      |
+| `communication` (`deliver_publication`) | Existing immutable owner publication                     |
+| `collect` in the originating group      | Inspect an original operation by its returned reference  |
+| `find` in the originating group         | Discover original owner operations and choose explicitly |
+| `workflow`                              | Upload/download tokens                                   |
+| `help`                                  | Documentation                                            |
 
 ## Basic Workflow Execution
 
 ### 1. Prepare and Start Workflow
 
 ```json
-start({ action: "prepare", workflowId: "moira/robust-task", parentExecutionId: "none" })
+execution({ action: "prepare", workflowId: "moira/robust-task", parentExecutionId: "none" })
 ```
 
 Preparation validates the request and reserves a Start attempt for 15 minutes without creating an
@@ -40,7 +40,7 @@ execution or running any workflow node. It returns `startAttemptId` independentl
 notification and trusted-lock readiness. Execute that exact attempt to run those preflight checks:
 
 ```json
-start({ action: "execute", startAttemptId: "start-attempt-123" })
+execution({ action: "execute", startAttemptId: "start-attempt-123" })
 ```
 
 The successful execution response contains:
@@ -69,7 +69,7 @@ at execute; it never authorizes a send or bypasses mandatory Telegram configurat
 node.
 
 Repeat `execute` with the same Start attempt ID when its response is lost: a completed attempt
-returns the exact stored response and cannot create a second execution. Preparing again is an
+returns the stored result with the current common language instruction and cannot create a second execution. Preparing again is an
 intentional request for a separate execution.
 
 ### 2. Execute Step
@@ -77,8 +77,7 @@ intentional request for a separate execution.
 After completing the work described in `directive`:
 
 ```json
-step({
-  processId: "abc-123-def",
+execution({ action: "step", processId: "abc-123-def",
   attemptId: "attempt-456",
   input: {
     "steps": ["Step 1", "Step 2", "Step 3"]
@@ -90,23 +89,30 @@ Returns next directive or completion status.
 
 ### 3. Continue Until Complete
 
-Repeat `step()` calls until workflow returns completion.
+Repeat `execution({ action: "step", processId, attemptId, input })` calls until workflow returns completion.
 
 Use the Step attempt ID from the current presentation for every call, including a step with empty
 input. A replay of the same attempt with the same input returns its stored result without advancing
 again. Never use an attempt from an older presentation.
 
+Ordinary steps, current-step reads and replay presentations carry the same common instruction:
+write all free-form text you author in the user's requested or preferred language, even when the
+directive uses another language. Preserve schema keys, identifiers, enum values, code, commands
+and exact quotations. Presentation does not rewrite the stored original response, attempt IDs or
+fingerprints. Pass objects, arrays, numbers and booleans in their declared types; serialize JSON
+only when the particular schema requires text.
+
 ## Response Format
 
 Every workflow step returns:
 
-| Field                 | Description                                        |
-| --------------------- | -------------------------------------------------- |
-| `processId`           | UUID for this execution, use in all `step()` calls |
-| `attemptId`           | Identity of this exact presented step              |
-| `directive`           | What to do (the instruction)                       |
-| `completionCondition` | When you're done (success criteria)                |
-| `inputSchema`         | How to structure your response (JSON Schema)       |
+| Field                 | Description                                                                                            |
+| --------------------- | ------------------------------------------------------------------------------------------------------ |
+| `processId`           | UUID for this execution, use in all `execution({ action: "step", processId, attemptId, input })` calls |
+| `attemptId`           | Identity of this exact presented step                                                                  |
+| `directive`           | What to do (the instruction)                                                                           |
+| `completionCondition` | When you're done (success criteria)                                                                    |
+| `inputSchema`         | How to structure your response (JSON Schema)                                                           |
 
 ## Understanding Directives vs Conditions
 
@@ -122,7 +128,7 @@ The agent must:
 
 1. Execute the directive (run tests)
 2. Verify the completionCondition is met (check for 0 failures)
-3. Only then proceed with `step()`
+3. Only then proceed with `execution({ action: "step", processId, attemptId, input })`
 
 ## Input Schema
 
@@ -162,7 +168,7 @@ Submit one object matching the presented schema, with every required property pr
 ### List Executions
 
 ```json
-session({ action: "executions" })
+execution({ action: "executions" })
 ```
 
 Returns the first page of active executions for the current user with status, workflow ID, and
@@ -173,7 +179,7 @@ notes. Use `limit` and `offset` for additional pages.
 Resume workflow after interruption:
 
 ```json
-session({ action: "current_step", executionId: "abc-123" })
+execution({ action: "current_step", executionId: "abc-123" })
 ```
 
 Returns the current agent-facing step presentation without advancing the workflow, including the
@@ -183,7 +189,7 @@ system-reminder, and teleport context is included as well.
 ### Get Full Context
 
 ```json
-session({ action: "execution_context", executionId: "abc-123" })
+execution({ action: "execution_context", executionId: "abc-123" })
 ```
 
 Returns execution state including context variables, history, the workflow-step `revision`, and
@@ -196,7 +202,7 @@ revision without changing the step revision.
 At intake, read execution context and persist the actual name before submitting the step:
 
 ```javascript
-session({
+execution({
   action: "update-task-title",
   executionId,
   taskTitle: "Implement authentication",
@@ -214,15 +220,14 @@ ordinary progress retains the name and the current step attempt. Notes below rem
 Track execution progress with notes:
 
 ```json
-start({ action: "prepare", workflowId: "dev-flow", note: "Feature: auth system", parentExecutionId: "none" })
-start({ action: "execute", startAttemptId: "start-attempt-123" })
+execution({ action: "prepare", workflowId: "dev-flow", note: "Feature: auth system", parentExecutionId: "none" })
+execution({ action: "execute", startAttemptId: "start-attempt-123" })
 ```
 
-Update note during execution via `step()` input only when that step's schema declares `execution_note`:
+Update note during execution via `execution({ action: "step", processId, attemptId, input })` input only when that step's schema declares `execution_note`:
 
 ```json
-step({
-  processId: "abc-123",
+execution({ action: "step", processId: "abc-123",
   attemptId: "attempt-456",
   input: {
     "task_result": "done",
@@ -231,10 +236,10 @@ step({
 })
 ```
 
-Or via session tool:
+Or through the execution tool:
 
 ```json
-session({
+execution({
   action: "update-note",
   executionId: "abc-123",
   note: "Step 3: Integration tests"
@@ -247,7 +252,7 @@ When you cannot continue without the user — a requirement you do not understan
 a choice only they can make — raise your question on the run and ask it in the chat as well:
 
 ```json
-session({
+execution({
   action: "await-user",
   executionId: "abc-123",
   question: "Which environment should the release go to?",
@@ -265,10 +270,10 @@ step. The call does not change the step revision, so your current Step attempt s
 ## Stopping a Workflow
 
 When the user cancels the run or asks to continue outside it, read its `revision` with
-`session({ action: "execution_context", executionId })`, then stop that owned run:
+`execution({ action: "execution_context", executionId })`, then stop that owned run:
 
 ```json
-session({
+execution({
   action: "stop-execution",
   executionId: "abc-123",
   expectedRevision: 4,
@@ -294,19 +299,19 @@ snapshot; the stored mutation repeats ownership, revision and executing-operatio
 ### List the First Page
 
 ```json
-list()
+workflow({ action: "list" })
 ```
 
 ### Search by Name
 
 ```json
-list({ search: "test" })
+workflow({ action: "list", search: "test" })
 ```
 
 ### Filter by Visibility
 
 ```json
-list({ visibility: "public", limit: 10 })
+workflow({ action: "list", visibility: "public", limit: 10 })
 ```
 
 ## Reading and changing definitions
@@ -314,7 +319,7 @@ list({ visibility: "public", limit: 10 })
 For `list`, `total` counts the whole filtered query. Follow the returned `nextOffset` rather than
 inferring the next page from its length; `nextOffset: null` ends the listing. Filters apply together.
 
-`manage get` returns metadata, variable registry, runtime policy, progress and reminder definitions
+`workflow` (`get`) returns metadata, variable registry, runtime policy, progress and reminder definitions
 as well as structure. `includeNodes: false` omits only node definitions; `includeValidation: false`
 omits only validation results. Use `list-nodes`, `get-nodes` or `analyze-variables` for a focused read.
 Mutations validate the complete resulting graph before saving; a rejected mutation is not partly
@@ -341,8 +346,9 @@ Structured JSON must survive serialization and reading without data loss or coer
 defaults pass the same type/schema checks before a manifest is accepted. Removing an extension
 hides its definitions but retains user values for reinstallation.
 
-For workflow JSON import/export use the short-lived `token` grants; upload uses multipart field
-`workflow`. Ordinary definition reads and mutations use `manage` instead.
+For workflow JSON import/export use `workflow` actions `upload` and `download` for short-lived
+grants; upload uses multipart field `workflow`. Ordinary definition reads and mutations use the
+other `workflow` actions.
 
 ## Common Patterns
 
@@ -350,15 +356,15 @@ For workflow JSON import/export use the short-lived `token` grants; upload uses 
 
 ```json
 // 1. Prepare without creating an execution
-start({ action: "prepare", workflowId: "moira/verified-research", parentExecutionId: "none" })
+execution({ action: "prepare", workflowId: "moira/verified-research", parentExecutionId: "none" })
 // → { startAttemptId: "start-1", expiresAt: "..." }
 
 // 2. Execute that exact prepared start
-start({ action: "execute", startAttemptId: "start-1" })
+execution({ action: "execute", startAttemptId: "start-1" })
 // → { processId: "xyz", attemptId: "attempt-1", directive: "...", ... }
 
 // 3. Do work, then advance
-step({ processId: "xyz", attemptId: "attempt-1", input: { findings: "..." } })
+execution({ action: "step", processId: "xyz", attemptId: "attempt-1", input: { findings: "..." } })
 // → { attemptId: "attempt-2", directive: "next step...", ... }
 ```
 
@@ -366,20 +372,20 @@ step({ processId: "xyz", attemptId: "attempt-1", input: { findings: "..." } })
 
 ```json
 // 1. Find your execution
-session({ action: "executions" })
+execution({ action: "executions" })
 // → a page of active executions; choose the exact original Process ID
 
 // 2. Get current step
-session({ action: "current_step", executionId: "xyz" })
+execution({ action: "current_step", executionId: "xyz" })
 // → { attemptId: "attempt-current", directive: "...", completionCondition: "...", ... }
 
 // 3. Continue
-step({ processId: "xyz", attemptId: "attempt-current", input: { ... } })
+execution({ action: "step", processId: "xyz", attemptId: "attempt-current", input: { ... } })
 ```
 
 ## Validation Errors
 
-If `step()` returns validation error, check:
+If `execution({ action: "step", processId, attemptId, input })` returns validation error, check:
 
 1. **Field names** - Must match schema exactly (case sensitive)
 2. **Required fields** - All required properties must be present
@@ -387,22 +393,22 @@ If `step()` returns validation error, check:
 4. **Enum values** - Must be one of allowed values
 
 `ATTEMPT_PROCESSING` means another caller still owns this exact mutation; retry the same Process ID,
-Step attempt ID, and input, or the same Start attempt ID for `start({ action: "execute" })`.
+Step attempt ID, and input, or the same Start attempt ID for `execution({ action: "execute" })`.
 `ATTEMPT_STALE` was rejected before handler work. Automatically read
-`session({ action: "current_step", executionId })` and reconcile its node, directive, schema and
+`execution({ action: "current_step", executionId })` and reconcile its node, directive, schema and
 current intent before submitting with the returned Step attempt ID. Do not carry old input into
 another step or overwrite a newer user answer.
 `ATTEMPT_CONFLICT` means the attempt is already bound to different input. Automatically read
-`session({ action: "current_step", executionId })`, discard the conflicting attempt, and continue
+`execution({ action: "current_step", executionId })`, discard the conflicting attempt, and continue
 from the returned directive and input schema without replaying the rejected input; user guidance is
 not required unless the current directive requires a decision.
 For a step-level `ATTEMPT_INVALID_OR_EXPIRED` that explicitly directs you to `current_step`, use the
 same state-refresh recovery and do not reuse the unavailable attempt. An unavailable start attempt
 does not provide this recovery.
 `ATTEMPT_OUTCOME_UNKNOWN` means an external effect may have happened; inspect the returned Process
-ID through `session` and do not automatically retry. The execution owner can retire a blocked
+ID through `execution` and do not automatically retry. The execution owner can retire a blocked
 execution with its current revision through
-`session({ action: "cancel-execution", executionId, expectedRevision })`.
+`execution({ action: "cancel-execution", executionId, expectedRevision })`.
 
 A write made on a revision that is no longer current — a reminder, parent, context or cancellation
 whose `expectedRevision` or target revision is older than the stored one, or a message that says
@@ -414,7 +420,7 @@ When an error carries an `AGENT INSTRUCTIONS` section, follow it. It tells you t
 person is needed: missing permission, an authentication or connection problem you cannot resolve, a
 workflow that does not exist, or an effect that may already have happened. Any other error — an
 invalid input, a missing execution, an error with no specific instructions — is yours to resolve:
-diagnose it with `help`, `session` (`diagnose`, `current_step`, `execution_context`) and `list`,
+diagnose it with `help`, `execution` (`diagnose`, `current_step`, `execution_context`) and `workflow` (`list`),
 fix what lies within your task, and ask the user only for a decision, permission, credential or fact
 you cannot obtain yourself.
 

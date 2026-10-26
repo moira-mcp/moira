@@ -25,7 +25,7 @@ describe("runtime execution variables", () => {
     client = authenticated.client;
     cleanup = authenticated.cleanup;
     const credentials = getAdminCredentials();
-    const creation = await callMCPToolRaw(client, "manage", {
+    const creation = await callMCPToolRaw(client, "workflow", {
       action: "create",
       overwrite: true,
       workflow: {
@@ -105,7 +105,7 @@ describe("runtime execution variables", () => {
       },
     });
     if (creation.includes("Error:")) throw new Error(`Workflow creation failed: ${creation}`);
-    const edited = await callMCPTool<any>(client, "manage", {
+    const edited = await callMCPTool<any>(client, "workflow", {
       action: "edit",
       workflowId: "runtime-variable-test",
       changes: {
@@ -178,7 +178,7 @@ describe("runtime execution variables", () => {
   });
 
   test("filters effective editability and schema-valid mutation without exposing denied globals", async () => {
-    const queried = await callMCPTool<any>(client, "session", {
+    const queried = await callMCPTool<any>(client, "execution", {
       action: "variables",
       executionId,
       names: ["editable_value", "denied_value", "unset_value", "missing"],
@@ -202,7 +202,7 @@ describe("runtime execution variables", () => {
         expect.objectContaining({ name: "unset_value", hasValue: false }),
       ]),
     );
-    const currentPhase = await callMCPTool<any>(client, "session", {
+    const currentPhase = await callMCPTool<any>(client, "execution", {
       action: "variables",
       executionId,
       names: ["editable_value", "denied_value"],
@@ -212,7 +212,7 @@ describe("runtime execution variables", () => {
       expect.objectContaining({ name: "editable_value", writePhase: "current" }),
     ]);
     expect(currentPhase.appliedFilters).toMatchObject({ writePhase: "current" });
-    const otherPhase = await callMCPTool<any>(client, "session", {
+    const otherPhase = await callMCPTool<any>(client, "execution", {
       action: "variables",
       executionId,
       names: ["editable_value", "denied_value", "unset_value"],
@@ -221,7 +221,7 @@ describe("runtime execution variables", () => {
     expect(otherPhase.variables).toEqual([
       expect.objectContaining({ name: "denied_value", writePhase: "other" }),
     ]);
-    const falseRuntimeFilters = await callMCPTool<any>(client, "session", {
+    const falseRuntimeFilters = await callMCPTool<any>(client, "execution", {
       action: "variables",
       executionId,
       names: ["editable_value", "denied_value", "unset_value"],
@@ -232,7 +232,7 @@ describe("runtime execution variables", () => {
       expect.objectContaining({ name: "unset_value", editable: false, hasValue: false }),
     ]);
     expect(falseRuntimeFilters.appliedFilters).toMatchObject({ editable: false, hasValue: false });
-    const changed = await callMCPTool<any>(client, "session", {
+    const changed = await callMCPTool<any>(client, "execution", {
       action: "set-variable",
       executionId,
       variableName: "editable_value",
@@ -243,7 +243,7 @@ describe("runtime execution variables", () => {
     expect(changed).toMatchObject({ name: "editable_value", value: "new" });
     expect(changed.revision).toBe(queried.revision);
     expect(changed.contextRevision).not.toBe(queried.contextRevision);
-    const denied = await callMCPToolRaw(client, "session", {
+    const denied = await callMCPToolRaw(client, "execution", {
       action: "set-variable",
       executionId,
       variableName: "denied_value",
@@ -252,7 +252,7 @@ describe("runtime execution variables", () => {
       expectedContextRevision: changed.contextRevision,
     });
     expect(denied).toContain("not externally editable");
-    const invalid = await callMCPToolRaw(client, "session", {
+    const invalid = await callMCPToolRaw(client, "execution", {
       action: "set-variable",
       executionId,
       variableName: "editable_value",
@@ -308,7 +308,7 @@ describe("runtime execution variables", () => {
       data: { revision: number; contextRevision: string };
     };
     expect(httpSetData.data.revision).toBe(httpData.data.revision);
-    const stale = await callMCPToolRaw(client, "session", {
+    const stale = await callMCPToolRaw(client, "execution", {
       action: "set-variable",
       executionId,
       variableName: "editable_value",
@@ -318,7 +318,7 @@ describe("runtime execution variables", () => {
     });
     expect(stale).toContain("stale");
 
-    const contextBeforePath = await callMCPTool<any>(client, "session", {
+    const contextBeforePath = await callMCPTool<any>(client, "execution", {
       action: "execution_context",
       executionId,
     });
@@ -339,7 +339,7 @@ describe("runtime execution variables", () => {
     expect(((await pathSet.clone().json()) as { data: { revision: number } }).data.revision).toBe(
       httpSetData.data.revision,
     );
-    const afterPath = await callMCPTool<any>(client, "session", {
+    const afterPath = await callMCPTool<any>(client, "execution", {
       action: "variables",
       executionId,
       names: ["object_value"],
@@ -390,7 +390,7 @@ describe("runtime execution variables", () => {
       }),
     });
     expect(stalePath.status).toBe(409);
-    const afterPathRejections = await callMCPTool<any>(client, "session", {
+    const afterPathRejections = await callMCPTool<any>(client, "execution", {
       action: "execution_context",
       executionId,
     });
@@ -414,12 +414,12 @@ describe("runtime execution variables", () => {
     });
     expect(legacy.status).toBe(400);
 
-    const foreignQuery = await callMCPToolRaw(foreignClient, "session", {
+    const foreignQuery = await callMCPToolRaw(foreignClient, "execution", {
       action: "variables",
       executionId,
     });
     expect(foreignQuery).toContain("execution belongs to another user");
-    const foreignSet = await callMCPToolRaw(foreignClient, "session", {
+    const foreignSet = await callMCPToolRaw(foreignClient, "execution", {
       action: "set-variable",
       executionId,
       variableName: "editable_value",
@@ -466,7 +466,7 @@ describe("runtime execution variables", () => {
       },
     );
     expect(foreignLegacyPath.status).toBe(401);
-    const afterForeignAttempts = await callMCPTool<any>(client, "session", {
+    const afterForeignAttempts = await callMCPTool<any>(client, "execution", {
       action: "variables",
       executionId,
       names: ["editable_value", "object_value"],
@@ -479,7 +479,7 @@ describe("runtime execution variables", () => {
       ]),
     );
 
-    const foreignOwnedWorkflow = await callMCPTool<any>(foreignClient, "manage", {
+    const foreignOwnedWorkflow = await callMCPTool<any>(foreignClient, "workflow", {
       action: "create",
       workflow: {
         metadata: {
@@ -524,7 +524,7 @@ describe("runtime execution variables", () => {
     );
     const foreignExecutionId = foreignStarted.match(/Process ID: ([a-f0-9-]+)/)?.[1];
     expect(foreignExecutionId).toBeDefined();
-    const foreignOwnedBefore = await callMCPTool<any>(foreignClient, "session", {
+    const foreignOwnedBefore = await callMCPTool<any>(foreignClient, "execution", {
       action: "variables",
       executionId: foreignExecutionId,
       names: ["settings"],
@@ -557,7 +557,7 @@ describe("runtime execution variables", () => {
       },
     );
     expect(adminMutation.status).toBe(401);
-    const foreignOwnedAfter = await callMCPTool<any>(foreignClient, "session", {
+    const foreignOwnedAfter = await callMCPTool<any>(foreignClient, "execution", {
       action: "variables",
       executionId: foreignExecutionId,
       names: ["settings"],
@@ -566,7 +566,7 @@ describe("runtime execution variables", () => {
     expect(foreignOwnedAfter.variables).toEqual([
       expect.objectContaining({ name: "settings", value: { count: 1 } }),
     ]);
-    const definition = await callMCPTool<any>(client, "manage", {
+    const definition = await callMCPTool<any>(client, "workflow", {
       action: "list-variables",
       workflowId: "runtime-variable-test",
       variableNames: ["editable_value", "missing"],
@@ -579,7 +579,7 @@ describe("runtime execution variables", () => {
     ]);
     expect(definition.unknownNames).toEqual(["missing"]);
     expect(definition.appliedFilters).toMatchObject({ hasDefault: true, externallyWritable: true });
-    const falseDefinition = await callMCPTool<any>(client, "manage", {
+    const falseDefinition = await callMCPTool<any>(client, "workflow", {
       action: "list-variables",
       workflowId: "runtime-variable-test",
       variableNames: ["editable_value", "denied_value", "unset_value"],
@@ -654,7 +654,7 @@ describe("runtime execution variables", () => {
   });
 
   test("validator rejects external-write policies for undeclared variables and non-agent nodes", async () => {
-    const result = await callMCPTool<any>(client, "manage", {
+    const result = await callMCPTool<any>(client, "workflow", {
       action: "validate",
       workflow: {
         metadata: { name: "Invalid Policy", version: "1.0.0", description: "Invalid" },
@@ -673,7 +673,7 @@ describe("runtime execution variables", () => {
   });
 
   test("projects owner-scoped progress consistently through session and HTTP", async () => {
-    const sessionProgress = await callMCPTool<any>(client, "session", {
+    const sessionProgress = await callMCPTool<any>(client, "execution", {
       action: "progress",
       executionId,
     });
@@ -775,88 +775,108 @@ describe("runtime execution variables", () => {
       headers: { Cookie: `better-auth.session_token=${foreignCookie}` },
     });
     expect(denied.status).toBe(401);
-    const deniedMcp = await callMCPToolRaw(foreignClient, "session", {
+    const deniedMcp = await callMCPToolRaw(foreignClient, "execution", {
       action: "progress",
       executionId,
     });
     expect(deniedMcp).toMatch(/access denied/i);
 
-    const invalidCreate = await callMCPToolRaw(client, "manage", {
-      action: "create",
-      workflow: {
-        metadata: {
-          name: `Invalid Dynamic Progress ${randomUUID()}`,
-          version: "1.0.0",
-          description: "Must be rejected instead of narrowed",
-        },
-        progress: {
-          nodes: [{ id: "work", label: "Work", condition: { operator: "always" } }],
-        },
-        nodes: [
-          { id: "start", type: "start", connections: { default: "work" } },
-          {
-            id: "work",
-            type: "agent-directive",
-            progressNodeId: "work",
-            directive: "Work",
-            completionCondition: "Done",
-            connections: { success: "end" },
+    await expect(
+      callMCPToolRaw(client, "workflow", {
+        action: "create",
+        workflow: {
+          metadata: {
+            name: `Invalid Dynamic Progress ${randomUUID()}`,
+            version: "1.0.0",
+            description: "Must be rejected instead of narrowed",
           },
-          { id: "end", type: "end" },
-        ],
-      },
+          progress: {
+            nodes: [
+              {
+                id: "work",
+                label: "Work",
+                content: { summary: "Work" },
+                condition: { operator: "always" },
+              },
+            ],
+          },
+          nodes: [
+            { id: "start", type: "start", connections: { default: "work" } },
+            {
+              id: "work",
+              type: "agent-directive",
+              progressNodeId: "work",
+              directive: "Work",
+              completionCondition: "Done",
+              connections: { success: "end" },
+            },
+            { id: "end", type: "end" },
+          ],
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 400,
+      message: expect.stringContaining(
+        '"error":{"code":-32602,"message":"Invalid tool action parameters"}',
+      ),
     });
-    expect(invalidCreate).toMatch(/invalid|unrecognized/i);
 
     const invalidEditProgressDefinitions = [
       {
         title: "Must not persist progress state",
         currentNodeId: "first",
         nodes: [
-          { id: "first", label: "First" },
-          { id: "second", label: "Second" },
+          { id: "first", label: "First", content: { summary: "First" } },
+          { id: "second", label: "Second", content: { summary: "Second" } },
         ],
       },
       {
         title: "Must not persist status",
         nodes: [
-          { id: "first", label: "First", status: "completed" },
-          { id: "second", label: "Second" },
+          { id: "first", label: "First", content: { summary: "First" }, status: "completed" },
+          { id: "second", label: "Second", content: { summary: "Second" } },
         ],
       },
       {
         title: "Must not persist type",
         nodes: [
-          { id: "first", label: "First", type: "condition" },
-          { id: "second", label: "Second" },
+          { id: "first", label: "First", content: { summary: "First" }, type: "condition" },
+          { id: "second", label: "Second", content: { summary: "Second" } },
         ],
       },
       {
         title: "Must not persist connection",
         nodes: [
-          { id: "first", label: "First" },
+          { id: "first", label: "First", content: { summary: "First" } },
           {
             id: "second",
             label: "Second",
+            content: { summary: "Second" },
             connections: { default: "first", error: "first" },
           },
         ],
       },
     ];
     for (const progress of invalidEditProgressDefinitions) {
-      const invalidEdit = await callMCPToolRaw(client, "manage", {
-        action: "edit",
-        workflowId: "runtime-variable-test",
-        changes: { progress },
+      await expect(
+        callMCPToolRaw(client, "workflow", {
+          action: "edit",
+          workflowId: "runtime-variable-test",
+          changes: { progress },
+        }),
+      ).rejects.toMatchObject({
+        code: 400,
+        message: expect.stringContaining(
+          '"error":{"code":-32602,"message":"Invalid tool action parameters"}',
+        ),
       });
-      expect(invalidEdit).toMatch(/invalid|unrecognized/i);
     }
     expect(
-      await callMCPTool<any>(client, "session", { action: "progress", executionId }),
+      await callMCPTool<any>(client, "execution", { action: "progress", executionId }),
     ).toMatchObject({ title: "Edited runtime progress", activeNodeId: "first" });
 
     const noProgressWorkflowName = `No Progress ${randomUUID()}`;
-    const noProgressWorkflow = await callMCPTool<any>(client, "manage", {
+    const noProgressWorkflow = await callMCPTool<any>(client, "workflow", {
       action: "create",
       workflow: {
         metadata: {
@@ -875,11 +895,11 @@ describe("runtime execution variables", () => {
     });
     const noProgressExecutionId = noProgressStarted.match(/Process ID: ([a-f0-9-]+)/)?.[1];
     expect(noProgressExecutionId).toBeDefined();
-    const noProgressContext = await callMCPTool<any>(client, "session", {
+    const noProgressContext = await callMCPTool<any>(client, "execution", {
       action: "execution_context",
       executionId: noProgressExecutionId,
     });
-    const noProgressMetadata = await callMCPTool<Record<string, unknown>>(client, "session", {
+    const noProgressMetadata = await callMCPTool<Record<string, unknown>>(client, "execution", {
       action: "progress",
       executionId: noProgressExecutionId,
     });
@@ -910,7 +930,7 @@ describe("runtime execution variables", () => {
     expect(noProgressHttpBody.data).toEqual(noProgressMetadata);
 
     const imageGrant = await client.callTool({
-      name: "session",
+      name: "execution",
       arguments: {
         action: "progress-image-token",
         executionId,
@@ -960,16 +980,16 @@ describe("runtime execution variables", () => {
       },
     );
     expect(invalidHttpMint.status).toBe(400);
-    const currentEditable = await callMCPTool<any>(client, "session", {
+    const currentEditable = await callMCPTool<any>(client, "execution", {
       action: "variables",
       executionId,
       names: ["editable_value"],
     });
-    const currentContext = await callMCPTool<any>(client, "session", {
+    const currentContext = await callMCPTool<any>(client, "execution", {
       action: "execution_context",
       executionId,
     });
-    await callMCPTool<any>(client, "session", {
+    await callMCPTool<any>(client, "execution", {
       action: "set-variable",
       executionId,
       variableName: "editable_value",
@@ -977,7 +997,7 @@ describe("runtime execution variables", () => {
       expectedRevision: currentContext.revision,
       expectedContextRevision: currentEditable.contextRevision,
     });
-    const changedContext = await callMCPTool<any>(client, "session", {
+    const changedContext = await callMCPTool<any>(client, "execution", {
       action: "execution_context",
       executionId,
     });
@@ -988,7 +1008,7 @@ describe("runtime execution variables", () => {
       currentContext.metadataRevisions.context,
     );
     expect(
-      await callMCPToolRaw(foreignClient, "session", {
+      await callMCPToolRaw(foreignClient, "execution", {
         action: "progress-image-token",
         executionId,
       }),
@@ -1085,7 +1105,7 @@ describe("runtime execution variables", () => {
     });
     const sdfExecutionId = started.match(/Process ID: ([a-f0-9-]+)/)?.[1];
     expect(sdfExecutionId).toBeDefined();
-    const variables = await callMCPTool<any>(client, "session", {
+    const variables = await callMCPTool<any>(client, "execution", {
       action: "variables",
       executionId: sdfExecutionId,
       names: ["visual_validation_preference", "vcs_commits_authorized", "current_step_index"],
@@ -1110,13 +1130,13 @@ describe("runtime execution variables", () => {
         }),
       ]),
     );
-    const editable = await callMCPTool<any>(client, "session", {
+    const editable = await callMCPTool<any>(client, "execution", {
       action: "variables",
       executionId: sdfExecutionId,
       editable: true,
     });
     expect(editable.variables).toEqual([]);
-    const denied = await callMCPToolRaw(client, "session", {
+    const denied = await callMCPToolRaw(client, "execution", {
       action: "set-variable",
       executionId: sdfExecutionId,
       variableName: "visual_validation_preference",
@@ -1125,7 +1145,7 @@ describe("runtime execution variables", () => {
       expectedContextRevision: variables.contextRevision,
     });
     expect(denied).toContain("not externally editable");
-    const after = await callMCPTool<any>(client, "session", {
+    const after = await callMCPTool<any>(client, "execution", {
       action: "variables",
       executionId: sdfExecutionId,
       names: ["visual_validation_preference"],
@@ -1139,13 +1159,13 @@ describe("runtime execution variables", () => {
       }),
     ]);
 
-    const reminderState = await callMCPTool<any>(client, "session", {
+    const reminderState = await callMCPTool<any>(client, "execution", {
       action: "reminders",
       executionId: sdfExecutionId,
       reminderStatus: "active",
     });
     const reminderText = "Open the authorized release pull request after SDF completion";
-    const addedReminder = await callMCPTool<any>(client, "session", {
+    const addedReminder = await callMCPTool<any>(client, "execution", {
       action: "add-reminder",
       executionId: sdfExecutionId,
       reminderText,
@@ -1157,7 +1177,7 @@ describe("runtime execution variables", () => {
       changed: true,
       reminder: { text: reminderText, status: "active" },
     });
-    const activeReminders = await callMCPTool<any>(client, "session", {
+    const activeReminders = await callMCPTool<any>(client, "execution", {
       action: "reminders",
       executionId: sdfExecutionId,
       reminderStatus: "active",
@@ -1165,7 +1185,7 @@ describe("runtime execution variables", () => {
     expect(activeReminders.reminders).toEqual([
       expect.objectContaining({ text: reminderText, status: "active" }),
     ]);
-    const authorityAfterReminder = await callMCPTool<any>(client, "session", {
+    const authorityAfterReminder = await callMCPTool<any>(client, "execution", {
       action: "variables",
       executionId: sdfExecutionId,
       names: ["vcs_commits_authorized"],
@@ -1178,7 +1198,7 @@ describe("runtime execution variables", () => {
         editable: false,
       }),
     ]);
-    const currentStep = await callMCPToolRaw(client, "session", {
+    const currentStep = await callMCPToolRaw(client, "execution", {
       action: "current_step",
       executionId: sdfExecutionId,
     });
@@ -1187,7 +1207,7 @@ describe("runtime execution variables", () => {
     // The reminders revision read before the add is now stale. The rejection changes nothing and
     // tells the agent to re-read and retry on its own instead of waiting for the user.
     const followUpText = "Push the branch after SDF completion";
-    const staleAdd = await callMCPToolRaw(client, "session", {
+    const staleAdd = await callMCPToolRaw(client, "execution", {
       action: "add-reminder",
       executionId: sdfExecutionId,
       reminderText: followUpText,
@@ -1198,11 +1218,11 @@ describe("runtime execution variables", () => {
     expect(staleAdd).toContain("reload before changing reminders");
     expect(staleAdd).toContain("Re-read that state for its current revisions");
     expect(staleAdd).not.toContain("WAIT for user guidance");
-    const reread = await callMCPTool<any>(client, "session", {
+    const reread = await callMCPTool<any>(client, "execution", {
       action: "reminders",
       executionId: sdfExecutionId,
     });
-    const retried = await callMCPTool<any>(client, "session", {
+    const retried = await callMCPTool<any>(client, "execution", {
       action: "add-reminder",
       executionId: sdfExecutionId,
       reminderText: followUpText,

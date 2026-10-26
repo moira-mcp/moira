@@ -30,7 +30,7 @@ describe("MCP Error Diagnostics", () => {
 
   describe("start() with nonexistent workflow", () => {
     test("returns structured error with workflow ID", async () => {
-      const text = await callMCPToolRaw(client, "start", {
+      const text = await callMCPToolRaw(client, "execution", {
         action: "prepare",
         workflowId: "nonexistent-workflow-diagnostics-test",
         parentExecutionId: "none",
@@ -45,7 +45,8 @@ describe("MCP Error Diagnostics", () => {
 
   describe("step() with nonexistent process", () => {
     test("returns structured error with process ID", async () => {
-      const text = await callMCPToolRaw(client, "step", {
+      const text = await callMCPToolRaw(client, "execution", {
+        action: "step",
         processId: "nonexistent-process-id-123",
         attemptId: "00000000-0000-4000-8000-000000000002",
         input: {
@@ -62,7 +63,7 @@ describe("MCP Error Diagnostics", () => {
 
   describe("manage() with nonexistent workflow", () => {
     test("returns error for get action on missing workflow", async () => {
-      const text = await callMCPToolRaw(client, "manage", {
+      const text = await callMCPToolRaw(client, "workflow", {
         action: "get",
         workflowId: "nonexistent-workflow-for-manage-test",
       });
@@ -72,7 +73,7 @@ describe("MCP Error Diagnostics", () => {
     });
 
     test("returns error for get-node action on missing workflow", async () => {
-      const text = await callMCPToolRaw(client, "manage", {
+      const text = await callMCPToolRaw(client, "workflow", {
         action: "get-node",
         workflowId: "nonexistent-workflow-node-test",
         nodeId: "some-node-id",
@@ -85,7 +86,7 @@ describe("MCP Error Diagnostics", () => {
 
   describe("session() with nonexistent execution", () => {
     test("returns error for current_step on missing execution", async () => {
-      const text = await callMCPToolRaw(client, "session", {
+      const text = await callMCPToolRaw(client, "execution", {
         action: "current_step",
         executionId: "nonexistent-execution-id-456",
       });
@@ -95,7 +96,7 @@ describe("MCP Error Diagnostics", () => {
     });
 
     test("returns error for execution_context on missing execution", async () => {
-      const text = await callMCPToolRaw(client, "session", {
+      const text = await callMCPToolRaw(client, "execution", {
         action: "execution_context",
         executionId: "nonexistent-execution-context-test",
       });

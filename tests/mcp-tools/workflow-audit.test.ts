@@ -130,10 +130,14 @@ describe("MCP Workflow Management Audit Logging E2E", () => {
       },
     };
 
-    const createResult = await callMCPTool<{ workflowId: string; slug: string }>(client, "manage", {
-      action: "create",
-      workflow,
-    });
+    const createResult = await callMCPTool<{ workflowId: string; slug: string }>(
+      client,
+      "workflow",
+      {
+        action: "create",
+        workflow,
+      },
+    );
 
     expect(createResult.workflowId).toBeDefined();
     const workflowId = createResult.workflowId;
@@ -176,7 +180,7 @@ describe("MCP Workflow Management Audit Logging E2E", () => {
       },
     };
 
-    const createResult = await callMCPTool<{ workflowId: string }>(client, "manage", {
+    const createResult = await callMCPTool<{ workflowId: string }>(client, "workflow", {
       action: "create",
       workflow,
     });
@@ -188,7 +192,7 @@ describe("MCP Workflow Management Audit Logging E2E", () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     // Now edit the workflow
-    const editResult = await callMCPTool(client, "manage", {
+    const editResult = await callMCPTool(client, "workflow", {
       action: "edit",
       workflowId,
       changes: {
@@ -239,7 +243,7 @@ describe("MCP Workflow Management Audit Logging E2E", () => {
       },
     };
 
-    const createResult = await callMCPTool<{ workflowId: string }>(client, "manage", {
+    const createResult = await callMCPTool<{ workflowId: string }>(client, "workflow", {
       action: "create",
       workflow,
     });
@@ -248,7 +252,7 @@ describe("MCP Workflow Management Audit Logging E2E", () => {
     createdWorkflows.push(workflowId);
 
     // Edit workflow
-    await callMCPTool<{ success: boolean }>(client, "manage", {
+    await callMCPTool<{ success: boolean }>(client, "workflow", {
       action: "edit",
       workflowId,
       changes: {

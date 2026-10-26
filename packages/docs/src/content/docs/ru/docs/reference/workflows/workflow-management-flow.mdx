@@ -6,12 +6,12 @@ description: Долговечный evidence-aware workflow authoring с optiona
 Workflow Management Flow создаёт новый Moira workflow или редактирует одну полную существующую definition через source preparation, requirements, design, official tooling, independent review и явно разрешённую publication.
 
 ```bash
-mcp__moira__start({
+mcp__moira__execution({
   action: "prepare",
   workflowId: "moira/workflow-management-flow",
   parentExecutionId: "none"
 })
-mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
+mcp__moira__execution({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ```
 
 ## Authoring lifecycle
@@ -81,7 +81,7 @@ WMF учит тем же правилам для каждого уведомле
 Правила живут в справочнике движка, `reference/engine.md`:
 
 - Движок добавляет заголовок из независимо сохранённого названия задачи. Первый шаг задаёт его
-  через [защищённые метаданные Progress/session](/ru/docs/concepts/workflows/#название-задачи-запуска)
+  через [защищённые метаданные Progress/execution](/ru/docs/concepts/workflows/#название-задачи-запуска)
   до завершения; bootstrap затем доставляет `reference/progress.md` как общий контракт именования
   для авторинга. Разрешённое изменение самой задачи обновляет то же название; обычное продвижение
   и техническое исправление его сохраняют. Сообщение не повторяет заголовок.
@@ -112,7 +112,7 @@ WMF учит тем же правилам для каждого уведомле
 Автономный запуск сам отвечает на вопросы об аудите, сохранении и неудачном сохранении и там ждущим
 вас не показан. Полный аудит не помечен: это в основном работа агента, и спрашивает он только в
 конце — какие исправления войдут в правку, — поэтому в интерактивном запуске агент задаёт этот вопрос
-сам (`session await-user`), и запуск показан ждущим вас, с вопросом, только в этот момент.
+сам (через `execution` с `action: "await-user"`), и запуск показан ждущим вас, с вопросом, только в этот момент.
 
 Эти же правила WMF переносит в флоу, которые создаёт и правит: флоу из нескольких стадий объявляет
 блоки прогресса, если в дизайне не записано, почему нет; стадия, которая идёт по списку, привязывает

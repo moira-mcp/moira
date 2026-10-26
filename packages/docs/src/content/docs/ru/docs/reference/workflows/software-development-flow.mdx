@@ -6,12 +6,12 @@ description: "Полная development-only реализация репозит�
 Software Development Flow реализует одно полное программное изменение как независимо принимаемые вертикальные units. Он владеет всем результатом репозитория — production code, тестами, coverage, документацией, schemas/types, generated/config outputs, compatibility и integration consequences — вместо разделения одного lifecycle между несколькими task workflows.
 
 ```bash
-mcp__moira__start({
+mcp__moira__execution({
   action: "prepare",
   workflowId: "moira/software-development-flow",
   parentExecutionId: "none"
 })
-mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
+mcp__moira__execution({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ```
 
 ## Lifecycle
@@ -24,7 +24,7 @@ Findings классифицируются как product, test/validation, evide
 
 Каждый producer, validator, reviewer, repair role, checkpoint и report role текущего unit получает полный утверждённый unit из `plans/{{plan_revision}}/plan.md`. Эта активная ревизия остаётся источником истины после любого replan; запомненная формулировка и `previous_plan_revision` не являются входами исполнения. Только пять revision writers намеренно читают обе ревизии: они сохраняют исторический источник и записывают уже увеличенную текущую ревизию. Финальное cross-revision review может использовать исторические evidence с явным указанием ревизии происхождения, но не заменяет ими контракт активного плана.
 
-Если исходный запрос уже разрешает последующий caller-owned push, pull request, publication, release или deployment, SDF во время intake сохраняет это намерение через `session` reminder API текущего execution. Запись требует текущую ревизию шага workflow, но не увеличивает её и не делает предъявленную попытку шага недействительной. При обычном завершении standalone и child запусков reminder возвращается в `Next requested actions`. Он не становится unit плана разработки, не меняет `vcs_commits_authorized`, не выполняет действие и не даёт новых полномочий.
+Если исходный запрос уже разрешает последующий caller-owned push, pull request, publication, release или deployment, SDF во время intake сохраняет это намерение через `execution` reminder API текущего execution. Запись требует текущую ревизию шага workflow, но не увеличивает её и не делает предъявленную попытку шага недействительной. При обычном завершении standalone и child запусков reminder возвращается в `Next requested actions`. Он не становится unit плана разработки, не меняет `vcs_commits_authorized`, не выполняет действие и не даёт новых полномочий.
 
 Runtime, browser, visual, integration, performance и full-suite checks остаются условными для конкретной фичи и репозитория. Постоянная документация закрывается вместе со своим unit. Одно общее финальное смысловое ревью сверяет весь результат с требованиями, включая согласованность документации между units; отдельной сверки только документации нет. Финализация включает общие проверки изменения, покрытие требований, фактический отчёт и локальную VCS reconciliation в пределах полномочий. Запуск завершается одним из трёх способов, и каждый отправляет best-effort уведомление через
 настроенные каналы пользователя: он завершается полностью; он завершается досрочно по явному
@@ -63,4 +63,4 @@ Runtime, browser, visual, integration, performance и full-suite checks оста
 
 Development-plan SDF может включать явно разрешённые локальные commits или checkpoints. Push, создание или merge pull request, publication, release и deployment являются работой caller или parent process и никогда не становятся development-plan units. Запуск SDF не разрешает notification, production mutation или administrative override; любой side effect остаётся ограничен originating authority.
 
-SDF не объявляет externally writable runtime variables. Агент может просматривать registry через `session variables`, но visual settings, VCS authority, plan cursors и все остальные переменные SDF остаются read-only благодаря default-deny runtime policy.
+SDF не объявляет externally writable runtime variables. Агент может просматривать registry через `execution` (`action: "variables"`), но visual settings, VCS authority, plan cursors и все остальные переменные SDF остаются read-only благодаря default-deny runtime policy.

@@ -407,7 +407,7 @@ Check variable values in execution context:
 
 ```
 Agent: What are the current context variables?
-[calls `session({ action: "execution_context", executionId: "..." })`]
+[calls `execution({ action: "execution_context", executionId: "..." })`]
 ```
 
 ## Related

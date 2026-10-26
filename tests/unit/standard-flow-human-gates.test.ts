@@ -85,12 +85,12 @@ describe("the standard flows' human gates", () => {
 
   test("the full audit asks at the end of its own work, so it raises the question instead of a mark", () => {
     // Marked, the step would read «waiting for you» through the whole audit; its directive has the
-    // agent raise `session await-user` when it asks, which shows the wait and tells the person.
+    // agent raise `execution await-user` when it asks, which shows the wait and tells the person.
     const audit = systemCatalogGraph("workflow-management-flow").nodes.find(
       (node) => node.id === "audit-complete-workflow",
     ) as AgentDirectiveNode;
     expect(audit.humanGate).toBeUndefined();
-    expect(audit.directive).toContain('session({ action: "await-user"');
+    expect(audit.directive).toContain('execution({ action: "await-user"');
   });
 
   test("no bundled flow tells the person twice about one wait", async () => {

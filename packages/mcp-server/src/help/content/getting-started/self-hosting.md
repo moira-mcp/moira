@@ -411,20 +411,20 @@ identity when available; the computer's Git configuration is not copied.
 
 With local web control approved, the owner can enable repository-management delegation here.
 It defaults off and binds the verified personal GitHub account, separate existing/new-private
-permissions and optional push. `workspace_targets({ provider: "local-sandboxes" })` returns approved
+permissions and optional push. `codespace({ action: "targets", provider: "local-sandboxes" })` returns approved
 Local repository targets and observed controller contact status without GitHub installation reads.
-Use `workspace_targets({ provider: "github-codespaces" })` for GitHub targets, registered controllers
+Use `codespace({ action: "targets", provider: "github-codespaces" })` for GitHub targets, registered controllers
 and eligible personal App installations. A GitHub setup warning does not erase registered choices;
 registration does not certify reachability. Availability is decided by actual dispatch, without fallback.
 
-Use `repository_admit({ controller, repository })` with a returned controller and the GitHub
+Use `codespace({ action: "repository_admit", controller, repository })` with a returned controller and the GitHub
 repository ID. Only confirmed owner application grants access. For a new empty private repository,
-use `repository_create({ controller, installation, name })` with returned references. Agents
+use `codespace({ action: "repository_create", controller, installation, name })` with returned references. Agents
 cannot change consent or supply rights. Current grants and existing VMs are preserved.
 
-Keep the returned original operation. `operation_get({ reference })` only collects it.
+Keep the returned original operation. `codespace({ action: "collect", reference })` only collects it.
 If installation access or permissions need repair, explicitly continue that original private
-creation with `operation_resume({ reference })`; it reconstructs the original request from its
+creation with `codespace({ action: "resume", reference })`; it reconstructs the original request from its
 retained record and never creates a replacement repository. Unknown creation uses its retained
 recovery marker, never an unrelated same-name repository. Missing results and uncertain replies
 do not authorize replay. A rejected admission may leave the confirmed repository on GitHub:
@@ -442,9 +442,9 @@ HTTPS directly and disposes the child after the upstream connection closes; clou
 not proxy Git bytes or execute PR requests. Tokens are not project files, arguments, environment
 values or tool results. Same-UID broker trust is not an OS sandbox.
 
-Use ordinary `git fetch`/`git push`. `pull_request_create` takes meaningful head/base/title
-fields and returns an original operation reference. Collect it with `operation_get` after an
-uncertain reply, then use `pull_request_read` for the same head/base before deliberately creating
+Use ordinary `git fetch`/`git push`. `codespace_git` (`create`) takes meaningful head/base/title
+fields and returns an original operation reference. Collect it with `codespace_git` (`collect`) after an
+uncertain reply, then use `codespace_git` (`read`) for the same head/base before deliberately creating
 another PR. The guest CLI equivalents are `pr-create HEAD BASE TITLE`, `get OPERATION_REF`,
 `pr-find HEAD BASE` and `pr-get NUMBER`. Credential custody/disposal uncertainty remains
 unconfirmed; preserve the original operation and follow its separate security-collection guidance
@@ -453,10 +453,10 @@ rather than requesting another token. Collection does not cancel a live stream.
 Each codespace has its own VM; a repository can have multiple codespaces.
 Local VMs and operations do not consume cloud Codespaces slots or use its machine ceiling.
 The same guest workspace service owns commands, files, sessions and retained output in both providers.
-Use `command_run` with argv or script, or `command_run_native` with required native stdin.
-Copy returned operation/process references; use `operation_get`, `process_output` and
-`process_stop` without resubmitting command fields. A lost first reply needs explicit
-`operation_find` and candidate selection. Identical deliberate calls are distinct intents;
+Use `codespace_terminal` (`run`) with argv or script, or `codespace_terminal` (`run_native`) with required native stdin.
+Copy returned operation/process references; use `codespace_terminal` (`collect`), `codespace_terminal` (`output`) and
+`codespace_terminal` (`stop`) without resubmitting command fields. A lost first reply needs explicit
+`codespace_terminal` (`find`) and candidate selection. Identical deliberate calls are distinct intents;
 absence or unavailability is not proof of non-execution.
 
 The guest retains results and complete output on its disk. Operation identity, input digest and
@@ -470,16 +470,16 @@ commands; provider stop can interrupt them. Explicit `timeout_seconds` and obser
 remain, alongside physical storage and repository/owner guards. Cancellation is not confirmed
 until its physical result is known. File changes use existing confined atomic transactions.
 
-`file_read` reads complete UTF-8 characters by lines or cursor and returns a whole-file reference.
-`file_create` requires an absent target; `file_replace` checks complete text or a file reference;
-`file_patch` matches old/new text without caller-computed hashes or byte edits.
-`file_upload` streams a required native descriptor to an explicit create path or checked replacement.
-`file_download` publishes the complete path without a separate stat; name and MIME are derived
+`codespace_read` (`read`) reads complete UTF-8 characters by lines or cursor and returns a whole-file reference.
+`codespace_edit` (`create`) requires an absent target; `codespace_edit` (`replace`) checks complete text or a file reference;
+`codespace_edit` (`patch`) matches old/new text without caller-computed hashes or byte edits.
+`codespace_upload` streams a required native descriptor to an explicit create path or checked replacement.
+`codespace_download` publishes the complete path without a separate stat; name and MIME are derived
 when omitted. Its immutable publication supports repeated reads until expiry under current authority.
-`communication_deliver_publication` separately sends that publication, optionally to one
-configured `channel`; delivery does not consume or renew it. `communication_deliver` accepts
+`communication` (`deliver_publication`) separately sends that publication, optionally to one
+configured `channel`; delivery does not consume or renew it. `communication` (`deliver`) accepts
 a native descriptor directly at the selected paired controller. Both return an original operation
-for `operation_get`; collection never sends again. Workflow attachment notifications also return
+for `communication` (`collect`); collection never sends again. Workflow attachment notifications also return
 their original `operation`; internal execution/visit identities are not required for collection.
 Discovery exposes safe metadata and returned references, not full results. Explicit collection
 preserves uncertain outcomes as `unconfirmed`, including a terminal private receipt with an
@@ -507,7 +507,7 @@ complete-text or checked-file preconditions. Native descriptors are read from st
 Guest daemon diagnostics rotate separately at
 `~/.local/state/moira/workspace-service/daemon.log`, `daemon.log.1` and `daemon.log.2`, each
 bounded to 1 MiB. Rotation does not trim command stdout/stderr; use the returned process
-reference with `output` or `process_output` to read those full streams.
+reference with `output` or `codespace_terminal` (`output`) to read those full streams.
 The public image is `ghcr.io/moira-mcp/moira-workspace-service`; the optional Feature is
 `ghcr.io/moira-mcp/features/workspace-service`. Choose a published release tag. Both use the
 same payload and support glibc x64/arm64 and a repository owned by the service user, including
@@ -532,24 +532,24 @@ the service. These assets install the runtime; they do not grant cloud or reposi
 Public package registries and public DNS destinations use approved brokered egress. There is no
 socket-count or transfer-duration quota; streaming backpressure, public-address checks, current
 permission and revocation remain. Host/LAN/service destinations stay denied. Browser compatibility
-requires the project's guest packages. `file_preview` reads a current repository PNG/JPEG and
+requires the project's guest packages. `codespace_read` (`preview`) reads a current repository PNG/JPEG and
 checks its container before returning native image content; inspect it before treating it as
 visual evidence. Optional `max_bytes` sets the caller's whole-image bound. There is no generic byte,
 edge or pixel-count ceiling. PNG/JPEG validation checks structure, not decoded pixels.
-`file_download` publishes the complete original file.
+`codespace_download` publishes the complete original file.
 See [the tools reference](/docs/reference/tools/#development-codespaces).
 
 In **Settings → Development → Local computers**, open a computer's codespaces and choose an
-approved repository. `workspace_targets({ provider: "local-sandboxes" })` returns its target references;
-computers offering the same repository remain distinct. `workspace_list({ provider: "local-sandboxes" })`
-and `workspace_observe` return
+approved repository. `codespace({ action: "targets", provider: "local-sandboxes" })` returns its target references;
+computers offering the same repository remain distinct. `codespace({ action: "list", provider: "local-sandboxes" })`
+and `codespace` (`observe`) return
 workspace references for explicit lifecycle decisions. Browser revocation denies new server work
 but cannot prove physical shutdown of an offline computer; local disable enforces shutdown.
 
 Lifecycle tools consume returned workspace references, not caller-supplied generations or IDs.
 A conflict requires a fresh observation and a deliberate new decision. An operation response
-returns its original handle for `operation_get`, including when creation is still unresolved.
-When the first reply was lost, `operation_find` at the selected controller finds candidates;
+returns its original handle for `codespace` (`collect`), including when creation is still unresolved.
+When the first reply was lost, `codespace` (`find`) at the selected controller finds candidates;
 select explicitly, even when there is one. No match does not prove no effect.
 Known `pending_operations` restore collection after reload; a newer snapshot alone does not
 settle an uncertain mutation.
@@ -592,7 +592,7 @@ their sign-in handling.
 Physical VM startup is distinct from guest readiness: commands become available only after guest
 preparation completes. For Local, `CODESPACE_LOCAL_SETUP_INCOMPLETE` means that preparation failed, even if
 the VM is confirmed stopped. Repair the reported prerequisite, then choose **Resume setup** or
-`workspace_lifecycle({ workspace, action: "resume_setup" })` with its returned workspace
+`codespace({ action: "lifecycle", workspace, operation: "resume_setup" })` with its returned workspace
 reference. This continues the same proved VM/disk and preserves files
 and the original create result. Ordinary start and custody `recover` do not resume setup.
 Unknown creation remains collection of its original operation, not permission to adopt or replace a VM.
@@ -630,6 +630,13 @@ The host CLI supports `create OWNER/REPO --ref BRANCH`, `start WORKSPACE_REF`,
 `resume-setup WORKSPACE_REF`, `stop WORKSPACE_REF`, `remove WORKSPACE_REF --confirm`,
 `observe WORKSPACE_REF`, `collect OPERATION_REF` and
 `operations CONTROLLER_REF` through the running private controller.
+`observe` reads only the selected Local resource; for GitHub it reads the retained binding's
+management metadata, not live provider or guest readiness. Neither waits for full Local native
+inventory. Use `workspaces` when you deliberately need that inventory. Observation checks current
+controller/connection identity and the exact resource/provider binding, returning its current
+generation. An older reference can request a fresh observation but does not authorize mutation
+with the old generation. A missing binding, refused authority or selected Local runtime failure
+is an explicit refusal, not a reason to fall back to full inventory.
 Mutations preserve the captured workspace reference; human maintenance retains its separate
 explicit request-ID contract. Fresh create needs cloud route registration and initial Git authority.
 `collect ORIGINAL_REQUEST_ID` also reads retained privileged maintenance or security custody;
@@ -755,8 +762,8 @@ The selected controller reads personal-payer preflight and offered machines, the
 machine choice and applicable idle/retention settings before the fixed create request. The cloud
 rechecks current authority and settings; it does not choose a different machine or controller.
 
-Use `workspace_list({ provider: "github-codespaces" })`,
-`workspace_targets({ provider: "github-codespaces" })` and `workspace_setup_help` for discovery.
+Use `codespace({ action: "list", provider: "github-codespaces" })`,
+`codespace({ action: "targets", provider: "github-codespaces" })` and `codespace` (`setup_help`) for discovery.
 Lists default to `view: "actionable"`, including known incomplete setup. Select
 `view: "diagnostics"` for uncertain or unavailable identities and their original-operation
 references, or `view: "history"` for confirmed retirement. These views are also available in
@@ -765,8 +772,8 @@ or request an observation instead of inventing mutation authority. Provider fail
 Local discovery does not await GitHub or billing. Billing loads separately when the GitHub
 settings subsection is active; Environment Refresh does not read it.
 Create with a returned target; start/stop/delete use the captured workspace reference.
-`workspace_adopt` uses an observed workspace and explicitly selected controller;
-`workspace_adopt_external` uses the selected controller and known owned provider name.
+`codespace` (`adopt`) uses an observed workspace and explicitly selected controller;
+`codespace` (`adopt_external`) uses the selected controller and known owned provider name.
 Both preserve the disk. Explicit adoption of a stopped environment can start it.
 Pending/unconfirmed preparation is not usable readiness: collect its original operation without
 creating, starting or installing again. `GITHUB_PROVISIONING_INCOMPLETE` remains actionable.
@@ -774,11 +781,11 @@ creating, starting or installing again. `GITHUB_PROVISIONING_INCOMPLETE` remains
 The GitHub guest starts its verified local Unix API before optional cloud enrollment. If first
 enrollment is unavailable, local CLI work remains available, while remote MCP work does not.
 Once the original operation and SSH custody have settled, choose **Resume setup** or call
-`workspace_lifecycle({ workspace, action: "resume_setup" })` with the returned observation.
+`codespace({ action: "lifecycle", workspace, operation: "resume_setup" })` with the returned observation.
 The selected controller checks the saved original repository/root, guest life, installed release
 and current assignment, then continues fixed configuration and enrollment on that same environment.
 It does not reinstall, start the provider, adopt or create another VM. A changed life or authority
-refuses continuation. `operation_get` only collects; it never performs this setup step.
+refuses continuation. `codespace` (`collect`) only collects; it never performs this setup step.
 
 After a cold restart, an already enrolled GitHub guest with retained renewal authority makes its
 Unix API ready before remote renewal. Temporary network/store failures retry in the existing
@@ -790,8 +797,8 @@ inspection through the assigned controller before choosing another lifecycle act
 
 Only an authenticated enrolled guest admits remote command/file work. Ordinary routing does not
 start a VM or open SSH. Unix readiness alone does not prove remote registration. Confirmed 401/403
-refusal retires that credential; ordinary network loss reconnects. Collect with `operation_get`,
-read retained output with `process_output`, and cancel with `process_stop`.
+refusal retires that credential; ordinary network loss reconnects. Collect with `codespace_terminal` (`collect`),
+read retained output with `codespace_terminal` (`output`), and cancel with `codespace_terminal` (`stop`).
 Cloud/client loss does not itself cancel an owned command.
 
 An agent working in a codespace acts as the ordinary Codespace user: it can read the repository,
@@ -885,8 +892,8 @@ An upgrade that changes a bundled workflow can leave a run that was paused insid
 continue. Startup names those runs before applying the update — the workflow, the execution and the
 node each is paused on — so they appear in `docker compose logs moira` while the old definitions are
 still in place. The warning never stops an upgrade. A run invalidated because its workflow changed
-can be repaired afterwards with `session({ action: 'diagnose', ... })` followed by
-`session({ action: 'recover', ... })`; a run whose workflow the upgrade removes cannot, since no
+can be repaired afterwards with `execution({ action: 'diagnose', ... })` followed by
+`execution({ action: 'recover', ... })`; a run whose workflow the upgrade removes cannot, since no
 definition remains to resume against, and the line says which case it is. No warning means no paused
 run would be affected only when the affected-run analysis actually ran. An unevaluated check or missing logs is not proof that continuation is safe; inspect the selected update's diagnostics.
 
@@ -945,7 +952,7 @@ owner or prove that a previous submission never ran. Preserve the owner's privat
 immutable files and delivery journal when updating its matched executable release.
 Workspace publications remain with their workspace owner.
 Materialize archives use the paired controller's immutable publication and original receipt;
-their separate `session materialize` text fallback requires no file owner.
+their separate `execution` (`materialize`) text fallback requires no file owner.
 
 Ordinary text, waiting reminders and trusted lock PIN delivery continue without a file owner.
 Explicit file delivery reports an unavailable owner instead of downloading in the cloud.

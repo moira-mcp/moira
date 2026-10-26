@@ -56,7 +56,7 @@ describe("MCP Lock Step Integration", () => {
     cleanup = authenticated.cleanup;
 
     const created = JSON.parse(
-      await callMCPToolRaw(client, "manage", {
+      await callMCPToolRaw(client, "workflow", {
         action: "create",
         workflow: buildLockTestWorkflow(),
       }),

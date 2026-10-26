@@ -199,7 +199,7 @@ describe("recovering a run that cannot continue", () => {
     );
     expect(rejected).toContain("STEP_BLOCKED");
     expect(rejected).toContain("plan_units");
-    expect(rejected).toContain('session({ action: "recover"');
+    expect(rejected).toContain('execution({ action: "recover"');
 
     const diagnosis = (
       await requestContext.run({ userId: USER_ID }, () =>

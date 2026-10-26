@@ -54,6 +54,13 @@ monotonic fence; heartbeat renewal is not permission for a second caller to exec
 executing claims are reconciled to unknown, not reclaimed as safe work. A caller losing ownership
 cannot commit the result under the old fence.
 
+The returned presentation appends the current common language instruction to ordinary steps,
+current-step reads and replayed step/start receipts. This does not rewrite the stored response,
+attempt identity, input fingerprint or execution state. All agent-authored free-form text follows
+the user's requested or preferred language; schema keys, identifiers, enum values, code, commands
+and exact quotations remain unchanged. The selected authored/model/agent/global reminder retains
+its existing precedence, including intentional empty configured overrides.
+
 Execution state, response receipt and next presented attempt commit together in an immediate SQL
 transaction. Notification enqueueing and change-feed writes share the owning mutation transaction.
 This protects persistence and replay; it does not roll back an external provider effect. A failure
@@ -87,12 +94,12 @@ when identifying affected paused runs; do not recreate its comparison in a loade
 
 ## Diagnosis and recovery
 
-`session diagnose` is read-only and separates blocking causes from explanatory facts. A recorded
+`execution` with `action: "diagnose"` is read-only and separates blocking causes from explanatory facts. A recorded
 past error is not a current block. An unresolved rendered reference shows a placeholder but does not
 by itself prevent `step`; an absent/revision-stale presentation may only need ordinary refresh.
 Missing persisted expression state that no accepted answer can supply is a blocking cause.
 
-`session recover` accepts only a live, genuinely broken run. It validates supplied declared global
+`execution` with `action: "recover"` accepts only a live, genuinely broken run. It validates supplied declared global
 values, target existence, resumability and missing references/expression inputs. It refuses terminal
 or healthy runs, executing/unknown attempts and concurrent execution changes. The target must be a
 pause-capable agent directive, teleport, materialize, lock or subgraph; recovery is not an arbitrary
@@ -117,7 +124,7 @@ schema or route. Its condition is evaluated on arrival. A refused answer continu
 wait retains that decision; a real loop back records a new arrival. Editing the gate definition
 reconciles the waiting decision without pretending the step was answered.
 
-`session await-user` records the agent's current question separately from the route and step
+`execution` with `action: "await-user"` records the agent's current question separately from the route and step
 generation. It binds to the current node, takes precedence over a gate's generic label, and clears
 when the agent acts or leaves/finishes that node. A person's variable edit is not an agent answer.
 Metadata polling does not make an execution active.

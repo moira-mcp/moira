@@ -68,7 +68,7 @@ async function person(page: Page, label: string): Promise<Person> {
   const email = `overview-${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
   expect((await createTestUser(email, PASSWORD, `Overview ${label}`)).success).toBe(true);
   const mcp = await createAuthenticatedMCPClient({ email, password: PASSWORD });
-  const created = await callMCPTool<{ workflowId: string }>(mcp.client, "manage", {
+  const created = await callMCPTool<{ workflowId: string }>(mcp.client, "workflow", {
     action: "create",
     workflow: orderImportFlow(`Order import ${label} ${Date.now()}`),
   });
@@ -129,7 +129,7 @@ test.describe("The overview", () => {
             node.id === "load" ? { ...node, metadata: { displayName: step } } : node,
           ),
         };
-        const created = await callMCPTool<{ workflowId: string }>(me.client, "manage", {
+        const created = await callMCPTool<{ workflowId: string }>(me.client, "workflow", {
           action: "create",
           workflow: childFlow,
         });
@@ -399,7 +399,7 @@ test.describe("The overview", () => {
       const busy = await me.start("Import April orders");
       // The newer run moved last, so by activity alone it would lead.
       await advanceWorkflowExecution(me.client, busy, {});
-      await callMCPTool(me.client, "session", {
+      await callMCPTool(me.client, "execution", {
         action: "await-user",
         executionId: asking.processId,
         question: "Which currency should the prices use?",
@@ -483,12 +483,12 @@ test.describe("The overview", () => {
       await page.evaluate(() => {
         (window as unknown as { overviewMarker: boolean }).overviewMarker = true;
       });
-      const context = await callMCPTool<{ revision: number }>(me.client, "session", {
+      const context = await callMCPTool<{ revision: number }>(me.client, "execution", {
         action: "execution_context",
         executionId: run.processId,
       });
       expect(context.revision).toEqual(expect.any(Number));
-      await callMCPTool(me.client, "session", {
+      await callMCPTool(me.client, "execution", {
         action: "stop-execution",
         executionId: run.processId,
         expectedRevision: context.revision,

@@ -308,10 +308,10 @@ export function createWorkspaceSemanticServices(dependencies: WorkspaceSemanticD
   const projectRepository = (result: RepositoryResult, controller: ControllerReference) => {
     const instruction =
       result.status === "applied"
-        ? "Use the returned target with workspace_create and the chosen branch."
+        ? "Use the returned target with codespace action create and the chosen branch."
         : result.status === "rejected"
           ? "Inspect this original refusal before deciding on another repository operation. If the repository was already created, repair its access in Moira Settings without creating a replacement."
-          : "Restore the selected GitHub and computer permissions in Moira Settings, then inspect this original operation. A retained private-repository setup can be continued explicitly with operation_resume; an absent record cannot be resumed.";
+          : "Restore the selected GitHub and computer permissions in Moira Settings, then inspect this original operation. A retained private-repository setup can be continued explicitly with codespace action resume; an absent record cannot be resumed.";
     return {
       status: result.status,
       instruction,

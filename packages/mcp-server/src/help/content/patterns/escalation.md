@@ -253,7 +253,7 @@ Track errors during retries:
 }
 ```
 
-Reaching an authored `end` produces an ordinarily completed run with the stated partial outcome; it does not set status `stopped`. For an actual stop, use the authorized `session stop` contract rather than submitting a fictitious successful answer.
+Reaching an authored `end` produces an ordinarily completed run with the stated partial outcome; it does not set status `stopped`. For an actual stop, use the authorized `execution` (`stop-execution`) contract rather than submitting a fictitious successful answer.
 
 ## Escalation Levels
 

@@ -4,7 +4,11 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
-import { createAuthenticatedMCPClient, callMCPTool } from "../utils/mcp-auth.js";
+import {
+  deleteOwnedTestWorkflow,
+  createAuthenticatedMCPClient,
+  callMCPTool,
+} from "../utils/mcp-auth.js";
 import { MCP_TEST_WORKFLOWS } from "../fixtures/mcp-workflows.js";
 import { MCP_TEST_DATA } from "../fixtures/mcp-test-data.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -25,12 +29,12 @@ function requiredId(response: string, label: "Process" | "Start attempt" | "Step
 }
 
 async function startExecution(client: Client, workflowId: string): Promise<RunningExecution> {
-  const preparation = await callMCPTool<string>(client, "start", {
+  const preparation = await callMCPTool<string>(client, "execution", {
     action: "prepare",
     parentExecutionId: "none",
     workflowId,
   });
-  const response = await callMCPTool<string>(client, "start", {
+  const response = await callMCPTool<string>(client, "execution", {
     action: "execute",
     startAttemptId: requiredId(preparation, "Start attempt"),
   });
@@ -46,7 +50,8 @@ async function advanceExecution(
   execution: RunningExecution,
   input: unknown,
 ): Promise<string> {
-  const response = await callMCPTool<string>(client, "step", {
+  const response = await callMCPTool<string>(client, "execution", {
+    action: "step",
     processId: execution.processId,
     attemptId: execution.attemptId,
     input,
@@ -84,7 +89,7 @@ describe("MCP Workflow Execution Tools E2E", () => {
         string,
         unknown
       >;
-      const createResult = await callMCPTool<{ workflowId: string }>(client, "manage", {
+      const createResult = await callMCPTool<{ workflowId: string }>(client, "workflow", {
         action: "create",
         workflow: workflowWithoutId,
       });
@@ -96,11 +101,7 @@ describe("MCP Workflow Execution Tools E2E", () => {
   afterAll(async () => {
     // Cleanup all created workflows
     for (const workflowId of createdWorkflows) {
-      try {
-        await callMCPTool(client, "manage", { workflowId });
-      } catch (e) {
-        // Ignore cleanup errors
-      }
+      await deleteOwnedTestWorkflow(client, workflowId);
     }
     await cleanup();
   });
@@ -149,7 +150,7 @@ describe("MCP Workflow Execution Tools E2E", () => {
     const processId = execution.processId;
 
     // Get current step
-    const currentStep = await callMCPTool<string>(client, "session", {
+    const currentStep = await callMCPTool<string>(client, "execution", {
       action: "current_step",
       executionId: processId,
     });
@@ -163,7 +164,7 @@ describe("MCP Workflow Execution Tools E2E", () => {
     await advanceExecution(client, execution, EXECUTION_INPUTS.STEP1_SIMPLE);
 
     // Get current step again
-    const afterStep1 = await callMCPTool<string>(client, "session", {
+    const afterStep1 = await callMCPTool<string>(client, "execution", {
       action: "current_step",
       executionId: processId,
     });
@@ -187,8 +188,9 @@ describe("MCP Workflow Execution Tools E2E", () => {
 
   test("execute_step marks missing-execution failures as MCP errors", async () => {
     const result = await client.callTool({
-      name: "step",
+      name: "execution",
       arguments: {
+        action: "step",
         processId: "00000000-0000-4000-8000-000000000000",
         attemptId: "00000000-0000-4000-8000-000000000001",
       },
@@ -209,7 +211,7 @@ describe("MCP Workflow Execution Tools E2E", () => {
     await advanceExecution(client, execution, EXECUTION_INPUTS.CONTEXT_DATA);
 
     // Check execution context
-    const context = await callMCPTool(client, "session", {
+    const context = await callMCPTool(client, "execution", {
       action: "execution_context",
       executionId: processId,
     });
@@ -240,7 +242,7 @@ describe("MCP Workflow Execution Tools E2E", () => {
     await advanceExecution(client, trueExecution, { testValue: "yes" });
 
     // Get current step - should have evaluated condition and be at true path
-    const trueStep = await callMCPTool<string>(client, "session", {
+    const trueStep = await callMCPTool<string>(client, "execution", {
       action: "current_step",
       executionId: trueProcessId,
     });
@@ -254,7 +256,7 @@ describe("MCP Workflow Execution Tools E2E", () => {
     // Execute setup node with testValue='no' for FALSE path
     await advanceExecution(client, falseExecution, { testValue: "no" });
 
-    const falseStep = await callMCPTool<string>(client, "session", {
+    const falseStep = await callMCPTool<string>(client, "execution", {
       action: "current_step",
       executionId: falseProcessId,
     });
@@ -284,7 +286,7 @@ describe("MCP Workflow Execution Tools E2E", () => {
     await advanceExecution(client, exec1, EXECUTION_INPUTS.STEP1_SIMPLE);
 
     // exec2 should still be at step1
-    const exec2State = await callMCPTool<string>(client, "session", {
+    const exec2State = await callMCPTool<string>(client, "execution", {
       action: "current_step",
       executionId: pid2,
     });
@@ -301,7 +303,7 @@ describe("MCP Workflow Execution Tools E2E", () => {
     // Execute all 5 steps
     let lastStepResult = "";
     for (let i = 1; i <= 5; i++) {
-      const currentStep = await callMCPTool<string>(client, "session", {
+      const currentStep = await callMCPTool<string>(client, "execution", {
         action: "current_step",
         executionId: processId,
       });

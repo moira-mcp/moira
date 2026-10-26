@@ -133,7 +133,7 @@ describe("answering a waiting step from the run page", () => {
     expect(String(invalid.json.error?.message ?? invalid.json.error)).toMatch(/validation/i);
 
     // Nothing moved: the run still waits on the first step with no adjustment in its route.
-    const progress = await callMCPTool<any>(client, "session", {
+    const progress = await callMCPTool<any>(client, "execution", {
       action: "progress",
       executionId: run.processId,
     });
@@ -179,14 +179,15 @@ describe("answering a waiting step from the run page", () => {
     });
 
     // The agent's attempt was bound to the answered step: it is stale, and current_step recovers.
-    const staleStep = await callMCPToolRaw(client, "step", {
+    const staleStep = await callMCPToolRaw(client, "execution", {
+      action: "step",
       processId: run.processId,
       attemptId: run.attemptId,
       input: getTaskInput,
     });
     expect(staleStep).toContain("ATTEMPT_STALE");
     expect(staleStep).toContain("current_step");
-    const current = await callMCPToolRaw(client, "session", {
+    const current = await callMCPToolRaw(client, "execution", {
       action: "current_step",
       executionId: run.processId,
     });
@@ -194,7 +195,8 @@ describe("answering a waiting step from the run page", () => {
     const nextAttempt = current.match(/Step attempt ID:\s*([a-f0-9-]+)/i)?.[1];
     expect(nextAttempt).toBeTruthy();
     expect(nextAttempt).not.toBe(run.attemptId);
-    const advanced = await callMCPToolRaw(client, "step", {
+    const advanced = await callMCPToolRaw(client, "execution", {
+      action: "step",
       processId: run.processId,
       attemptId: nextAttempt,
       input: {
@@ -207,14 +209,14 @@ describe("answering a waiting step from the run page", () => {
     expect(advanced).not.toContain("ATTEMPT_STALE");
     // The answer was accepted, not paused again for a schema error: the run moved on to the review.
     expect(advanced).not.toContain("VALIDATION ERROR");
-    const afterPlan = await callMCPTool<any>(client, "session", {
+    const afterPlan = await callMCPTool<any>(client, "execution", {
       action: "progress",
       executionId: run.processId,
     });
     expect(afterPlan.route.at(-1).nodeId).toBe("plan-review");
 
     // The route cursor projects the run as it stood at a visit, on MCP and HTTP alike.
-    const atAnswer = await callMCPTool<any>(client, "session", {
+    const atAnswer = await callMCPTool<any>(client, "execution", {
       action: "progress",
       executionId: run.processId,
       at: 1,
@@ -254,26 +256,27 @@ describe("answering a waiting step from the run page", () => {
     });
     expect(byAdmin.status).toBe(200);
     expect(byAdmin.json.data.currentNodeId).toBe("create-plan");
-    const progress = await callMCPTool<any>(foreignClient, "session", {
+    const progress = await callMCPTool<any>(foreignClient, "execution", {
       action: "progress",
       executionId: foreignRun.processId,
     });
     expect(progress.route[2]).toMatchObject({ adjusted: true, actor: { role: "user" } });
     // The foreign owner's agent recovers the same way: its attempt is stale, current_step is not.
-    const stale = await callMCPToolRaw(foreignClient, "step", {
+    const stale = await callMCPToolRaw(foreignClient, "execution", {
+      action: "step",
       processId: foreignRun.processId,
       attemptId: foreignRun.attemptId,
       input: getTaskInput,
     });
     expect(stale).toContain("ATTEMPT_STALE");
-    const current = await callMCPToolRaw(foreignClient, "session", {
+    const current = await callMCPToolRaw(foreignClient, "execution", {
       action: "current_step",
       executionId: foreignRun.processId,
     });
     expect(current).toContain("Step attempt ID:");
 
     // A one-step workflow: the answer completes the run, and a completed run refuses an answer.
-    const creation = await callMCPToolRaw(client, "manage", {
+    const creation = await callMCPToolRaw(client, "workflow", {
       action: "create",
       overwrite: true,
       workflow: {

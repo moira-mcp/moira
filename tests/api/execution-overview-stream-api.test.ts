@@ -168,7 +168,7 @@ describe("GET /api/executions/overview/stream", () => {
   }
 
   async function setNote(executionId: string, note: string): Promise<void> {
-    await callMCPTool(client, "session", { action: "update-note", executionId, note });
+    await callMCPTool(client, "execution", { action: "update-note", executionId, note });
   }
 
   beforeAll(async () => {
@@ -177,7 +177,7 @@ describe("GET /api/executions/overview/stream", () => {
     const mcp = await createAuthenticatedMCPClient({ email: owner.email, password: PASSWORD });
     client = mcp.client;
     cleanups.push(mcp.cleanup);
-    const created = await callMCPTool<{ workflowId: string }>(client, "manage", {
+    const created = await callMCPTool<{ workflowId: string }>(client, "workflow", {
       action: "create",
       workflow: plainFlow(`Order import stream ${Date.now()}`),
     });

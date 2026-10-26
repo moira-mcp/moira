@@ -6,13 +6,13 @@ description: Secret-safe настройка Telegram текущего польз
 Telegram Setup настраивает или тестирует Telegram-уведомления текущего пользователя Moira. Он проверяет masked существующие настройки, поддерживает явную замену, подтверждает сохранённые значения, отправляет bounded secret-free тест и разделяет handler send, API error, skipped send, фактическое получение, retry, reconfiguration, incomplete, blocked и skipped outcomes.
 
 ```bash
-mcp__moira__start({
+mcp__moira__execution({
   action: "prepare",
   workflowId: "moira/telegram-setup",
   parentExecutionId: "none",
   skipNotificationCheck: true
 })
-mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
+mcp__moira__execution({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ```
 
 Укажите `skipNotificationCheck: true` во время prepare для ненастроенного аккаунта: workflow содержит собственную legacy test node `telegram-notification`, и execute иначе вернёт `START_PRECONDITION_CHANGED` на preflight обычных уведомлений. `skipTelegramCheck` остаётся устаревшим alias с тем же поведением.

@@ -52,7 +52,7 @@ describe("workflow content history across MCP and HTTP", () => {
       identifier: `${identity.kind}/${identity.value}`,
     });
   };
-  const get = () => callMCPTool<any>(client, "manage", { action: "get", workflowId });
+  const get = () => callMCPTool<any>(client, "workflow", { action: "get", workflowId });
 
   beforeAll(async () => {
     const auth = await createAuthenticatedMCPClient();
@@ -83,7 +83,7 @@ describe("workflow content history across MCP and HTTP", () => {
   });
 
   beforeEach(async () => {
-    const result = await callMCPTool<any>(client, "manage", {
+    const result = await callMCPTool<any>(client, "workflow", {
       action: "create",
       workflow: {
         metadata: {
@@ -185,22 +185,22 @@ describe("workflow content history across MCP and HTTP", () => {
   );
 
   test("MCP exposes immutable content snapshots from non-edit mutations and restores one with its write guard", async () => {
-    const first = await callMCPTool<any>(client, "manage", {
+    const first = await callMCPTool<any>(client, "workflow", {
       action: "get-revision",
       workflowId,
       revision: 1,
     });
     expect(JSON.parse(first.content).variableRegistry.tone.default).toBe("plain");
-    await callMCPTool(client, "manage", {
+    await callMCPTool(client, "workflow", {
       action: "set-variable",
       workflowId,
       variableName: "tone",
       variableValue: "warm",
     });
     const current = await get();
-    const history = await callMCPTool<any>(client, "manage", { action: "history", workflowId });
+    const history = await callMCPTool<any>(client, "workflow", { action: "history", workflowId });
     expect(history.revisions.map((item: any) => item.revision)).toEqual([2, 1]);
-    const difference = await callMCPTool<any>(client, "manage", {
+    const difference = await callMCPTool<any>(client, "workflow", {
       action: "compare-revisions",
       workflowId,
       fromRevision: 1,
@@ -209,7 +209,7 @@ describe("workflow content history across MCP and HTTP", () => {
     expect(difference.parts.some((part: any) => part.added && part.value.includes("warm"))).toBe(
       true,
     );
-    const restored = await callMCPTool<any>(client, "manage", {
+    const restored = await callMCPTool<any>(client, "workflow", {
       action: "rollback",
       workflowId,
       revision: 1,
@@ -222,13 +222,13 @@ describe("workflow content history across MCP and HTTP", () => {
       revision: current.revision + 1,
     });
     expect((await get()).variableRegistry.tone.default).toBe("plain");
-    const firstAfter = await callMCPTool<any>(client, "manage", {
+    const firstAfter = await callMCPTool<any>(client, "workflow", {
       action: "get-revision",
       workflowId,
       revision: 1,
     });
     expect(firstAfter.content).toBe(first.content);
-    const stale = await callMCPToolRaw(client, "manage", {
+    const stale = await callMCPToolRaw(client, "workflow", {
       action: "rollback",
       workflowId,
       revision: 2,
@@ -238,7 +238,7 @@ describe("workflow content history across MCP and HTTP", () => {
   });
 
   test("HTTP history supports canonical references, distinguishes absent revisions and applies guarded rollback", async () => {
-    const edited = await callMCPTool<any>(client, "manage", {
+    const edited = await callMCPTool<any>(client, "workflow", {
       action: "edit",
       workflowId,
       changes: { metadata: { description: "Second description" } },
@@ -292,7 +292,7 @@ describe("workflow content history across MCP and HTTP", () => {
 
   test("publishing the current workflow does not expose private past definitions or rollback authority", async () => {
     expect((await historyRequest("/history", { who: foreignCookie })).status).toBe(404);
-    await callMCPTool(client, "manage", {
+    await callMCPTool(client, "workflow", {
       action: "set-visibility",
       workflowId,
       visibility: "public",

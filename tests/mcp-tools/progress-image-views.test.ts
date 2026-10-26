@@ -44,7 +44,7 @@ describe("progress image export views", () => {
       { view: "process", hide: ["health", "notify-plan-approval"], collapse: ["finalize"] },
     ]) {
       const result = await client.callTool({
-        name: "session",
+        name: "execution",
         arguments: {
           action: "progress-image-token",
           executionId: run.processId,
@@ -61,18 +61,19 @@ describe("progress image export views", () => {
       expect(result.structuredContent).not.toHaveProperty("downloadUrl");
     }
 
-    const unknown = await callMCPToolRaw(client, "session", {
+    const unknown = await callMCPToolRaw(client, "execution", {
       action: "progress-image-token",
       executionId: run.processId,
       hide: ["no-such-block"],
     });
     expect(unknown).toMatch(/hide names no block or node.*no-such-block/);
-    const badView = await callMCPToolRaw(client, "session", {
-      action: "progress-image-token",
-      executionId: run.processId,
-      view: "sepia",
-    });
-    expect(badView).toMatch(/invalid|sepia/i);
+    await expect(
+      callMCPToolRaw(client, "execution", {
+        action: "progress-image-token",
+        executionId: run.processId,
+        view: "sepia",
+      }),
+    ).rejects.toMatchObject({ code: 400 });
   });
 
   test("HTTP distinguishes unavailable owner from invalid export parameters", async () => {

@@ -190,7 +190,7 @@ export function formatCommunicationPreflightResponse(workflowIdentifier: string)
   return (
     `Your next task: Configure at least one communication channel before starting workflow "${workflowIdentifier}". ` +
     `Open Settings > Notifications and complete an available channel. Telegram can also be configured through moira/telegram-setup. ` +
-    `To continue without optional ordinary notifications, prepare a new attempt with start({ action: "prepare", workflowId: "${workflowIdentifier}", skipNotificationCheck: true, parentExecutionId: "none" }), then execute the returned Start attempt ID.\n\n` +
+    `To continue without optional ordinary notifications, prepare a new attempt with execution({ action: "prepare", workflowId: "${workflowIdentifier}", skipNotificationCheck: true, parentExecutionId: "none" }), then execute the returned Start attempt ID.\n\n` +
     `Success criteria: At least one channel is ready for the authenticated user, or the workflow is restarted with skipNotificationCheck: true.\n\n` +
     `No specific input format required. Send any data that fulfills the success criteria.`
   );
@@ -437,7 +437,7 @@ export async function startWorkflow(rawParams: unknown): Promise<ToolResult<stri
       appError.message.includes("already running") ||
       appError.message.includes("in progress")
     ) {
-      enhancedError = `${appError.message}\n\nHint: Use session({ action: 'executions' }) to see active executions`;
+      enhancedError = `${appError.message}\n\nHint: Use execution({ action: 'executions' }) to see active executions`;
       enhancedError = formatErrorWithAgentInstructions(enhancedError);
     } else {
       // Use domain error formatting which handles slug/handle errors with proper codes

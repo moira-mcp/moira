@@ -13,12 +13,12 @@
   ],
   "workflow_troubleshooting": [
     "Verify workflow ID is correct",
-    "Use list() to see available workflows",
+    "Use workflow({ action: 'list' }) to see available workflows",
     "Check if workflow was created successfully"
   ],
   "process_troubleshooting": [
     "Verify process ID is correct",
-    "Use session({ action: 'executions' }) to list active executions",
+    "Use execution({ action: 'executions' }) to list active executions",
     "Check if workflow execution is still active"
   ],
   "auth_troubleshooting": [

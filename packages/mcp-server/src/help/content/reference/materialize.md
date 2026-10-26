@@ -75,7 +75,7 @@ or `{}`. No other input shape is accepted.
 The generated directive states the lifetime and retry behavior, warns that advancing the execution
 invalidates the URL, names the context-delivery fallback below as conditional on this host being
 unable to run the command, and explains that delivery does not prove reading on either route. Calling
-`session({ action: "current_step", executionId })` while the execution is paused issues a fresh command and grant
+`execution({ action: "current_step", executionId })` while the execution is paused issues a fresh command and grant
 without advancing the graph. A later directive must still explicitly require the agent to read each
 materialized file it uses.
 
@@ -143,7 +143,7 @@ after the step has already been presented.
 A host that cannot run a shell command or reach the network in the current turn has a second route:
 
 ```text
-session({ action: "materialize", executionId: "<process-id>" })
+execution({ action: "materialize", executionId: "<process-id>" })
 ```
 
 It resolves current authorized workflow text directly, one text block per file headed by that file's

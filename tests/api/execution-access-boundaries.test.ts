@@ -49,7 +49,7 @@ describe("Execution access boundaries", () => {
     });
     cleanupOwnerMcp = authenticated.cleanup;
 
-    const workflow = await callMCPTool(authenticated.client, "manage", {
+    const workflow = await callMCPTool(authenticated.client, "workflow", {
       action: "create",
       workflow: {
         metadata: {

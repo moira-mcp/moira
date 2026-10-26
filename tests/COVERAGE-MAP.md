@@ -18,6 +18,12 @@ belongs to the [runner configs](docs/test-infrastructure.md#discovery-and-prepar
 
 ## Execution, attempts and waiting
 
+[Reminder presentation](workflow/engine/system-reminder-priority.test.ts) exercises the actual
+executor's reminder precedence and universal language instruction. Ordinary/current/replayed
+presentations retain durable originals and attempt identity through the
+[current/replay MCP boundary](integration/replay-safe-step-mcp-boundary.test.ts) and
+[prepared-start recovery](integration/replay-safe-start-attempts.test.ts).
+
 | Level       | Boundary and suite                                                                                                                                                                                                                                                                                                                                       |
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Unit        | Status/summary/current-wait policies: [shared](unit/shared/). Engine visits, context, progress, continuation and locks: [workflow engine](unit/workflow-engine/).                                                                                                                                                                                        |
@@ -30,6 +36,11 @@ belongs to the [runner configs](docs/test-infrastructure.md#discovery-and-prepar
 | E2E         | Live run inspection and route lifetime: [inspector](e2e/execution-inspector-ux.spec.ts), [inspector lifetime](e2e/execution-inspector-lifetime.spec.ts). Backend authority and browser stale-response isolation are distinct.                                                                                                                            |
 
 ## Task identity
+
+[Catalog identity](integration/catalog-task-identity.test.ts) starts complete earlier definitions,
+then verifies ordinary continuation where the paused contract is compatible or explicit public
+diagnosis and recovery on the same execution where it changed. Task state, captured originals and
+caller-owned guide/evidence files remain distinct from the current catalog definition.
 
 | Level       | Boundary and suite                                                                                                                                                                                                                                                                                       |
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -59,6 +70,14 @@ belongs to the [runner configs](docs/test-infrastructure.md#discovery-and-prepar
 | Workflow           | Measurement behavior: [coverage regression](workflow/scenarios/coverage.test.ts). [Coverage semantics](docs/workflow-scenarios.md#coverage-and-its-limits) distinguish observed nodes, declared non-null engine exits and scenario success, including failed-scenario observations. Waits, retries and teleport redirects do not invent branches; raw cycle visits are separate from the persisted journal. A percentage is not independent semantic review or provider acceptance. |
 
 ## Communication, files and artifacts
+
+[Browser publication fixtures](fixtures/browser-publication-owner.ts) give
+[SDF progress](e2e/sdf-progress-ui.spec.ts) and
+[materialize degradation](e2e/run-degradation-display.spec.ts) their own paired file owner against
+an explicitly selected loopback contributor backend. They exercise real PNG/materialize publication
+and browser presentation while refusing native VM access. Their scope and owned cleanup are in
+the [browser testing guide](docs/e2e-testing.md#prerequisite-versus-observed-action); they do not
+establish native ChatGPT input or physical/provider acceptance.
 
 | Level       | Boundary and suite                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -136,6 +155,13 @@ themselves establish each named control's full behavior; use the boundary-specif
 
 ## Documentation and client contracts
 
+The [typed catalog tests](unit/mcp-server/tool-definitions.test.ts) cover grouped actions, strict
+cross-action refusal, conditional native-file metadata and native result blocks.
+[Catalog lifecycle](unit/mcp-server/mcp-catalog-lifecycle.test.ts) owns accepted connection revision
+and refresh behavior. [Inspector tools](e2e/inspector-mcp-tools.spec.ts) exercises the maintained
+Inspector 2.12 UI with discovery, JSON action editing and an actual `workflow` list result;
+it does not establish the separate v1 Inspector OAuth registration flow or native ChatGPT delivery.
+
 | Level       | Boundary and suite                                                                                                                                                                                                                                                                                                                                                                                          |
 | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Unit        | Public EN/RU topic identities and runtime Markdown: [help rendering](unit/mcp-server/get-help-mdx.test.ts). Typed tool catalog/schema/examples: [tool definitions](unit/mcp-server/tool-definitions.test.ts). Site paths/sidebar and learning examples: [docs](unit/docs/).                                                                                                                                 |
@@ -156,6 +182,11 @@ archive publication and original collection during controlled native failure.
 refusal and runner exclusion; [runtime settlement](integration/local/runtime-settlement.test.ts)
 covers exact-profile shutdown and preservation on refusal. These fixtures do not establish
 physical VM or provider acceptance.
+
+The [packaged host CLI](integration/local/cli-admission.test.ts) observes a selected Local or
+GitHub resource while full native inventory is held. [Controller and CLI identity cases](unit/local/controller.test.ts)
+preserve explicit full listing, current connection checks, exact provider/resource binding and
+selected native refusal. The fixtures do not start a physical VM or establish installed-owner acceptance.
 
 Management independence and current policy are covered by [controller HTTP](unit/local/controller.test.ts)
 and [Local provider](integration/local-codespace-provider.test.ts): metadata and exact Git authority

@@ -6,12 +6,12 @@ description: Complete development-only repository implementation with plan-owned
 Software Development Flow implements one complete software change as independently accepted vertical units. It owns the full repository result—production code, tests, coverage, documentation, schemas and types, generated or configuration outputs, compatibility, and integration consequences—rather than splitting one lifecycle across several task workflows.
 
 ```bash
-mcp__moira__start({
+mcp__moira__execution({
   action: "prepare",
   workflowId: "moira/software-development-flow",
   parentExecutionId: "none"
 })
-mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
+mcp__moira__execution({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 ## Lifecycle
@@ -24,7 +24,7 @@ Findings are classified as product, test/validation, evidence, documentation/pro
 
 Every current-unit producer, validator, reviewer, repair role, checkpoint, and report role resolves its complete approved unit from `plans/{{plan_revision}}/plan.md`. This active revision remains authoritative after any replan; remembered wording and `previous_plan_revision` are not execution inputs. Only the five revision writers intentionally read both revisions: they preserve the historical source while writing the already-advanced current plan. Cross-revision final review may use origin-qualified historical evidence, but it does not replace the active plan contract.
 
-When the originating request already authorizes a later caller-owned push, pull request, publication, release, or deployment, SDF records that intent through the `session` reminder API during intake. The write requires the current workflow-step revision but does not advance that revision or invalidate the presented Step attempt. The reminder is returned under `Next requested actions` on ordinary completion for both standalone and child runs. It never becomes a development-plan unit, changes `vcs_commits_authorized`, performs the effect, or grants new authority.
+When the originating request already authorizes a later caller-owned push, pull request, publication, release, or deployment, SDF records that intent through the `execution` reminder API during intake. The write requires the current workflow-step revision but does not advance that revision or invalidate the presented Step attempt. The reminder is returned under `Next requested actions` on ordinary completion for both standalone and child runs. It never becomes a development-plan unit, changes `vcs_commits_authorized`, performs the effect, or grants new authority.
 
 Runtime, browser, visual, integration, performance, and full-suite checks remain conditional on the feature and repository. Permanent documentation closes with its vertical unit. One unified final semantic review checks the complete result against the requirements, including cross-unit documentation; there is no separate documentation-only reconciliation. Finalization covers feature-wide validation, requirements coverage, factual reporting, and authority-bound local VCS reconciliation. A run ends in one of three ways, and each sends a best-effort notification through the configured
 user channels: it completes; it ends early on the user's explicit confirmation; or it finishes the
@@ -64,4 +64,4 @@ Use Software Development Flow for repository implementation of any size: its pla
 
 The SDF development plan may include explicitly authorized local commits or checkpoints. Push, pull-request creation or merge, publication, release, and deployment are caller or parent-process work and never development-plan units. Starting SDF does not authorize notification, production mutation, or administrative override; every side effect remains bounded by originating authority.
 
-SDF declares no externally writable runtime variables. Agents may inspect its registry through `session variables`, but visual settings, VCS authority, plan cursors, and every other SDF variable remain read-only through the default-deny runtime policy.
+SDF declares no externally writable runtime variables. Agents may inspect its registry through `execution` (`action: "variables"`), but visual settings, VCS authority, plan cursors, and every other SDF variable remain read-only through the default-deny runtime policy.

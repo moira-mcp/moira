@@ -66,10 +66,10 @@ Updates/errors/retry stay local; other controls, loaded data and drafts remain.
 
 ## Development environments
 
-Use `workspace_list({ provider: "local-sandboxes" })` or
-`workspace_list({ provider: "github-codespaces" })` to find persistent environments for one provider.
+Use `codespace({ action: "list", provider: "local-sandboxes" })` or
+`codespace({ action: "list", provider: "github-codespaces" })` to find persistent environments for one provider.
 Pass the selected environment's returned reference to command and file tools. Use
-`workspace_targets` with the same `provider` to select an approved repository and paired controller
+`codespace` (`targets`) with the same `provider` to select an approved repository and paired controller
 before creation. The normal list includes known incomplete setup; choose `view: "diagnostics"`
 for unavailable or uncertain identities and their original operations, or `view: "history"`
 for confirmed retired environments. Local discovery does not await GitHub or billing.
@@ -131,7 +131,7 @@ flowchart LR
 1. Agent starts a workflow via MCP tool
 2. Receives current step directive and completion condition
 3. Executes the directive
-4. Returns result via `step()` tool
+4. Returns result via `execution({ action: "step", processId, attemptId, input })` tool
 5. Engine validates and advances to next step
 6. Repeat until workflow completes
 
@@ -212,13 +212,13 @@ An execution is a running instance of a workflow. It maintains:
 
 Moira connects to AI agents via [Model Context Protocol](https://modelcontextprotocol.io/). The MCP server provides tools for:
 
-| Tool      | Purpose                              |
-| --------- | ------------------------------------ |
-| `list`    | Browse available workflows           |
-| `start`   | Prepare or execute a workflow start  |
-| `step`    | Execute current step and advance     |
-| `manage`  | Create, edit, and retrieve workflows |
-| `session` | Get user info and active executions  |
+| Tool                               | Purpose                              |
+| ---------------------------------- | ------------------------------------ |
+| `workflow` (`list`)                | Browse available workflows           |
+| `execution` (`prepare`, `execute`) | Prepare or execute a workflow start  |
+| `execution` (`step`)               | Execute current step and advance     |
+| `workflow`                         | Create, edit, and retrieve workflows |
+| `execution`                        | Get user info and active executions  |
 
 :::note
 MCP is an open protocol. Moira works with any MCP-compatible client: Claude Code, Cursor, and

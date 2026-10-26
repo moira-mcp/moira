@@ -472,6 +472,127 @@ describe("One owner HTTP surface for local and remote control", () => {
       stderr.mockRestore();
     }
   });
+  test("explicit host CLI workspaces still waits for the full native inventory", async () => {
+    const f = await fixture();
+    let enter!: () => void, release!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const snapshot = f.manager.snapshot.bind(f.manager);
+    let selectedSpace: string | undefined,
+      finished = false,
+      output = "";
+    f.manager.snapshot = async (spaceId) => {
+      selectedSpace = spaceId;
+      enter();
+      await held;
+      return snapshot(spaceId);
+    };
+    const stdout = jest.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      output += String(chunk);
+      return true;
+    });
+    const listing = localCli(["workspaces", "--state", directory], {}).then(() => {
+      finished = true;
+    });
+    try {
+      await entered;
+      expect(selectedSpace).toBeUndefined();
+      expect(finished).toBe(false);
+      release();
+      await listing;
+      expect(
+        decodeReference(JSON.parse(output).workspaces[0].workspace, "workspace"),
+      ).toMatchObject({ resourceId: f.resourceId, generation: 3 });
+    } finally {
+      release();
+      try {
+        await listing;
+      } finally {
+        stdout.mockRestore();
+      }
+    }
+  });
+  test.each([
+    "foreign-device",
+    "wrong-provider",
+    "unknown-resource",
+    "old-controller-response",
+    "connection-changed",
+    "authority-refused",
+  ] as const)(
+    "host CLI observe refuses %s without publishing another owner's fresh reference",
+    async (failure) => {
+      const f = await fixture();
+      const reference = encodeReference("workspace", {
+        resourceId: failure === "unknown-resource" ? randomUUID() : f.resourceId,
+        provider: failure === "wrong-provider" ? "github-codespaces" : "local-sandboxes",
+        deviceId: failure === "foreign-device" ? randomUUID() : f.identity.deviceId,
+        generation: 1,
+      });
+      const snapshot = f.manager.snapshot.bind(f.manager);
+      f.manager.snapshot = async (spaceId) => {
+        if (failure === "connection-changed" || failure === "authority-refused")
+          await f.state.write("connection.json", {
+            ...f.identity,
+            ...(failure === "connection-changed"
+              ? { connectionId: randomUUID() }
+              : { authorityRefused: true }),
+            origin: "https://moira.example",
+          });
+        return snapshot(spaceId);
+      };
+      if (failure === "old-controller-response")
+        await f.state.write("connection.json", {
+          ...f.identity,
+          connectionId: randomUUID(),
+          origin: "https://moira.example",
+        });
+      let output = "";
+      const stdout = jest.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+        output += String(chunk);
+        return true;
+      });
+      try {
+        await expect(
+          localCli(["observe", reference, "--state", directory], {}),
+        ).rejects.toMatchObject({
+          code:
+            failure === "unknown-resource"
+              ? "LOCAL_CONTROLLER_REFUSED"
+              : failure === "wrong-provider"
+                ? "LOCAL_IDENTITY_CHANGED"
+                : "LOCAL_UNAUTHORIZED",
+        });
+        expect(output).toBe("");
+        expect(await f.state.keys("controller-operation-")).toEqual([]);
+        expect((await f.records.get(f.space.id))?.desiredState).toBe("running");
+      } finally {
+        stdout.mockRestore();
+      }
+    },
+  );
+  test("host CLI observe preserves the selected native refusal without falling back to inventory", async () => {
+    const f = await fixture();
+    const reads: Array<string | undefined> = [];
+    f.manager.snapshot = async (spaceId) => {
+      reads.push(spaceId);
+      throw new LocalRefusal("LOCAL_RUNTIME_UNAVAILABLE", "Selected native owner is unavailable");
+    };
+    const reference = encodeReference("workspace", {
+      resourceId: f.resourceId,
+      provider: "local-sandboxes",
+      deviceId: f.identity.deviceId,
+      generation: 3,
+    });
+    await expect(localCli(["observe", reference, "--state", directory], {})).rejects.toMatchObject({
+      code: "LOCAL_RUNTIME_UNAVAILABLE",
+    });
+    expect(reads).toEqual([f.space.id]);
+  });
   test("exact retained selector resolution works without native observation and refuses foreign selectors", async () => {
     const f = await fixture();
     f.manager.snapshot = async () => {

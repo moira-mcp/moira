@@ -57,7 +57,7 @@ test.describe("Home work area", () => {
     let workflowId: string;
     try {
       workflowId = (
-        await callMCPTool(mcp.client, "manage", {
+        await callMCPTool(mcp.client, "workflow", {
           action: "create",
           workflow: {
             metadata: { name, version: "1.0.0", description: "A flow the home page lists" },

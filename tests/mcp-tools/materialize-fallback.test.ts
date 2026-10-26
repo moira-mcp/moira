@@ -22,7 +22,7 @@ async function callForBlocks(
   client: Client,
   args: Record<string, unknown>,
 ): Promise<{ blocks: TextBlock[]; isError: boolean }> {
-  const result = await client.callTool({ name: "session", arguments: args });
+  const result = await client.callTool({ name: "execution", arguments: args });
   return {
     blocks: (result.content as TextBlock[]) ?? [],
     isError: result.isError === true,
@@ -48,7 +48,7 @@ describe("MCP materialize fallback E2E", () => {
     });
     expect(execution.response).toContain("workflow-guide.md");
     // The deployed image must actually present the fallback, not merely accept the call.
-    expect(execution.response).toContain('session({ action: "materialize"');
+    expect(execution.response).toContain('execution({ action: "materialize"');
   });
 
   afterAll(async () => {
@@ -90,12 +90,17 @@ describe("MCP materialize fallback E2E", () => {
   // lookup's user filter in tests/integration/workflow-file-tokens.test.ts, and the resolver's
   // foreign-execution refusal in tests/unit/workflow-engine/materialize-context-delivery.test.ts.
 
-  test("reports the materialize action in the session tool contract", async () => {
+  test("reports the materialize action in the execution tool contract", async () => {
     const tools = await client.listTools();
-    const session = tools.tools.find((tool) => tool.name === "session");
-    expect(session).toBeDefined();
-    const action = (session!.inputSchema as { properties?: { action?: { enum?: string[] } } })
-      .properties?.action;
-    expect(action?.enum).toContain("materialize");
+    const execution = tools.tools.find((tool) => tool.name === "execution");
+    expect(execution).toBeDefined();
+    const branches = (
+      execution!.inputSchema as unknown as {
+        anyOf: Array<{ properties: { action: { const: string } }; required: string[] }>;
+      }
+    ).anyOf;
+    expect(
+      branches.find((branch) => branch.properties.action.const === "materialize")?.required,
+    ).toContain("executionId");
   });
 });

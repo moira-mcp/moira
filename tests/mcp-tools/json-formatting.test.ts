@@ -18,7 +18,7 @@ describe("MCP JSON Formatting", () => {
     cleanup = mcpClient.cleanup;
 
     // Create a test workflow for JSON formatting tests
-    const result = await callMCPTool(client, "manage", {
+    const result = await callMCPTool(client, "workflow", {
       action: "create",
       workflow: {
         metadata: {
@@ -47,7 +47,7 @@ describe("MCP JSON Formatting", () => {
   });
 
   test("list tool returns formatted JSON", async () => {
-    const rawResponse = await callMCPToolRaw(client, "list", {});
+    const rawResponse = await callMCPToolRaw(client, "workflow", { action: "list" });
 
     // Verify JSON is formatted with 2-space indent
     expect(rawResponse).toContain("\n");
@@ -61,7 +61,7 @@ describe("MCP JSON Formatting", () => {
 
   test("manage(get) tool returns formatted JSON", async () => {
     // Use test workflow created in beforeAll
-    const rawResponse = await callMCPToolRaw(client, "manage", {
+    const rawResponse = await callMCPToolRaw(client, "workflow", {
       action: "get",
       workflowId: testWorkflowId,
       includeNodes: false,
@@ -90,7 +90,7 @@ describe("MCP JSON Formatting", () => {
   });
 
   test("session(user) returns formatted JSON", async () => {
-    const rawResponse = await callMCPToolRaw(client, "session", {
+    const rawResponse = await callMCPToolRaw(client, "execution", {
       action: "user",
     });
 
@@ -104,7 +104,7 @@ describe("MCP JSON Formatting", () => {
 
   test("manage(get-structure) returns formatted JSON", async () => {
     // Use test workflow created in beforeAll
-    const rawResponse = await callMCPToolRaw(client, "manage", {
+    const rawResponse = await callMCPToolRaw(client, "workflow", {
       action: "get-structure",
       workflowId: testWorkflowId,
     });

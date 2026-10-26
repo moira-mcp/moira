@@ -41,7 +41,7 @@ describe("task-title HTTP boundary and mutation audit", () => {
     const password = "Title-Http-Other1!";
     await createTestUserViaApi(baseUrl, otherEmail, password, "Other task owner");
     otherCookie = formatSessionCookie(baseUrl, await signInUser(baseUrl, otherEmail, password));
-    const created = await callMCPTool(client, "manage", {
+    const created = await callMCPTool(client, "workflow", {
       action: "create",
       workflow: {
         metadata: {
@@ -144,7 +144,7 @@ describe("task-title HTTP boundary and mutation audit", () => {
       if (transport === "HTTP") {
         expect((await rename(processId, request)).status).toBe(200);
       } else {
-        const result = await callMCPTool(client, "session", {
+        const result = await callMCPTool(client, "execution", {
           action: "update-task-title",
           executionId: processId,
           ...request,
@@ -164,7 +164,7 @@ describe("task-title HTTP boundary and mutation audit", () => {
           false,
         );
       } else {
-        const result = await callMCPTool(client, "session", {
+        const result = await callMCPTool(client, "execution", {
           action: "update-task-title",
           executionId: processId,
           ...repeated,

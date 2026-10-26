@@ -6,6 +6,7 @@
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import {
+  deleteOwnedTestWorkflow,
   createAuthenticatedMCPClient,
   callMCPTool,
   getAdminSessionCookie,
@@ -69,7 +70,7 @@ describe("MCP Execution Audit Logging E2E", () => {
 
     // Create test workflow - extract workflow without hardcoded id
     const { id: _unusedId, ...workflowWithoutId } = SIMPLE_LINEAR.workflow;
-    const createResult = await callMCPTool<{ workflowId: string }>(client, "manage", {
+    const createResult = await callMCPTool<{ workflowId: string }>(client, "workflow", {
       action: "create",
       workflow: workflowWithoutId,
     });
@@ -80,15 +81,7 @@ describe("MCP Execution Audit Logging E2E", () => {
   afterAll(async () => {
     // Cleanup created workflows
     for (const workflowId of createdWorkflows) {
-      try {
-        await callMCPTool(client, "manage", {
-          action: "edit",
-          workflowId,
-          changes: { removeNodes: ["*"] }, // This won't work, but we try
-        });
-      } catch {
-        // Ignore cleanup errors
-      }
+      await deleteOwnedTestWorkflow(client, workflowId);
     }
     await cleanup();
   });
@@ -320,7 +313,7 @@ describe("MCP Execution Audit Logging E2E", () => {
     const nonExistentWorkflowId = "non-existent-workflow-for-audit-test";
 
     try {
-      await callMCPTool<string>(client, "start", {
+      await callMCPTool<string>(client, "execution", {
         action: "prepare",
         parentExecutionId: "none",
         workflowId: nonExistentWorkflowId,
@@ -362,7 +355,8 @@ describe("MCP Execution Audit Logging E2E", () => {
     const nonExistentProcessId = "00000000-0000-4000-8000-000000000000";
 
     try {
-      await callMCPTool<string>(client, "step", {
+      await callMCPTool<string>(client, "execution", {
+        action: "step",
         processId: nonExistentProcessId,
         attemptId: "00000000-0000-4000-8000-000000000001",
         input: { test: "data" },
@@ -402,7 +396,7 @@ describe("MCP Execution Audit Logging E2E", () => {
     // Create workflow with strict schema validation
     const { id: _unusedId, ...validationWorkflowWithoutId } =
       MCP_TEST_WORKFLOWS.VALIDATION_TEST.workflow;
-    const createResult = await callMCPTool<{ workflowId: string }>(client, "manage", {
+    const createResult = await callMCPTool<{ workflowId: string }>(client, "workflow", {
       action: "create",
       workflow: validationWorkflowWithoutId,
     });
@@ -465,7 +459,7 @@ describe("MCP Execution Audit Logging E2E", () => {
 
   test("mcp:workflow_list is logged when listing workflows", async () => {
     // Call list tool
-    await callMCPTool(client, "list", {});
+    await callMCPTool(client, "workflow", { action: "list" });
 
     // Wait for audit log entry with retry
     const auditLogs = await waitFor(
@@ -488,7 +482,7 @@ describe("MCP Execution Audit Logging E2E", () => {
 
   test("mcp:session_info is logged when getting session info", async () => {
     // Call session tool with user action
-    await callMCPTool(client, "session", { action: "user" });
+    await callMCPTool(client, "execution", { action: "user" });
 
     // Wait for audit log entry with retry — find the specific "user" action log
     // (other session_info actions like "executions" use resource: "execution")
@@ -569,7 +563,7 @@ describe("MCP Execution Audit Logging E2E", () => {
 
   test("mcp:token_create is logged when creating token", async () => {
     // Call token tool with upload action
-    await callMCPTool(client, "token", { action: "upload" });
+    await callMCPTool(client, "workflow", { action: "upload" });
 
     // Wait for audit log entry with retry - filter by metadata.action to avoid race conditions
     // with other tests that may create download tokens

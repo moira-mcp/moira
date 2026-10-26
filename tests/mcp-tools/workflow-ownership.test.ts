@@ -68,7 +68,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
 
     beforeAll(async () => {
       // Admin creates a private workflow
-      const createResult = await callMCPTool(adminClient, "manage", {
+      const createResult = await callMCPTool(adminClient, "workflow", {
         action: "create",
         workflow: {
           visibility: "private",
@@ -95,7 +95,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
     });
 
     test("owner can read own private workflow", async () => {
-      const result = await callMCPTool(adminClient, "manage", {
+      const result = await callMCPTool(adminClient, "workflow", {
         action: "get",
         workflowId: privateWorkflowId,
       });
@@ -107,7 +107,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
     });
 
     test("owner can edit own private workflow", async () => {
-      const result = await callMCPTool(adminClient, "manage", {
+      const result = await callMCPTool(adminClient, "workflow", {
         action: "edit",
         workflowId: privateWorkflowId,
         changes: {
@@ -121,7 +121,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
     });
 
     test("non-owner cannot read private workflow", async () => {
-      const result = await callMCPTool<string>(userClient, "manage", {
+      const result = await callMCPTool<string>(userClient, "workflow", {
         action: "get",
         workflowId: privateWorkflowId,
       });
@@ -134,7 +134,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
     });
 
     test("non-owner cannot edit private workflow", async () => {
-      const result = await callMCPTool<string>(userClient, "manage", {
+      const result = await callMCPTool<string>(userClient, "workflow", {
         action: "edit",
         workflowId: privateWorkflowId,
         changes: {
@@ -156,7 +156,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
     // The system generates unique UUIDs for each workflow.
 
     test("private workflow not visible in list for non-owner", async () => {
-      const result = await callMCPTool(userClient, "list", {});
+      const result = await callMCPTool(userClient, "workflow", { action: "list" });
       const workflows = result.workflows || result;
 
       const found = workflows.find((w: any) => w.id === privateWorkflowId);
@@ -170,7 +170,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
 
     beforeAll(async () => {
       // Admin creates a public workflow
-      const createResult = await callMCPTool(adminClient, "manage", {
+      const createResult = await callMCPTool(adminClient, "workflow", {
         action: "create",
         workflow: {
           visibility: "public",
@@ -198,7 +198,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
     });
 
     test("non-owner can read public workflow", async () => {
-      const result = await callMCPTool(userClient, "manage", {
+      const result = await callMCPTool(userClient, "workflow", {
         action: "get",
         workflowId: publicWorkflowId,
       });
@@ -209,7 +209,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
     });
 
     test("non-owner cannot edit public workflow", async () => {
-      const result = await callMCPTool<string>(userClient, "manage", {
+      const result = await callMCPTool<string>(userClient, "workflow", {
         action: "edit",
         workflowId: publicWorkflowId,
         changes: {
@@ -231,7 +231,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
     // The system generates unique UUIDs for each workflow.
 
     test("public workflow visible in list for non-owner", async () => {
-      const result = await callMCPTool(userClient, "list", {});
+      const result = await callMCPTool(userClient, "workflow", { action: "list" });
       const workflows = result.workflows || result;
 
       // Match by slug since list id is now "handle/slug" format, not UUID
@@ -241,7 +241,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
     });
 
     test("owner can edit own public workflow", async () => {
-      const result = await callMCPTool(adminClient, "manage", {
+      const result = await callMCPTool(adminClient, "workflow", {
         action: "edit",
         workflowId: publicWorkflowId,
         changes: {
@@ -259,7 +259,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
     let userOwnWorkflowId: string;
 
     test("user can create own workflow", async () => {
-      const result = await callMCPTool(userClient, "manage", {
+      const result = await callMCPTool(userClient, "workflow", {
         action: "create",
         workflow: {
           visibility: "private",
@@ -283,7 +283,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
 
     test("user can read own workflow", async () => {
       expect(userOwnWorkflowId).toBeDefined();
-      const result = await callMCPTool(userClient, "manage", {
+      const result = await callMCPTool(userClient, "workflow", {
         action: "get",
         workflowId: userOwnWorkflowId,
       });
@@ -294,7 +294,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
 
     test("user can edit own workflow", async () => {
       expect(userOwnWorkflowId).toBeDefined();
-      const result = await callMCPTool(userClient, "manage", {
+      const result = await callMCPTool(userClient, "workflow", {
         action: "edit",
         workflowId: userOwnWorkflowId,
         changes: {
@@ -311,7 +311,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
       expect(userOwnWorkflowId).toBeDefined();
       // Admin should not be able to edit other users' private workflows
       // This tests that admin doesn't have super-powers over user content
-      const result = await callMCPTool<string>(adminClient, "manage", {
+      const result = await callMCPTool<string>(adminClient, "workflow", {
         action: "edit",
         workflowId: userOwnWorkflowId,
         changes: {
@@ -334,7 +334,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
 
     beforeAll(async () => {
       // Admin creates a private workflow
-      const createResult = await callMCPTool(adminClient, "manage", {
+      const createResult = await callMCPTool(adminClient, "workflow", {
         action: "create",
         workflow: {
           visibility: "private",
@@ -361,7 +361,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
     });
 
     test("non-owner cannot start private workflow", async () => {
-      const result = await callMCPToolRaw(userClient, "start", {
+      const result = await callMCPToolRaw(userClient, "execution", {
         action: "prepare",
         parentExecutionId: "none",
         workflowId: privateExecWorkflowId,
@@ -387,7 +387,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
 
     beforeAll(async () => {
       // Admin creates workflow with variables
-      const createResult = await callMCPTool(adminClient, "manage", {
+      const createResult = await callMCPTool(adminClient, "workflow", {
         action: "create",
         workflow: {
           visibility: "private",
@@ -414,7 +414,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
     });
 
     test("non-owner cannot access workflow variables", async () => {
-      const result = await callMCPTool<string>(userClient, "manage", {
+      const result = await callMCPTool<string>(userClient, "workflow", {
         action: "list-variables",
         workflowId: varWorkflowId,
       });
@@ -427,7 +427,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
     });
 
     test("non-owner cannot get specific variable", async () => {
-      const result = await callMCPTool<string>(userClient, "manage", {
+      const result = await callMCPTool<string>(userClient, "workflow", {
         action: "get-variable",
         workflowId: varWorkflowId,
         variableName: "secret_data",
@@ -440,7 +440,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
     });
 
     test("non-owner cannot set variable in others workflow", async () => {
-      const result = await callMCPTool<string>(userClient, "manage", {
+      const result = await callMCPTool<string>(userClient, "workflow", {
         action: "set-variable",
         workflowId: varWorkflowId,
         variableName: "injected_var",
@@ -454,7 +454,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
     });
 
     test("non-owner cannot delete variable in others workflow", async () => {
-      const result = await callMCPTool<string>(userClient, "manage", {
+      const result = await callMCPTool<string>(userClient, "workflow", {
         action: "delete-variable",
         workflowId: varWorkflowId,
         variableName: "secret_data",
@@ -467,7 +467,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
     });
 
     test("owner can access own workflow variables", async () => {
-      const result = await callMCPTool(adminClient, "manage", {
+      const result = await callMCPTool(adminClient, "workflow", {
         action: "list-variables",
         workflowId: varWorkflowId,
       });
@@ -482,7 +482,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
     let diffPrivateWorkflowId: string;
 
     beforeAll(async () => {
-      const createResult = await callMCPTool(adminClient, "manage", {
+      const createResult = await callMCPTool(adminClient, "workflow", {
         action: "create",
         workflow: {
           visibility: "private",
@@ -503,7 +503,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
 
     test("non-owner cannot diff private workflows", async () => {
       // Try to use diff action on private workflow
-      const result = await callMCPTool<string>(userClient, "manage", {
+      const result = await callMCPTool<string>(userClient, "workflow", {
         action: "diff",
         workflowId: diffPrivateWorkflowId,
         compareWorkflowId: diffPrivateWorkflowId,
@@ -517,7 +517,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
     });
 
     test("owner can diff own private workflow", async () => {
-      const result = await callMCPTool(adminClient, "manage", {
+      const result = await callMCPTool(adminClient, "workflow", {
         action: "diff",
         workflowId: diffPrivateWorkflowId,
         compareWorkflowId: diffPrivateWorkflowId,

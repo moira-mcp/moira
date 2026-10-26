@@ -81,23 +81,21 @@ describe("MCP Artifacts Tool E2E", () => {
     });
 
     test("upload requires name parameter", async () => {
-      const result = await callMCPTool(client, "artifacts", {
-        action: "upload",
-        content: "<html><body>Content</body></html>",
-      });
-
-      expect(typeof result).toBe("string");
-      expect(result).toContain("name");
+      await expect(
+        callMCPTool(client, "artifacts", {
+          action: "upload",
+          content: "<html><body>Content</body></html>",
+        }),
+      ).rejects.toMatchObject({ code: 400 });
     });
 
     test("upload requires content parameter", async () => {
-      const result = await callMCPTool(client, "artifacts", {
-        action: "upload",
-        name: "test.html",
-      });
-
-      expect(typeof result).toBe("string");
-      expect(result).toContain("content");
+      await expect(
+        callMCPTool(client, "artifacts", {
+          action: "upload",
+          name: "test.html",
+        }),
+      ).rejects.toMatchObject({ code: 400 });
     });
 
     test("upload validates HTML content", async () => {
@@ -140,13 +138,12 @@ describe("MCP Artifacts Tool E2E", () => {
     });
 
     test("update requires uuid parameter", async () => {
-      const result = await callMCPTool(client, "artifacts", {
-        action: "update",
-        content: "<html><body>Content</body></html>",
-      });
-
-      expect(typeof result).toBe("string");
-      expect(result).toContain("uuid");
+      await expect(
+        callMCPTool(client, "artifacts", {
+          action: "update",
+          content: "<html><body>Content</body></html>",
+        }),
+      ).rejects.toMatchObject({ code: 400 });
     });
 
     test("update requires content parameter", async () => {
@@ -158,13 +155,12 @@ describe("MCP Artifacts Tool E2E", () => {
       });
       createdUuids.push(createResult.uuid);
 
-      const result = await callMCPTool(client, "artifacts", {
-        action: "update",
-        uuid: createResult.uuid,
-      });
-
-      expect(typeof result).toBe("string");
-      expect(result).toContain("content");
+      await expect(
+        callMCPTool(client, "artifacts", {
+          action: "update",
+          uuid: createResult.uuid,
+        }),
+      ).rejects.toMatchObject({ code: 400 });
     });
 
     test("update returns error for non-existent artifact", async () => {
@@ -212,12 +208,11 @@ describe("MCP Artifacts Tool E2E", () => {
     });
 
     test("delete requires uuid parameter", async () => {
-      const result = await callMCPTool(client, "artifacts", {
-        action: "delete",
-      });
-
-      expect(typeof result).toBe("string");
-      expect(result).toContain("uuid");
+      await expect(
+        callMCPTool(client, "artifacts", {
+          action: "delete",
+        }),
+      ).rejects.toMatchObject({ code: 400 });
     });
 
     test("delete returns error for non-existent artifact", async () => {
@@ -441,12 +436,11 @@ describe("MCP Artifacts Tool E2E", () => {
 
   describe("error handling", () => {
     test("invalid action returns error", async () => {
-      const result = await callMCPTool(client, "artifacts", {
-        action: "invalid-action" as any,
-      });
-
-      expect(typeof result).toBe("string");
-      expect(result.toLowerCase()).toContain("error");
+      await expect(
+        callMCPTool(client, "artifacts", {
+          action: "invalid-action" as any,
+        }),
+      ).rejects.toMatchObject({ code: 400 });
     });
   });
 });

@@ -80,7 +80,7 @@ description: Специальные переменные с автоматиче
 Заметки отображаются в запросах session:
 
 ```typescript
-mcp__moira__session({ action: "executions" });
+mcp__moira__execution({ action: "executions" });
 // Возвращает executions с заполненным полем note
 ```
 

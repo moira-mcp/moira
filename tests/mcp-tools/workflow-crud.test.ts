@@ -4,7 +4,11 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
-import { createAuthenticatedMCPClient, callMCPTool } from "../utils/mcp-auth.js";
+import {
+  deleteOwnedTestWorkflow,
+  createAuthenticatedMCPClient,
+  callMCPTool,
+} from "../utils/mcp-auth.js";
 import { MCP_TEST_DATA } from "../fixtures/mcp-test-data.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
@@ -22,7 +26,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
     cleanup = mcpClient.cleanup;
 
     // Dedicated workflow for the edit_workflow tests so they never depend on create tests' state
-    const created = await callMCPTool(client, "manage", {
+    const created = await callMCPTool(client, "workflow", {
       action: "create",
       workflow: { ...CRUD_WORKFLOWS.SIMPLE_CREATE },
     });
@@ -33,18 +37,10 @@ describe("MCP Workflow CRUD Tools E2E", () => {
   afterAll(async () => {
     // Cleanup all test workflows
     for (const workflowId of createdWorkflows) {
-      try {
-        await callMCPTool(client, "manage", { workflowId });
-      } catch (e) {
-        // Ignore cleanup errors
-      }
+      await deleteOwnedTestWorkflow(client, workflowId);
     }
     if (testWorkflowId) {
-      try {
-        await callMCPTool(client, "manage", { workflowId: testWorkflowId });
-      } catch (e) {
-        // Ignore
-      }
+      await deleteOwnedTestWorkflow(client, testWorkflowId);
     }
     await cleanup();
   });
@@ -54,7 +50,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
       ...CRUD_WORKFLOWS.SIMPLE_CREATE,
     };
 
-    const result = await callMCPTool(client, "manage", {
+    const result = await callMCPTool(client, "workflow", {
       action: "create",
       workflow,
       overwrite: false,
@@ -69,7 +65,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
     const testSlug = result.slug;
 
     // Verify workflow exists - list returns id as "ownerHandle/slug" format
-    const listResult = await callMCPTool(client, "list", {});
+    const listResult = await callMCPTool(client, "workflow", { action: "list" });
     const workflows = listResult.workflows || listResult;
     // Match by slug since list id is now "handle/slug" format, not UUID
     const created = workflows.find((wf: any) => wf.slug === testSlug);
@@ -131,7 +127,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
       },
     };
 
-    const result = await callMCPTool(client, "manage", {
+    const result = await callMCPTool(client, "workflow", {
       action: "create",
       workflow,
       overwrite: true,
@@ -140,7 +136,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
     expect(result).toHaveProperty("validation.valid", true);
     createdWorkflows.push(result.workflowId);
 
-    const stored = await callMCPTool(client, "manage", {
+    const stored = await callMCPTool(client, "workflow", {
       action: "get",
       workflowId: result.workflowId,
     });
@@ -161,7 +157,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
     };
 
     // Create original
-    const createResult = await callMCPTool(client, "manage", {
+    const createResult = await callMCPTool(client, "workflow", {
       action: "create",
       workflow: originalWorkflow,
     });
@@ -179,7 +175,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
       },
     };
 
-    const result = await callMCPTool(client, "manage", {
+    const result = await callMCPTool(client, "workflow", {
       action: "create",
       workflow: updatedWorkflow,
       overwrite: true,
@@ -189,7 +185,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
     expect(result).toHaveProperty("validation.valid", true);
 
     // Verify updated - match by slug since list id is now "handle/slug" format
-    const listResult2 = await callMCPTool(client, "list", {});
+    const listResult2 = await callMCPTool(client, "workflow", { action: "list" });
     const workflowsList = listResult2.workflows || listResult2;
     const updated = workflowsList.find((wf: any) => wf.slug === originalSlug);
     expect(updated).toBeDefined();
@@ -198,7 +194,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
   });
 
   test("create_workflow validates workflow structure", async () => {
-    const result = await callMCPTool<string>(client, "manage", {
+    const result = await callMCPTool<string>(client, "workflow", {
       action: "create",
       workflow: CRUD_WORKFLOWS.INVALID_EMPTY_NODES,
     });
@@ -209,7 +205,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
   });
 
   test("edit_workflow updates metadata", async () => {
-    const result = await callMCPTool(client, "manage", {
+    const result = await callMCPTool(client, "workflow", {
       action: "edit",
       workflowId: testWorkflowId,
       changes: {
@@ -225,7 +221,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
     expect(result).toHaveProperty("validation.valid", true);
 
     // Verify changes
-    const details = await callMCPTool(client, "manage", {
+    const details = await callMCPTool(client, "workflow", {
       action: "get",
       workflowId: testWorkflowId,
     });
@@ -235,7 +231,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
   });
 
   test("edit_workflow adds nodes", async () => {
-    const result = await callMCPTool(client, "manage", {
+    const result = await callMCPTool(client, "workflow", {
       action: "edit",
       workflowId: testWorkflowId,
       changes: {
@@ -247,7 +243,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
     expect(result).toHaveProperty("validation.valid", true);
 
     // Verify node added
-    const details = await callMCPTool(client, "manage", {
+    const details = await callMCPTool(client, "workflow", {
       action: "get",
       workflowId: testWorkflowId,
     });
@@ -258,7 +254,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
   });
 
   test("edit_workflow updates nodes", async () => {
-    const result = await callMCPTool(client, "manage", {
+    const result = await callMCPTool(client, "workflow", {
       action: "edit",
       workflowId: testWorkflowId,
       changes: {
@@ -278,7 +274,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
     expect(result).toHaveProperty("validation.valid", true);
 
     // Verify update
-    const details = await callMCPTool(client, "manage", {
+    const details = await callMCPTool(client, "workflow", {
       action: "get",
       workflowId: testWorkflowId,
     });
@@ -289,7 +285,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
   });
 
   test("edit_workflow removes nodes", async () => {
-    const result = await callMCPTool(client, "manage", {
+    const result = await callMCPTool(client, "workflow", {
       action: "edit",
       workflowId: testWorkflowId,
       changes: {
@@ -301,7 +297,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
     expect(result).toHaveProperty("validation.valid", true);
 
     // Verify removed
-    const details = await callMCPTool(client, "manage", {
+    const details = await callMCPTool(client, "workflow", {
       action: "get",
       workflowId: testWorkflowId,
     });
@@ -312,7 +308,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
 
   test("edit_workflow validates connection integrity", async () => {
     // Create workflow with 3 nodes
-    const createResult = await callMCPTool(client, "manage", {
+    const createResult = await callMCPTool(client, "workflow", {
       action: "create",
       workflow: {
         metadata: {
@@ -338,7 +334,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
     createdWorkflows.push(testId);
 
     // Try to remove middle node - should return error
-    const result = await callMCPTool<string>(client, "manage", {
+    const result = await callMCPTool<string>(client, "workflow", {
       action: "edit",
       workflowId: testId,
       changes: {
@@ -356,12 +352,12 @@ describe("MCP Workflow CRUD Tools E2E", () => {
       ...CRUD_WORKFLOWS.SIMPLE_CREATE,
     };
 
-    const createResult = await callMCPTool(client, "manage", { action: "create", workflow });
+    const createResult = await callMCPTool(client, "workflow", { action: "create", workflow });
     const workflowId = createResult.workflowId;
     createdWorkflows.push(workflowId);
 
     // Verify visibility is private
-    const details = await callMCPTool(client, "manage", {
+    const details = await callMCPTool(client, "workflow", {
       action: "get",
       workflowId,
     });
@@ -371,7 +367,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
 
   test("create_workflow respects explicit visibility parameter", async () => {
     // Create public workflow
-    const publicResult = await callMCPTool(client, "manage", {
+    const publicResult = await callMCPTool(client, "workflow", {
       action: "create",
       workflow: {
         ...CRUD_WORKFLOWS.SIMPLE_CREATE,
@@ -382,7 +378,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
     createdWorkflows.push(publicWorkflowId);
 
     // Create private workflow
-    const privateResult = await callMCPTool(client, "manage", {
+    const privateResult = await callMCPTool(client, "workflow", {
       action: "create",
       workflow: {
         ...CRUD_WORKFLOWS.SIMPLE_CREATE,
@@ -392,11 +388,11 @@ describe("MCP Workflow CRUD Tools E2E", () => {
     const privateWorkflowId = privateResult.workflowId;
     createdWorkflows.push(privateWorkflowId);
 
-    const publicDetails = await callMCPTool(client, "manage", {
+    const publicDetails = await callMCPTool(client, "workflow", {
       action: "get",
       workflowId: publicWorkflowId,
     });
-    const privateDetails = await callMCPTool(client, "manage", {
+    const privateDetails = await callMCPTool(client, "workflow", {
       action: "get",
       workflowId: privateWorkflowId,
     });
@@ -407,7 +403,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
 
   test("edit_workflow preserves visibility when not specified", async () => {
     // Create private workflow
-    const createResult = await callMCPTool(client, "manage", {
+    const createResult = await callMCPTool(client, "workflow", {
       action: "create",
       workflow: {
         ...CRUD_WORKFLOWS.SIMPLE_CREATE,
@@ -417,7 +413,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
     createdWorkflows.push(workflowId);
 
     // Edit metadata without touching visibility
-    await callMCPTool(client, "manage", {
+    await callMCPTool(client, "workflow", {
       action: "edit",
       workflowId,
       changes: {
@@ -429,7 +425,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
     });
 
     // Verify visibility still private
-    const details = await callMCPTool(client, "manage", {
+    const details = await callMCPTool(client, "workflow", {
       action: "get",
       workflowId,
     });

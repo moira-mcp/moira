@@ -42,7 +42,7 @@ async function setup(failure: Error) {
 test("progress mint preserves the unavailable owner code through the real MCP binding", async () => {
   const { run } = await setup(new CommunicationChannelOwnerUnavailableError());
   const input = { action: "progress-image-token" as const, executionId: run.executionId };
-  const definition = TOOL_DEFINITIONS.find((tool) => tool.name === "session")!;
+  const definition = TOOL_DEFINITIONS.find((tool) => tool.name === "execution")!;
   const result = await runWithMCPContext({ userId: run.userId }, () =>
     invokeToolDefinition(definition, input),
   );

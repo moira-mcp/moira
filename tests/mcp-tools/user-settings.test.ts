@@ -79,16 +79,18 @@ describe("MCP User Settings Tools E2E", () => {
     ];
 
     for (const args of emptySelectorRequests) {
-      const result = await client.callTool({ name: "settings", arguments: args });
-      expect(result.isError).toBe(true);
+      await expect(client.callTool({ name: "settings", arguments: args })).rejects.toMatchObject({
+        code: 400,
+      });
     }
 
-    const ambiguous = await callMCPTool(client, "settings", {
-      action: "get",
-      key: "profile.display_name",
-      category: "profile",
-    });
-    expect(ambiguous).toEqual(expect.stringContaining("key or category"));
+    await expect(
+      callMCPTool(client, "settings", {
+        action: "get",
+        key: "profile.display_name",
+        category: "profile",
+      }),
+    ).rejects.toMatchObject({ code: 400 });
   });
 
   test("manage_settings set and get workflow", async () => {

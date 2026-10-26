@@ -4,7 +4,7 @@
 
 ## Доступные инструменты
 
-Основной цикл выглядит как `list` → `start` prepare → `start` execute → повторные вызовы `step`; `session` используется для
+Используйте `workflow` с `action: "list"`, затем `execution` с действиями `prepare`, `execute` и повторными `step`. Та же группа `execution` служит для
 просмотра и возобновления выполнений, а `help` — для runtime-документации.
 [Справочник MCP-инструментов](/ru/docs/reference/tools/) является источником полного
 актуального каталога, точных входных схем, действий и примеров.
@@ -75,8 +75,8 @@ API-токены полностью обходят OAuth. Используйте
 {
   "method": "tools/call",
   "params": {
-    "name": "list",
-    "arguments": {}
+    "name": "workflow",
+    "arguments": { "action": "list" }
   }
 }
 ```
@@ -87,7 +87,7 @@ API-токены полностью обходят OAuth. Используйте
 {
   "method": "tools/call",
   "params": {
-    "name": "start",
+    "name": "execution",
     "arguments": {
       "action": "prepare",
       "workflowId": "moira/software-development-flow",
@@ -103,7 +103,7 @@ API-токены полностью обходят OAuth. Используйте
 {
   "method": "tools/call",
   "params": {
-    "name": "start",
+    "name": "execution",
     "arguments": {
       "action": "execute",
       "startAttemptId": "start-attempt-current"
@@ -118,8 +118,9 @@ API-токены полностью обходят OAuth. Используйте
 {
   "method": "tools/call",
   "params": {
-    "name": "step",
+    "name": "execution",
     "arguments": {
+      "action": "step",
       "processId": "abc-123",
       "attemptId": "attempt-current",
       "input": {

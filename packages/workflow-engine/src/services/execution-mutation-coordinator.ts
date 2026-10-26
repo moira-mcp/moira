@@ -285,13 +285,13 @@ export class ExecutionMutationCoordinator {
       case "stale":
         executionMutationAttemptsTotal.inc({ operation: "step", outcome: "stale_rejection" });
         throw new ConflictError(
-          "ATTEMPT_STALE: this attempt no longer matches the current workflow step. Read session current_step and use its attempt.",
+          "ATTEMPT_STALE: this attempt no longer matches the current workflow step. Read execution action current_step and use its attempt.",
           { attemptOutcome: "stale_rejection" },
         );
       case "invalid":
         executionMutationAttemptsTotal.inc({ operation: "step", outcome: "stale_rejection" });
         throw new ValidationError(
-          "ATTEMPT_INVALID_OR_EXPIRED: the attempt is unavailable. Read session current_step and use its current attempt.",
+          "ATTEMPT_INVALID_OR_EXPIRED: the attempt is unavailable. Read execution action current_step and use its current attempt.",
           { attemptOutcome: "stale_rejection" },
         );
     }
@@ -401,14 +401,27 @@ export function presentedAttemptResponse(attemptId: string, response: string): s
   return `${firstLine}\nStep attempt ID: ${attemptId}${rest.length ? `\n${rest.join("\n")}` : ""}`;
 }
 
+export const AGENT_LANGUAGE_REMINDER =
+  "Write all free-form text you author in the user's requested or preferred language, even when directives use another language. Preserve schema keys, identifiers, enum values, code, commands and exact quotations.";
+
+/** Current presentation guidance does not rewrite the original durable receipt. */
+export function withAgentLanguageReminder(response: string): string {
+  const suffix = `\n\n${AGENT_LANGUAGE_REMINDER}`;
+  return response.endsWith(suffix) ? response : response + suffix;
+}
+
 export function currentAttemptGuidance(attempt: ExecutionAttempt): string {
   if (attempt.state === "outcome_unknown") {
-    return `Process ID: ${attempt.executionId}\n\nATTEMPT_OUTCOME_UNKNOWN: a previous mutation may have produced effects. It will not be repeated automatically. Inspect the execution and cancel it if recovery is required.`;
+    return withAgentLanguageReminder(
+      `Process ID: ${attempt.executionId}\n\nATTEMPT_OUTCOME_UNKNOWN: a previous mutation may have produced effects. It will not be repeated automatically. Inspect the execution and cancel it if recovery is required.`,
+    );
   }
   if (attempt.state === "executing") {
-    return `Process ID: ${attempt.executionId}\nStep attempt ID: ${attempt.attemptId}\n\nATTEMPT_PROCESSING: this attempt is still processing. Retry the same attempt.`;
+    return withAgentLanguageReminder(
+      `Process ID: ${attempt.executionId}\nStep attempt ID: ${attempt.attemptId}\n\nATTEMPT_PROCESSING: this attempt is still processing. Retry the same attempt.`,
+    );
   }
-  return (
-    attempt.response ?? `Process ID: ${attempt.executionId}\nStep attempt ID: ${attempt.attemptId}`
+  return withAgentLanguageReminder(
+    attempt.response ?? `Process ID: ${attempt.executionId}\nStep attempt ID: ${attempt.attemptId}`,
   );
 }
