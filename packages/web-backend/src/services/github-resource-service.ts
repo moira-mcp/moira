@@ -1,4 +1,5 @@
 import { createHash, createHmac } from "node:crypto";
+import { z } from "zod";
 import {
   CodespaceConnectionRepository,
   CodespaceResourceError,
@@ -43,10 +44,36 @@ import {
   codespaceLifecycleErrorCode,
   type GitHubProviderFailure,
   providerFailureSchema,
+  githubControllerResourceSchema,
+  githubMachineSchema,
+  providerObservationSchema,
+  type GitHubControllerResource,
 } from "@mcp-moira/shared";
 import type Database from "better-sqlite3";
 import { HttpGitHubCodespaceClient } from "./github-codespace-client.js";
 import type { WorkspaceBinding } from "./workspace-router.js";
+import { CodespaceEffectObservationError } from "./codespace-effect-observation-error.js";
+
+const retainedProviderResourceSchema = providerObservationSchema.extend({
+  displayName: z.string().min(1),
+  ownerId: z.string().regex(/^[1-9][0-9]*$/),
+  billableOwnerId: z.string().regex(/^[1-9][0-9]*$/),
+  ref: z.string().nullable(),
+  state: z.enum([
+    "created",
+    "provisioning",
+    "starting",
+    "available",
+    "stopping",
+    "shutdown",
+    "deleting",
+    "failed",
+    "unknown",
+  ]),
+  lastUsedAt: z.number().finite().nullable(),
+  machine: githubMachineSchema.nullable(),
+  createdAt: z.number().finite(),
+});
 
 /** Live owner lifecycle, fixed provider API and minimal cloud authority; no reconciliation worker. */
 export class GitHubResourceService {
@@ -199,19 +226,62 @@ export class GitHubResourceService {
       return null;
     }
   }
-  async getCodespace(userId: string, id: string): Promise<CodespaceSummaryView> {
+  /** Reuse the ordinary projection with captured facts, without any live owner/provider reads. */
+  async projectRetainedSnapshot(userId: string, value: unknown): Promise<CodespaceSummaryView> {
+    try {
+      const captured = githubControllerResourceSchema.parse(value);
+      return await this.getCodespace(userId, captured.resourceId, captured);
+    } catch (error) {
+      throw new CodespaceEffectObservationError(error);
+    }
+  }
+  async getCodespace(
+    userId: string,
+    id: string,
+    captured?: GitHubControllerResource,
+  ): Promise<CodespaceSummaryView> {
     this.account(userId);
-    const identity = this.identities.getOwned(userId, id);
-    if (!identity) throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Resource is not owned");
+    const saved = this.identities.getOwned(userId, id);
+    if (!saved) throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Resource is not owned");
+    if (
+      captured &&
+      (captured.repositoryId !== saved.repositoryId ||
+        captured.repositoryFullName.toLowerCase() !== saved.repositoryFullName.toLowerCase() ||
+        captured.requestedRef !== saved.requestedRef ||
+        captured.operationMarker !== saved.operationMarker ||
+        captured.resourceGeneration > saved.generation)
+    )
+      throw new CodespaceResourceError(
+        "CODESPACE_GENERATION_CONFLICT",
+        "Retained resource identity does not match its owner assignment",
+      );
+    const identity = captured
+      ? {
+          ...saved,
+          generation: captured.resourceGeneration,
+          authorizationGeneration: captured.authorizationGeneration,
+          providerResourceName: captured.providerResourceName,
+          retirement: captured.retirement,
+        }
+      : saved;
     const current = this.identities.hasCurrentAuthorization(userId, id),
-      owner = current && identity.retirement !== "retired" ? await this.owner(identity) : null,
-      observed =
-        current && identity.retirement !== "retired"
+      owner =
+        captured ??
+        (current && identity.retirement !== "retired" ? await this.owner(identity) : null),
+      observed = captured
+        ? this.exact(
+            identity,
+            captured.providerResource === null
+              ? null
+              : retainedProviderResourceSchema.parse(captured.providerResource),
+          )
+        : current && identity.retirement !== "retired"
           ? await this.observation(userId, identity)
           : null;
-    const credential = new WorkspaceAuthRepository(this.db).getOwned(userId, id);
-    let guestLive = false;
+    const credential = captured ? null : new WorkspaceAuthRepository(this.db).getOwned(userId, id);
+    let guestLive = captured?.remote?.state === "connected";
     if (
+      !captured &&
       current &&
       identity.retirement !== "retired" &&
       credential &&
@@ -300,7 +370,7 @@ export class GitHubResourceService {
             : observed?.state === "starting"
               ? "provisioning"
               : (observed?.state ?? "unknown"),
-      observed_at: observed ? Date.now() : null,
+      observed_at: captured ? captured.observedAt : observed ? Date.now() : null,
       lifecycle_error:
         identity.retirement === "retired"
           ? null
@@ -450,7 +520,7 @@ export class GitHubResourceService {
     }
     if (receipt.state !== "completed" || !receipt.outcome?.ok)
       throw this.uncertainty(resource, input.requestId);
-    return this.getCodespace(userId, resource.id);
+    return this.projectRetainedSnapshot(userId, receipt.outcome.result);
   }
   async create(
     userId: string,

@@ -54,6 +54,9 @@ export class LocalManager {
   private git?: ReturnType<typeof gitBroker>;
   private releaseLock?: () => Promise<void>;
   private readonly lanes = new Map<string, Promise<unknown>>();
+  private readonly enrollments = new Map<string, Promise<void>>();
+  private readonly enrollmentFailures = new Map<string, string>();
+  private enrollmentEpoch = 0;
   private openingOwner?: Promise<DeviceGuard>;
   readonly now: () => number;
   constructor(
@@ -84,23 +87,33 @@ export class LocalManager {
   }
 
   private async owner(cleanupOnly = false): Promise<DeviceGuard> {
+    const epoch = this.enrollmentEpoch;
     if (!cleanupOnly) await requireNativeAdmission(this.records.state);
+    this.requireOwnerLife(epoch);
     const policy = await this.records.policy();
+    this.requireOwnerLife(epoch);
     const managementOnly = cleanupOnly && !policy.enabled;
     if (!this.device?.active || this.cleanupOnlyOwner !== managementOnly) {
       this.openingOwner ??= (async () => {
+        this.requireOwnerLife(epoch);
         await this.holdRunnerLock();
+        this.requireOwnerLife(epoch);
         if (this.device && !this.device.active) {
           // Losing a guard is not a physical stop. Under the retained runner
           // gate, only proven absence for this profile permits a new observer.
           await this.requireInactiveOwnerAbsent();
         } else await this.device?.stop();
-        this.device = await (this.dependencies.guard ?? startGuard)(
+        this.requireOwnerLife(epoch);
+        const device = await (this.dependencies.guard ?? startGuard)(
           this.records.state.root,
           managementOnly ? "cleanup" : "work",
           this.dependencies.signal,
         );
+        this.device = device;
         this.cleanupOnlyOwner = managementOnly;
+        // Shutdown waits for this opening promise before retiring its resulting
+        // guard, including a guard that arrives after life was invalidated.
+        this.requireOwnerLife(epoch);
         return this.device;
       })().finally(() => {
         this.openingOwner = undefined;
@@ -110,16 +123,24 @@ export class LocalManager {
     return this.device;
   }
 
+  private requireOwnerLife(epoch: number): void {
+    if (epoch !== this.enrollmentEpoch)
+      throw new LocalRefusal("LOCAL_CANCELLED", "Local owner admission was retired.");
+  }
+
   private async requireInactiveOwnerAbsent(): Promise<void> {
     await this.holdRunnerLock();
     await requireRuntimeOwnerAbsent(this.records, await this.records.policy());
   }
 
   async holdRunnerLock(): Promise<void> {
+    const epoch = this.enrollmentEpoch;
     await this.serial("runner-lock", async () => {
+      this.requireOwnerLife(epoch);
       if (this.releaseLock) return;
       const release = await this.records.state.lock({ recoverStale: true });
       try {
+        this.requireOwnerLife(epoch);
         await requireRuntimeOwnerAbsent(this.records);
         await upgradeLocalPolicyState(this.records);
         await this.records.withSettingsChange(async () => {
@@ -148,6 +169,7 @@ export class LocalManager {
           }
         });
         await new LocalRelay(this.records).markOrphanedGitCredentials();
+        this.requireOwnerLife(epoch);
         this.releaseLock = release;
       } catch (error) {
         await release();
@@ -156,18 +178,26 @@ export class LocalManager {
     });
   }
   async open(): Promise<void> {
+    const epoch = this.enrollmentEpoch;
     return this.serial("open", async () => {
+      this.requireOwnerLife(epoch);
       await requireNativeAdmission(this.records.state);
+      this.requireOwnerLife(epoch);
       // An existing controller owns this exclusion independently of native startup.
       const retainGateOnFailure = Boolean(this.releaseLock);
       await this.holdRunnerLock();
+      this.requireOwnerLife(epoch);
       if (this.broker && this.tunnel) return;
       try {
         const policy = await this.records.policy();
+        this.requireOwnerLife(epoch);
         if (this.dependencies.storage) await this.dependencies.storage(policy);
         else await ensureStorageMounted(this.records.state, policy);
+        this.requireOwnerLife(epoch);
         await this.owner();
+        this.requireOwnerLife(epoch);
         if (this.dependencies.runtime) await this.runtime(policy).boundary.verifyConfiguration();
+        this.requireOwnerLife(epoch);
         const onFault = this.dependencies.onFault ?? (() => undefined);
         const budget = new NetworkBudget();
         const relay = new LocalRelay(this.records);
@@ -236,15 +266,20 @@ export class LocalManager {
           },
           this.dependencies.brokerPorts?.http,
         );
+        this.requireOwnerLife(epoch);
         const saved = await this.records.state.read("broker.json", brokerState.parse);
+        this.requireOwnerLife(epoch);
         this.tunnel = await startBrokerTunnel(
           this.broker.port,
           saved?.port ?? this.dependencies.brokerPorts?.tunnel,
         );
+        this.requireOwnerLife(epoch);
         await this.records.state.write("broker.json", { port: this.tunnel.port });
+        this.requireOwnerLife(epoch);
       } catch (error) {
         try {
-          await this.release(retainGateOnFailure);
+          this.enrollmentEpoch++;
+          await this.releaseResources(retainGateOnFailure);
         } catch (cleanup) {
           throw new AggregateError([error, cleanup], "Local startup and cleanup failed", {
             cause: error,
@@ -349,41 +384,54 @@ export class LocalManager {
   async refreshWorkspaceEnrollments(): Promise<{ spaceId: string; code: string }[]> {
     const policy = await this.records.policyOrNull();
     if (!policy?.enabled || !this.broker || !this.tunnel) return [];
-    const unavailable: { spaceId: string; code: string }[] = [];
+    const unavailable = [...this.enrollmentFailures].map(([spaceId, code]) => ({ spaceId, code }));
+    this.enrollmentFailures.clear();
+    const epoch = this.enrollmentEpoch;
     for (const saved of await this.records.list()) {
       if (
         saved.desiredState !== "running" ||
         saved.phase !== "usable" ||
         saved.failure !== null ||
-        !saved.runtimeId
+        !saved.runtimeId ||
+        this.enrollments.has(saved.id)
       )
         continue;
-      const guard = await this.serial(`space:${saved.id}`, async () => {
-        try {
-          const current = await this.require(saved.id);
-          if (current.generation !== saved.generation || current.desiredState !== "running") return;
-          let guard = this.guards.get(saved.id);
-          if (!guard?.active) {
-            guard = await (await this.owner()).space(saved.id);
-            this.guards.set(saved.id, guard);
-          }
-          return guard;
-        } catch (error) {
-          unavailable.push({
-            spaceId: saved.id,
-            code: error instanceof LocalRefusal ? error.code : "LOCAL_OBSERVATION_UNKNOWN",
+      // A pass schedules each owner independently. A held cloud response for one
+      // VM must not hold the next pass or prevent another VM's confirmed retry.
+      const work = Promise.resolve()
+        .then(async () => {
+          const guard = await this.serial(`space:${saved.id}`, async () => {
+            if (epoch !== this.enrollmentEpoch) return;
+            const current = await this.require(saved.id);
+            if (
+              epoch !== this.enrollmentEpoch ||
+              current.generation !== saved.generation ||
+              current.desiredState !== "running"
+            )
+              return;
+            let guard = this.guards.get(saved.id);
+            if (!guard?.active) {
+              const owner = await this.owner();
+              if (epoch !== this.enrollmentEpoch) return;
+              guard = await owner.space(saved.id);
+              if (epoch !== this.enrollmentEpoch) return;
+              this.guards.set(saved.id, guard);
+            }
+            return guard;
           });
-        }
-      });
-      // Optional cloud acquisition must not retain local lifecycle admission.
-      try {
-        await guard?.refreshRemote?.();
-      } catch (error) {
-        unavailable.push({
-          spaceId: saved.id,
-          code: error instanceof LocalRefusal ? error.code : "LOCAL_OBSERVATION_UNKNOWN",
+          // Optional cloud acquisition must not retain local lifecycle admission.
+          if (epoch === this.enrollmentEpoch) await guard?.refreshRemote?.();
+        })
+        .catch((error: unknown) => {
+          this.enrollmentFailures.set(
+            saved.id,
+            error instanceof LocalRefusal ? error.code : "LOCAL_OBSERVATION_UNKNOWN",
+          );
+        })
+        .finally(() => {
+          if (this.enrollments.get(saved.id) === work) this.enrollments.delete(saved.id);
         });
-      }
+      this.enrollments.set(saved.id, work);
     }
     return unavailable;
   }
@@ -398,7 +446,13 @@ export class LocalManager {
   }
   /** The host service relinquishes observations; no VM stop intent is manufactured. */
   async release(keepLock = false): Promise<void> {
+    this.enrollmentEpoch++;
+    await this.lanes.get("open")?.catch(() => undefined);
+    await this.releaseResources(keepLock);
+  }
+  private async releaseResources(keepLock: boolean): Promise<void> {
     await this.openingOwner?.catch(() => undefined);
+    await this.lanes.get("runner-lock")?.catch(() => undefined);
     if (this.device) {
       if (!this.device.active) await this.requireInactiveOwnerAbsent();
       else if (!this.device.release)
@@ -421,6 +475,10 @@ export class LocalManager {
     }
   }
   private async closeResources(keepLock: boolean): Promise<void> {
+    this.enrollmentEpoch++;
+    await this.lanes.get("open")?.catch(() => undefined);
+    await this.openingOwner?.catch(() => undefined);
+    await this.lanes.get("runner-lock")?.catch(() => undefined);
     const errors: unknown[] = [];
     for (const [id, guard] of this.guards) {
       try {
@@ -816,11 +874,20 @@ export class LocalManager {
     if (ownerCleanup && !spaceId)
       throw new LocalRefusal("LOCAL_UNAUTHORIZED", "Owner cleanup requires one exact sandbox.");
     const admitted = ownerCleanup || policy.enabled;
+    const records = spaceId
+      ? [await this.records.get(spaceId)].filter((space): space is LocalSpace => space !== null)
+      : await this.records.list();
     let observationFailure: string | null = null;
     const observed = await (async () => {
       try {
         return this.dependencies.runtime
-          ? await this.runtime(policy).list()
+          ? spaceId
+            ? records[0]?.runtimeId
+              ? [await this.runtime(policy).inspectExact(this.identity(records[0]))].filter(
+                  (value): value is NonNullable<typeof value> => value !== null,
+                )
+              : []
+            : await this.runtime(policy).list()
           : admitted
             ? await (await this.owner(ownerCleanup)).observe(spaceId)
             : [];
@@ -831,9 +898,6 @@ export class LocalManager {
       }
     })();
     const spaces = [];
-    const records = spaceId
-      ? [await this.records.get(spaceId)].filter((space): space is LocalSpace => space !== null)
-      : await this.records.list();
     for (const space of records) {
       if (space.phase === "deleted" && !spaceId) continue;
       // A creation manifest without an observed UUID is still unknown, even if the

@@ -387,14 +387,29 @@ errors. An installation callback without Moira state never exchanges its returne
 credentials refresh installations instead. Disconnect/revocation can remain pending; do not erase
 custody or claim provider access was revoked before collection confirms it.
 
-`GET /api/integrations/github/codespaces` and POST `/refresh` reuse the typed `workspace_list` schema
-with required provider and selected view. They return readiness, connection, repository/controller
-targets, resource observations, stale flags and diagnostics. Healthy empty discovery differs from an
-unavailable provider/controller. GET `/billing` is separate; missing billing is not zero cost.
+Under `/api/integrations/github/codespaces`, GET `/targets` and POST `/targets/refresh` reuse the
+typed `workspace_targets` schema with a required provider. They return readiness, connection,
+repository/controller targets, `repositories_stale` and provider errors without awaiting resource
+inventory. The POST explicitly refreshes grants.
+
+GET on the base route and POST `/refresh` reuse the typed `workspace_list` schema with required
+provider and selected view. They return resource observations, unavailable identities,
+`resources_stale`, `has_diagnostics` and provider errors, independently of targets. Healthy empty
+discovery differs from an unavailable provider/controller. GET `/billing` is separate; missing
+billing is not zero cost.
 POST `/operations/:purpose` supports the typed workspace create/lifecycle/delete/observe/adopt and
 operation get/find purposes. Preserve opaque references and original-operation identity. Observation
 is not captured mutation authority, and collection/discovery must not silently submit a new action.
 See [management and discovery](workspaces.md#management-and-discovery).
+
+Successful Local and GitHub lifecycle collection returns the same public workspace projection as
+the immediate effect response, with its captured reference generation and observation time.
+When that historical snapshot cannot be projected, the response retains the original `operation`
+and `state:"completed"` with `outcome:{ok:true,result:null}` and a separate safe
+`observation_error:{code}`. This confirms the effect, not current workspace state or authority;
+collect the original rather than repeat the effect. Current account/controller authority is
+rechecked before either projection or diagnostic is disclosed. A revocation refuses the response
+without deleting the private original or converting it into an unknown outcome.
 
 ### Local device enrollment and controller API
 
@@ -403,6 +418,11 @@ original-operation collection. Settings require a confirmed cookie session, matc
 JSON content type; bearer substitution is refused. Authentication occurs before incremental body
 reading and is repeated afterwards. Generation/revision guards and device enabled state are separate
 from permission for agent repository management.
+
+The device list isolates a device-specific authority or response-schema failure as an unavailable
+owner projection with a safe diagnostic code. It does not accept that device's policy or hide
+healthy peers. Current account admission is checked for the complete response; an account-wide
+refusal is not converted into a device diagnostic.
 
 `/api/local-devices` owns native enrollment/status, device heartbeat, resource registration, workspace
 bootstrap and repository-bound Git identity. Private `/api/codespaces/github/credentials` and

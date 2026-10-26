@@ -12,6 +12,8 @@ import {
   createWorkspaceSemanticServices,
   type WorkspaceSemanticDependencies,
 } from "../../../packages/web-backend/src/services/workspace-semantic-service.js";
+import { GitHubResourceService } from "../../../packages/web-backend/src/services/github-resource-service.js";
+import { CodespaceEffectObservationError } from "../../../packages/web-backend/src/services/codespace-effect-observation-error.js";
 
 const USER = "user-a",
   RESOURCE = "00000000-0000-4000-8000-000000000001",
@@ -53,6 +55,7 @@ function fixture(provider = "github-codespaces") {
   let identity = { userId: USER, ...owner, deviceGeneration: 1 };
   let current = view({ provider });
   const resource = {
+    projectRetainedSnapshot: jest.fn(async (..._args: unknown[]) => current),
     listRepositories: jest.fn(() => [{ id: "42", fullName: "owner/repository", private: true }]),
     listResources: jest.fn(async (..._args: unknown[]) => ({
       codespaces: [current],
@@ -193,6 +196,280 @@ function fixture(provider = "github-codespaces") {
 }
 
 describe("semantic workspace backend", () => {
+  test.each([
+    ["device", false],
+    ["device", true],
+    ["account", false],
+    ["account", true],
+  ] as const)(
+    "collection refuses %s revocation during projection (projection failure: %s)",
+    async (authority, failProjection) => {
+      const f = fixture();
+      const retained = {
+        requestId: REQUEST,
+        state: "completed",
+        outcome: { ok: true, result: { resourceId: RESOURCE } },
+      };
+      f.devices.getOperation.mockResolvedValue(retained as never);
+      let entered!: () => void, release!: () => void;
+      const started = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      f.resource.projectRetainedSnapshot.mockImplementation(async () => {
+        entered();
+        await held;
+        if (failProjection) throw new Error("Controlled projection failure");
+        return view();
+      });
+      const reference = encodeReference("operation", {
+        owner: { kind: "controller", ...owner },
+        requestId: REQUEST,
+        kind: "lifecycle",
+      });
+      const result = f.service.invoke(USER, "operation_get", { reference });
+      await started;
+      if (authority === "device")
+        f.setIdentity({ userId: USER, deviceId: DEVICE, connectionId: SPACE, deviceGeneration: 2 });
+      else
+        f.devices.repository.getActiveDevice.mockImplementation(() => {
+          throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Account admission revoked");
+        });
+      release();
+      await expect(result).rejects.toMatchObject({ code: "LOCAL_UNAUTHORIZED" });
+      expect(f.devices.getOperation).toHaveBeenCalledTimes(1);
+      expect(retained.outcome).toEqual({ ok: true, result: { resourceId: RESOURCE } });
+      expect(f.resource.create).not.toHaveBeenCalled();
+    },
+  );
+  test.each(["device", "account"] as const)(
+    "confirmed-effect observation failure does not bypass revoked %s authority",
+    async (authority) => {
+      const f = fixture();
+      f.resource.create.mockImplementation(async () => {
+        if (authority === "device")
+          f.setIdentity({
+            userId: USER,
+            deviceId: DEVICE,
+            connectionId: SPACE,
+            deviceGeneration: 2,
+          });
+        else
+          f.devices.repository.getActiveDevice.mockImplementation(() => {
+            throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Account admission revoked");
+          });
+        throw new CodespaceEffectObservationError(
+          new LocalDeviceError("LOCAL_UNAUTHORIZED", "Controlled post-effect authority refusal"),
+        );
+      });
+      const target = encodeReference("target", {
+        provider: "github-codespaces",
+        repositoryId: "42",
+        controller: owner,
+      });
+      await expect(
+        f.service.invoke(USER, "workspace_create", { target, branch: "main" }, REQUEST),
+      ).rejects.toMatchObject({ code: "LOCAL_UNAUTHORIZED" });
+      expect(f.resource.create).toHaveBeenCalledTimes(1);
+    },
+  );
+  test.each(["running", "stopped"] as const)(
+    "GitHub collection projects the captured %s result, preserving its old generation and time without live reads",
+    async (state) => {
+      const f = fixture();
+      const record = {
+        id: RESOURCE,
+        userId: USER,
+        repositoryId: "42",
+        repositoryFullName: "owner/repository",
+        requestedRef: "main",
+        operationMarker: `moira-${"a".repeat(24)}`,
+        generation: 5,
+        authorizationGeneration: 1,
+        providerResourceName: "owned-vm",
+        deviceId: DEVICE,
+        deviceGeneration: 1,
+        deviceConnectionId: CONNECTION,
+        externalOwnerId: "101",
+        billableOwnerId: "101",
+        retirement: "owned",
+        createdAt: 10,
+      };
+      const identities = {
+        db: {
+          prepare: () => ({
+            get: () => ({ blocked: 0, approvedAt: "approved", emailVerified: 1 }),
+          }),
+        },
+        getOwned: () => record,
+        hasCurrentAuthorization: () => true,
+      };
+      const forbidden = jest.fn(async () => {
+        throw new Error("No live observation during original collection");
+      });
+      let ownerReply: unknown;
+      const controllerReply = jest.fn(async () => ownerReply);
+      const actual = new GitHubResourceService(
+        identities as never,
+        { getAccessToken: forbidden, getStatus: forbidden } as never,
+        { getExact: forbidden } as never,
+        f.dependencies.devices,
+        { json: controllerReply } as never,
+        forbidden,
+        () => ({ enabled: true, persistentRetentionMs: 1 }),
+      );
+      f.resource.projectRetainedSnapshot.mockImplementation((userId, snapshot) =>
+        actual.projectRetainedSnapshot(String(userId), snapshot),
+      );
+      const captured = {
+        resourceId: RESOURCE,
+        resourceGeneration: 3,
+        authorizationGeneration: 1,
+        repositoryId: "42",
+        repositoryFullName: "owner/repository",
+        requestedRef: "main",
+        operationMarker: record.operationMarker,
+        providerResourceName: "owned-vm",
+        retirement: "owned",
+        state,
+        desiredState: state,
+        environmentIdentity: state === "running" ? "a".repeat(64) : null,
+        pendingRequestIds: [],
+        observedAt: 123,
+        ...(state === "running" ? { remote: { state: "connected" } } : {}),
+        providerResource: {
+          name: "owned-vm",
+          displayName: "Owned VM",
+          repositoryId: "42",
+          repositoryFullName: "owner/repository",
+          ownerId: "101",
+          billableOwnerId: "101",
+          state: state === "running" ? "available" : "shutdown",
+          ref: "feature/captured",
+          lastUsedAt: 11,
+          machine: null,
+          createdAt: 10,
+        },
+      };
+      const retained = {
+        requestId: REQUEST,
+        state: "completed",
+        outcome: { ok: true, result: captured },
+      };
+      const before = JSON.stringify(retained);
+      f.devices.getOperation.mockResolvedValue(retained as never);
+      const reference = encodeReference("operation", {
+        owner: { kind: "controller", ...owner },
+        requestId: REQUEST,
+        kind: "lifecycle",
+      });
+      const result = (await f.service.invoke(USER, "operation_get", { reference })) as {
+        outcome: { result: { workspace: string } };
+      };
+      expect(result).toMatchObject({
+        operation: reference,
+        kind: "lifecycle",
+        state: "completed",
+        outcome: {
+          ok: true,
+          result: {
+            state: state === "running" ? "usable" : "stopped",
+            observed_at: 123,
+            current_ref: "feature/captured",
+          },
+        },
+      });
+      expect(decodeReference(result.outcome.result.workspace, "workspace").generation).toBe(3);
+      expect(JSON.stringify(retained)).toBe(before);
+      expect(forbidden).not.toHaveBeenCalled();
+      expect(f.resource.getCodespace).not.toHaveBeenCalled();
+      expect(f.resource.create).not.toHaveBeenCalled();
+      expect(f.resource.startCodespace).not.toHaveBeenCalled();
+      expect(f.resource.stopCodespace).not.toHaveBeenCalled();
+      expect(controllerReply).not.toHaveBeenCalled();
+      f.devices.getOperation.mockResolvedValue({
+        ...retained,
+        outcome: { ok: true, result: { ...captured, repositoryId: "99" } },
+      } as never);
+      expect(await f.service.invoke(USER, "operation_get", { reference })).toMatchObject({
+        state: "completed",
+        outcome: { ok: true, result: null },
+        observation_error: { code: "CODESPACE_GENERATION_CONFLICT" },
+      });
+      f.devices.getOperation.mockResolvedValue(retained as never);
+      f.devices.getDeviceIdentity.mockReturnValue({
+        userId: USER,
+        ...owner,
+        deviceGeneration: 1,
+        status: "active",
+      } as never);
+      ownerReply = {
+        ...retained,
+        outcome: { ok: true, result: { ...captured, resourceGeneration: 5 } },
+      };
+      expect(await actual.startCodespace(USER, RESOURCE, REQUEST, 5)).toMatchObject({
+        state: state === "running" ? "usable" : "stopped",
+        generation: 5,
+        observed_at: 123,
+      });
+      expect(forbidden).not.toHaveBeenCalled();
+      ownerReply = { ...retained, outcome: { ok: true, result: { resourceId: RESOURCE } } };
+      f.resource.startCodespace.mockImplementation((userId, id, requestId, generation) =>
+        actual.startCodespace(String(userId), String(id), String(requestId), Number(generation)),
+      );
+      expect(
+        await f.service.invoke(
+          USER,
+          "workspace_lifecycle",
+          {
+            workspace: workspace("github-codespaces", 5),
+            action: "start",
+          },
+          REQUEST,
+        ),
+      ).toMatchObject({
+        state: "completed",
+        outcome: { ok: true, result: null },
+        observation_error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" },
+      });
+      expect(forbidden).not.toHaveBeenCalled();
+      f.resource.projectRetainedSnapshot.mockRejectedValue(
+        new CodespaceResourceError("CODESPACE_NOT_FOUND", "Private missing metadata"),
+      );
+      expect(await f.service.invoke(USER, "operation_get", { reference })).toMatchObject({
+        operation: reference,
+        state: "completed",
+        outcome: { ok: true, result: null },
+        observation_error: { code: "CODESPACE_NOT_FOUND" },
+      });
+      expect(JSON.stringify(retained)).toBe(before);
+    },
+  );
+  test("a confirmed effect with an unavailable result projection stays successful and collectable", async () => {
+    const f = fixture();
+    f.resource.create.mockRejectedValue(
+      new CodespaceEffectObservationError(new Error("private projection failure")),
+    );
+    const target = encodeReference("target", {
+      provider: "github-codespaces",
+      repositoryId: "42",
+      controller: owner,
+    });
+    const result = await f.service.invoke(
+      USER,
+      "workspace_create",
+      { target, branch: "main" },
+      REQUEST,
+    );
+    expect(result).toMatchObject({
+      state: "completed",
+      outcome: { ok: true, result: null },
+      observation_error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" },
+    });
+    expect(JSON.stringify(result)).not.toContain("private projection failure");
+  });
   test("normal Local discovery completes while the separately selected GitHub observation stays pending", async () => {
     const f = fixture();
     const local = fixture("local-sandboxes");

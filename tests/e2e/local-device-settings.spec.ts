@@ -209,13 +209,34 @@ for (const language of ["en", "ru"] as const)
         await route.fulfill({ json: { success: true, data: "unavailable" } });
         return;
       }
-      const provider = url.searchParams.get("provider");
+      const selection =
+        route.request().method() === "POST"
+          ? route.request().postDataJSON()
+          : Object.fromEntries(url.searchParams);
+      const provider = selection.provider;
       if (provider === "github-codespaces") {
         heldGitHub.push(route);
         return;
       }
       expect(provider).toBe("local-sandboxes");
-      const view = url.searchParams.get("view") ?? "actionable";
+      if (url.pathname.endsWith("/targets") || url.pathname.endsWith("/targets/refresh")) {
+        await route.fulfill({
+          json: {
+            success: true,
+            data: {
+              provider,
+              repositories_stale: false,
+              repositories: [],
+              controllers: [],
+              readiness: { state: "ready" },
+              connection: { state: "connected" },
+              provider_errors: [],
+            },
+          },
+        });
+        return;
+      }
+      const view = selection.view ?? "actionable";
       expect(["actionable", "diagnostics", "history"]).toContain(view);
       await route.fulfill({
         json: {
@@ -230,12 +251,8 @@ for (const language of ["en", "ru"] as const)
                   : codespaces.filter((row) => row.state !== "ambiguous"),
             has_diagnostics: true,
             resources_stale: false,
-            repositories_stale: false,
             unavailable: view === "diagnostics" ? [unavailable] : [],
             provider_errors: [],
-            repositories: [],
-            readiness: { state: "ready" },
-            connection: { state: "connected" },
           },
         },
       });

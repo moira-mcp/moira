@@ -23,19 +23,21 @@ export interface ManagedWorkspaceView extends Omit<
 }
 export interface WorkspaceOperationView {
   operation: string;
+  kind?: string;
   state: "pending" | "accepted" | "completed" | "unconfirmed" | "absent";
   original?: unknown;
   descriptor?: { kind: string; description?: string; createdAt?: number };
   outcome?:
     { ok: true; result?: unknown } | { ok: false; error: { code: string; message: string } };
   error?: { code: string; message: string };
+  observation_error?: { code: string };
 }
 
 export type WorkspaceDiscoveryProvider = WorkspaceReference["provider"];
 export type WorkspaceDiscoveryView = CodespaceDiscoveryView;
 /** One provider/view observation; billing has its own read boundary. */
-export interface CodespaceManagementView {
-  has_diagnostics: boolean;
+export interface CodespaceTargetsView {
+  provider: WorkspaceDiscoveryProvider;
   readiness?: CodespaceReadinessView;
   connection?: CodespaceConnectionView;
   repositories: Array<{
@@ -49,6 +51,18 @@ export interface CodespaceManagementView {
     controller: string;
   }>;
   repositories_stale: boolean;
+  provider_errors?: CodespaceProviderErrorView[];
+  controllers?: Array<{
+    device_id: string;
+    label: string;
+    available?: boolean;
+    controller: string;
+  }>;
+}
+
+export interface CodespaceManagementView {
+  provider: WorkspaceDiscoveryProvider;
+  has_diagnostics: boolean;
   resources_stale: boolean;
   codespaces: ManagedWorkspaceView[];
   unavailable?: Array<
@@ -58,12 +72,6 @@ export interface CodespaceManagementView {
     }
   >;
   provider_errors?: CodespaceProviderErrorView[];
-  controllers?: Array<{
-    device_id: string;
-    label: string;
-    available?: boolean;
-    controller: string;
-  }>;
 }
 import { WorkflowValidationStatus } from "./react-flow-types.js";
 import { WorkflowGraph, ValidationResult, WorkflowFileInfo } from "./workflow-types.js";

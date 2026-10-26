@@ -1,7 +1,10 @@
 import { test, expect } from "./fixtures.js";
 import type { CodespaceConnectionView, CodespaceReadinessView } from "@mcp-moira/shared";
 import { encodeReference } from "../../packages/shared/src/codespaces/workspace-references.mjs";
-import type { ManagedWorkspaceView } from "../../packages/web-frontend/src/types/api-types.js";
+import type {
+  ManagedWorkspaceView,
+  CodespaceTargetsView,
+} from "../../packages/web-frontend/src/types/api-types.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import type { Route } from "./fixtures.js";
@@ -78,11 +81,36 @@ const managementMetadata = {
 };
 
 /** Discovery is provider-scoped; a hidden peer must not borrow these GitHub rows. */
-async function fulfillAuxiliaryRead(route: Route): Promise<boolean> {
+async function fulfillAuxiliaryRead(
+  route: Route,
+  targetOverrides: Partial<CodespaceTargetsView> = {},
+): Promise<boolean> {
   const request = route.request();
   const url = new URL(request.url());
   if (request.method() === "GET" && url.pathname.endsWith("/billing")) {
     await route.fulfill({ json: { success: true, data: "unavailable" } });
+    return true;
+  }
+  if (url.pathname.endsWith("/targets") || url.pathname.endsWith("/targets/refresh")) {
+    const provider =
+      request.method() === "GET"
+        ? url.searchParams.get("provider")
+        : request.postDataJSON().provider;
+    await route.fulfill({
+      json: {
+        success: true,
+        data: {
+          provider,
+          readiness: { ...readiness, provider },
+          connection,
+          repositories: provider === "github-codespaces" ? repositories : [],
+          repositories_stale: true,
+          controllers: managementMetadata.controllers,
+          provider_errors: [],
+          ...targetOverrides,
+        },
+      },
+    });
     return true;
   }
   const refresh = request.method() === "POST" && url.pathname.endsWith("/refresh");
@@ -172,6 +200,13 @@ test("codespaces are created, stopped and deleted with confirmation from Setting
     const request = route.request();
     requests.push(`${request.method()} ${new URL(request.url()).pathname}`);
     const url = new URL(request.url());
+    if (url.pathname.endsWith("/workspace_observe")) {
+      const observed = codespaces.find(
+        (item) => item.workspace === request.postDataJSON().workspace,
+      )!;
+      await route.fulfill({ json: { success: true, data: observed } });
+      return;
+    }
     if (request.method() === "GET" && url.pathname.endsWith("/codespaces")) {
       await route.fulfill({
         json: {
@@ -356,6 +391,7 @@ test("codespaces are created, stopped and deleted with confirmation from Setting
   await page.getByTestId("github-codespace-create-submit").click();
   await expect(page.getByText("Codespace creation was accepted")).toBeVisible();
   await expect(page.getByTestId("github-codespace-list")).toContainText("feature/e2e");
+  await page.getByTestId(`codespace-reconcile-${createdId}`).click();
   await page.getByTestId(`github-codespace-delete-${createdId}`).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page.getByTestId(`github-codespace-state-${createdId}`)).toHaveText("Deleting");
@@ -371,6 +407,9 @@ test("codespaces are created, stopped and deleted with confirmation from Setting
     "Stopped (data kept)",
   );
   await expect(page.getByTestId(`github-codespace-start-${CODESPACE_ID}`)).toBeVisible();
+  await expect(page.getByTestId(`github-codespace-start-${CODESPACE_ID}`)).toBeDisabled();
+  await page.getByTestId(`codespace-reconcile-${CODESPACE_ID}`).click();
+  await expect(page.getByTestId(`github-codespace-start-${CODESPACE_ID}`)).toBeEnabled();
 
   // Keyboard path: open with Enter, dismiss with Escape, focus returns to the trigger.
   const deleteButton = page.getByTestId(`github-codespace-delete-${CODESPACE_ID}`);
@@ -545,7 +584,7 @@ test("unconfigured instances explain themselves in both languages", async ({ pag
     }),
   );
   await page.route("**/api/integrations/github/codespaces**", async (route) => {
-    if (await fulfillAuxiliaryRead(route)) return;
+    if (await fulfillAuxiliaryRead(route, { readiness: state, repositories: [] })) return;
     await route.fulfill({
       json: {
         success: true,
@@ -594,19 +633,52 @@ test("administrators inspect readiness without cloud lifecycle controls", async 
   expect(requests.every((method) => method === "GET")).toBe(true);
 });
 
-test("a lost create reply collects the original owner request without another creation", async ({
+test("a lost create keeps confirmed recovery separate from unavailable state and held inventory", async ({
   page,
-}) => {
+}, testInfo) => {
   await loginAsAdmin(page);
   let creates = 0;
   let discovered = 0;
   let codespaces: ManagedWorkspaceView[] = [];
+  let inventoryRefreshes = 0;
+  let releaseInventory!: () => void;
+  const heldInventory = new Promise<void>((resolve) => {
+    releaseInventory = resolve;
+  });
   const collected: string[] = [];
   await page.route("**/api/integrations/github", (route) =>
     route.fulfill({ json: { success: true, data: connection } }),
   );
   await page.route("**/api/integrations/github/codespaces**", async (route) => {
     if (await fulfillAuxiliaryRead(route)) return;
+    const path = new URL(route.request().url()).pathname;
+    if (
+      (route.request().method() === "GET" && path.endsWith("/codespaces")) ||
+      path.endsWith("/refresh")
+    ) {
+      if (route.request().method() === "POST") inventoryRefreshes++;
+      await heldInventory;
+      await route.fulfill({
+        json: {
+          success: true,
+          data: { provider: "github-codespaces", ...managementMetadata, codespaces },
+        },
+      });
+      return;
+    }
+    if (new URL(route.request().url()).pathname.endsWith("/workspace_observe")) {
+      await route.fulfill({
+        status: 503,
+        json: {
+          success: false,
+          error: {
+            code: "CODESPACE_PROVIDER_UNAVAILABLE",
+            message: "Independent observation unavailable",
+          },
+        },
+      });
+      return;
+    }
     if (
       route.request().method() === "POST" &&
       new URL(route.request().url()).pathname.endsWith("/workspace_create")
@@ -670,6 +742,21 @@ test("a lost create reply collects the original owner request without another cr
     ) {
       expect(route.request().postDataJSON()).toEqual({ reference: originalOperation });
       collected.push(originalOperation);
+      if (collected.length === 1) {
+        await route.fulfill({
+          json: {
+            success: true,
+            data: {
+              operation: originalOperation,
+              kind: "lifecycle",
+              state: "completed",
+              outcome: { ok: true, result: null },
+              observation_error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" },
+            },
+          },
+        });
+        return;
+      }
       const original = codespace({ requested_ref: "feature/recovery" });
       codespaces = [original];
       await route.fulfill({
@@ -677,6 +764,7 @@ test("a lost create reply collects the original owner request without another cr
           success: true,
           data: {
             operation: originalOperation,
+            kind: "lifecycle",
             state: "completed",
             outcome: { ok: true, result: original },
           },
@@ -697,32 +785,60 @@ test("a lost create reply collects the original owner request without another cr
       },
     });
   });
-  await page.goto(`${baseUrl}/settings?lang=en#development-environments`);
-  await page.getByTestId("github-codespace-ref").fill("feature/recovery");
-  await page.getByTestId("github-codespace-create-submit").click();
-  await expect(page.getByTestId("github-codespace-create-submit")).toBeDisabled();
-  await page
-    .getByTestId("github-codespace-management")
-    .getByRole("button", { name: "Find original operation", exact: true })
-    .click();
-  await expect(
-    page.getByRole("button", {
-      name: "Inspect: Create witqq/private-project feature/recovery",
-      exact: true,
-    }),
-  ).toBeVisible();
-  expect(discovered).toBe(1);
-  expect(collected).toEqual([]);
-  await expect(page.getByTestId("github-codespace-create-submit")).toBeDisabled();
-  await page
-    .getByRole("button", {
-      name: "Inspect: Create witqq/private-project feature/recovery",
-      exact: true,
-    })
-    .click();
-  await expect.poll(() => collected).toEqual([originalOperation]);
-  await expect(page.getByTestId("github-codespace-create-submit")).toBeEnabled();
-  expect(creates).toBe(1);
+  try {
+    await page.goto(`${baseUrl}/settings?lang=en#development-environments`);
+    await page.getByTestId("github-codespace-ref").fill("feature/recovery");
+    await page.getByTestId("github-codespace-create-submit").click();
+    await expect(page.getByTestId("github-codespace-create-submit")).toBeDisabled();
+    await page
+      .getByTestId("github-codespace-management")
+      .getByRole("button", { name: "Find original operation", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", {
+        name: "Inspect: Create witqq/private-project feature/recovery",
+        exact: true,
+      }),
+    ).toBeVisible();
+    expect(discovered).toBe(1);
+    expect(collected).toEqual([]);
+    await expect(page.getByTestId("github-codespace-create-submit")).toBeDisabled();
+    await page
+      .getByRole("button", {
+        name: "Inspect: Create witqq/private-project feature/recovery",
+        exact: true,
+      })
+      .click();
+    await expect.poll(() => collected).toEqual([originalOperation]);
+    const originalResult = page.getByTestId("workspace-original-create");
+    await expect(originalResult).toContainText("Original operation completed");
+    await expect(originalResult).not.toContainText("Original operation result is not confirmed");
+    await expect(page.getByTestId("github-codespace-create-submit")).toBeDisabled();
+    await expect(page.getByTestId(`github-codespace-${CODESPACE_ID}`)).toHaveCount(0);
+    await testInfo.attach("collected-create-confirmed-without-observation", {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: "image/png",
+    });
+    await originalResult
+      .getByRole("button", { name: "Check original result", exact: true })
+      .click();
+    await expect.poll(() => collected).toEqual([originalOperation, originalOperation]);
+    const row = page.getByTestId(`github-codespace-${CODESPACE_ID}`);
+    await expect(row).toBeVisible();
+    await expect(row.getByRole("alert")).toBeVisible();
+    await expect(originalResult).toHaveCount(0);
+    await expect(page.getByTestId(`github-codespace-stop-${CODESPACE_ID}`)).toBeDisabled();
+    await expect(page.getByTestId(`codespace-reconcile-${CODESPACE_ID}`)).toBeEnabled();
+    await expect(page.getByTestId("github-codespace-create-submit")).toBeEnabled();
+    await testInfo.attach("collected-create-retained-result-observation-failed", {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: "image/png",
+    });
+    expect(creates).toBe(1);
+    expect(inventoryRefreshes).toBe(0);
+  } finally {
+    releaseInventory();
+  }
 });
 
 test("a lost completed start reply is explicitly recovered without another start", async ({
@@ -744,6 +860,11 @@ test("a lost completed start reply is explicitly recovered without another start
     if (await fulfillAuxiliaryRead(route)) return;
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (path.endsWith("/workspace_observe")) {
+      expect(request.postDataJSON()).toEqual({ workspace: current.workspace });
+      await route.fulfill({ json: { success: true, data: current } });
+      return;
+    }
     if (request.method() === "POST" && path.endsWith("/workspace_lifecycle")) {
       expect(request.postDataJSON()).toEqual({ workspace: current.workspace, action: "start" });
       starts++;
@@ -825,3 +946,103 @@ test("a lost completed start reply is explicitly recovered without another start
   expect(collections).toBe(1);
   expect(starts).toBe(1);
 });
+
+for (const language of ["en", "ru"] as const) {
+  test(`targets stay usable under held inventory and an exact card refusal is isolated (${language})`, async ({
+    page,
+  }, testInfo) => {
+    await loginAsAdmin(page);
+    let releaseInventory!: () => void;
+    const heldInventory = new Promise<void>((resolve) => {
+      releaseInventory = resolve;
+    });
+    let inventoryReads = 0;
+    let observations = 0;
+    const first = codespace({ lifecycle_error: "CODESPACE_PROVIDER_UNAVAILABLE" });
+    const peer = codespace({ codespace_id: SECOND_ID, repository: "witqq/healthy-peer" });
+    await page.route("**/api/integrations/github", (route) =>
+      route.fulfill({ json: { success: true, data: connection } }),
+    );
+    await page.route("**/api/integrations/github/codespaces**", async (route) => {
+      if (await fulfillAuxiliaryRead(route)) return;
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      if (request.method() === "GET" && path.endsWith("/codespaces")) {
+        inventoryReads++;
+        await heldInventory;
+        await route.fulfill({
+          json: {
+            success: true,
+            data: {
+              provider: "github-codespaces",
+              codespaces: [first, peer],
+              resources_stale: false,
+              has_diagnostics: false,
+              unavailable: [],
+              provider_errors: [],
+            },
+          },
+        });
+        return;
+      }
+      if (path.endsWith("/workspace_observe")) {
+        expect(request.postDataJSON()).toEqual({ workspace: first.workspace });
+        observations++;
+        if (observations === 1) {
+          await route.fulfill({
+            status: 409,
+            json: {
+              success: false,
+              error: { code: "CODESPACE_GENERATION_CONFLICT", message: "Stale observation" },
+            },
+          });
+        } else {
+          await route.fulfill({ json: { success: true, data: codespace() } });
+        }
+        return;
+      }
+      await route.fulfill({ status: 404, json: { success: false } });
+    });
+    try {
+      await page.goto(`${baseUrl}/settings?lang=${language}#development-environments`);
+      const targets = page.getByTestId("github-codespace-management-targets-region");
+      const inventory = page.getByTestId("github-management-region");
+      const branch = page.getByTestId("github-codespace-ref");
+      await branch.fill("feature/independent-targets");
+      await expect(page.getByTestId("github-codespace-create-submit")).toBeEnabled();
+      await expect(targets).toHaveAttribute("aria-busy", "false");
+      await expect(inventory).toHaveAttribute("aria-busy", "true");
+      await testInfo.attach(`independent-targets-held-inventory-${language}`, {
+        body: await page.screenshot({ fullPage: true }),
+        contentType: "image/png",
+      });
+      releaseInventory();
+      const row = page.getByTestId(`github-codespace-${CODESPACE_ID}`);
+      const peerRow = page.getByTestId(`github-codespace-${SECOND_ID}`);
+      await expect(peerRow).toBeVisible();
+      await page.getByTestId(`codespace-reconcile-${CODESPACE_ID}`).click();
+      await expect.poll(() => observations).toBe(1);
+      await expect(page.getByTestId(`codespace-reconcile-${CODESPACE_ID}`)).toBeEnabled();
+      await expect(row.getByRole("alert")).toBeVisible();
+      await expect(page.getByTestId(`github-codespace-stop-${SECOND_ID}`)).toBeEnabled();
+      await expect(peerRow.getByRole("alert")).toHaveCount(0);
+      await expect(branch).toHaveValue("feature/independent-targets");
+      await testInfo.attach(`exact-card-refusal-retained-targets-${language}`, {
+        body: await page.screenshot({ fullPage: true }),
+        contentType: "image/png",
+      });
+      await page.getByTestId(`codespace-reconcile-${CODESPACE_ID}`).click();
+      await expect(row.getByRole("alert")).toHaveCount(0);
+      expect(observations).toBe(2);
+      expect(inventoryReads).toBe(1);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await targets.scrollIntoViewIfNeeded();
+      await testInfo.attach(`independent-regions-recovered-narrow-${language}`, {
+        body: await page.screenshot({ fullPage: true }),
+        contentType: "image/png",
+      });
+    } finally {
+      releaseInventory();
+    }
+  });
+}

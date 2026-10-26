@@ -13,6 +13,7 @@ import { apiClient } from "@/services/api-client";
 import type { CodespaceConnectionView } from "@mcp-moira/shared";
 import type {
   CodespaceManagementView,
+  CodespaceTargetsView,
   WorkspaceDiscoveryProvider,
   WorkspaceDiscoveryView,
 } from "@/types/api-types";
@@ -135,6 +136,22 @@ function useProviderDiscovery(provider: WorkspaceDiscoveryProvider) {
 }
 
 type DiscoveryState = ReturnType<typeof useProviderDiscovery>;
+function useProviderTargets(provider: WorkspaceDiscoveryProvider) {
+  const synchronize = useRef(false);
+  const result = useResource<CodespaceTargetsView>(`codespace-targets:${provider}`, () => {
+    const sync = synchronize.current;
+    synchronize.current = false;
+    return sync
+      ? apiClient.refreshCodespaceTargets(provider)
+      : apiClient.getCodespaceTargets(provider);
+  });
+  const refresh = result.refresh;
+  const reload = useCallback(() => {
+    synchronize.current = true;
+    return refresh();
+  }, [refresh]);
+  return { ...result, reload };
+}
 interface GitHubCodespacesState {
   connection: CodespaceConnectionView | null;
   connectionLoading: boolean;
@@ -142,6 +159,7 @@ interface GitHubCodespacesState {
   applyConnection(next: CodespaceConnectionView): void;
   reloadConnection(): Promise<void>;
   discovery: Record<WorkspaceDiscoveryProvider, DiscoveryState>;
+  targets: Record<WorkspaceDiscoveryProvider, ReturnType<typeof useProviderTargets>>;
   reloadManagement(provider: WorkspaceDiscoveryProvider, options?: ReloadOptions): Promise<boolean>;
 }
 const GitHubCodespacesContext = createContext<GitHubCodespacesState | null>(null);
@@ -167,24 +185,35 @@ export function GitHubCodespacesProvider({
   const scope = getReadScopeVersion();
   const local = useProviderDiscovery("local-sandboxes"),
     github = useProviderDiscovery("github-codespaces");
+  const localTargets = useProviderTargets("local-sandboxes"),
+    githubTargets = useProviderTargets("github-codespaces");
   const reloadLocal = local.reload,
     reloadGitHub = github.reload;
   useRefreshOnActivation(active && view === "github", reloadConnection);
   useRefreshOnActivation(active && view === "environments", github.reload);
   useRefreshOnActivation(active && view === "local", local.reload);
+  useRefreshOnActivation(active && view === "environments", githubTargets.reload);
+  useRefreshOnActivation(active && view === "local", localTargets.reload);
+  const reloadGitHubTargets = githubTargets.reload;
+  const reloadLocalTargets = localTargets.reload;
   const applyConnection = useCallback(
     (next: CodespaceConnectionView) => {
       if (scope !== getReadScopeVersion() || isPrivateReadSuspended()) return;
       // All connection effects are enabled by an accepted connection observation.
       updateConnection(() => next);
       void reloadGitHub({ silent: true });
+      void reloadGitHubTargets();
     },
-    [scope, updateConnection, reloadGitHub],
+    [scope, updateConnection, reloadGitHub, reloadGitHubTargets],
   );
   const reloadManagement = useCallback(
-    (provider: WorkspaceDiscoveryProvider, options?: ReloadOptions) =>
-      provider === "local-sandboxes" ? reloadLocal(options) : reloadGitHub(options),
-    [reloadLocal, reloadGitHub],
+    (provider: WorkspaceDiscoveryProvider, options?: ReloadOptions) => {
+      // Device grants and pairing can change creation targets as well as inventory. Each read
+      // publishes independently; one result must never be assembled from the other's request.
+      void (provider === "local-sandboxes" ? reloadLocalTargets() : reloadGitHubTargets());
+      return provider === "local-sandboxes" ? reloadLocal(options) : reloadGitHub(options);
+    },
+    [reloadLocal, reloadGitHub, reloadLocalTargets, reloadGitHubTargets],
   );
   return (
     <GitHubCodespacesContext.Provider
@@ -195,6 +224,7 @@ export function GitHubCodespacesProvider({
         applyConnection,
         reloadConnection,
         discovery: { "local-sandboxes": local, "github-codespaces": github },
+        targets: { "local-sandboxes": localTargets, "github-codespaces": githubTargets },
         reloadManagement,
       }}
     >
@@ -210,4 +240,7 @@ export function useGitHubCodespaces(): GitHubCodespacesState {
 }
 export function useCodespaceDiscovery(provider: WorkspaceDiscoveryProvider) {
   return useGitHubCodespaces().discovery[provider];
+}
+export function useCodespaceTargets(provider: WorkspaceDiscoveryProvider) {
+  return useGitHubCodespaces().targets[provider];
 }

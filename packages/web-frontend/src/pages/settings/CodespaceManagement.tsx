@@ -21,7 +21,7 @@ import { apiClient } from "@/services/api-client";
 import type { ManagedWorkspaceView, WorkspaceOperationView } from "@/types/api-types";
 import { cn } from "@/lib/utils";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { useCodespaceDiscovery } from "./GitHubCodespacesData";
+import { useCodespaceDiscovery, useCodespaceTargets } from "./GitHubCodespacesData";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -154,23 +154,29 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
     update: setView,
     select: selectDiscoveryView,
   } = useCodespaceDiscovery(provider);
+  const {
+    data: targets,
+    pending: targetsLoading,
+    error: targetsError,
+    reload: reloadTargets,
+  } = useCodespaceTargets(provider);
   const [repositoryId, setRepositoryId] = useState("");
   // Repository metadata has no default branch; require a ref instead of guessing one.
   const [ref, setRef] = useState("");
   const [controllerId, setControllerId] = useState("");
   const [devcontainerPath, setDevcontainerPath] = useState("");
   const [providerName, setProviderName] = useState("");
-  const availableControllers = useMemo(() => view?.controllers ?? [], [view?.controllers]);
+  const availableControllers = useMemo(() => targets?.controllers ?? [], [targets?.controllers]);
   useEffect(() => {
-    if (!view?.controllers) return;
+    if (!targets?.controllers) return;
     setControllerId((current) =>
-      view?.controllers?.some((entry) => entry.device_id === current)
+      targets.controllers?.some((entry) => entry.device_id === current)
         ? current
         : availableControllers.length === 1
           ? availableControllers[0].device_id
           : "",
     );
-  }, [view?.controllers, availableControllers]);
+  }, [targets?.controllers, availableControllers]);
   const [creating, setCreating] = useState(false);
   const [busyCodespaces, setBusyCodespaces] = useState<Set<string>>(new Set());
   const [actionErrors, setActionErrors] = useState<
@@ -183,12 +189,25 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
     Record<string, RetainedOperation>
   >({});
   const retainedRef = useRef<Record<string, RetainedOperation>>({});
+  const [confirmedOperations, setConfirmedOperations] = useState<
+    Record<string, { operation: string; observation_error?: { code: string } }>
+  >({});
   const [operationCandidates, setOperationCandidates] = useState<
     Record<string, { operations: WorkspaceOperationView[]; nextCursor?: string }>
   >({});
+  const [effectSnapshots, setEffectSnapshots] = useState<Record<string, ManagedWorkspaceView>>({});
+  const clearEffectSnapshot = (id: string) =>
+    setEffectSnapshots((previous) => {
+      const next = { ...previous };
+      delete next[id];
+      return next;
+    });
+  const needsObservation = (codespace: ManagedWorkspaceView) =>
+    effectSnapshots[codespace.codespace_id] === codespace;
   const pendingOperationIds = (target: string): string[] => [
     ...new Set([
       ...(retainedRef.current[target]?.operation ? [retainedRef.current[target].operation!] : []),
+      ...(confirmedOperations[target] ? [confirmedOperations[target].operation] : []),
       ...(view?.codespaces.find((entry) => entry.codespace_id === target)?.pending_operations ??
         []),
       ...(view?.unavailable?.find((entry) => entry.codespace_id === target)?.pending_operations ??
@@ -206,6 +225,11 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
     delete next[target];
     retainedRef.current = next;
     setUnconfirmedOperations(next);
+    setConfirmedOperations((previous) => {
+      const next = { ...previous };
+      delete next[target];
+      return next;
+    });
     setOperationCandidates((previous) => {
       const next = { ...previous };
       delete next[target];
@@ -215,6 +239,12 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
   const receiptError = (receipt: WorkspaceOperationView) =>
     receipt.error ?? (receipt.outcome?.ok === false ? receipt.outcome.error : undefined);
   const receiptConfirmed = (receipt: WorkspaceOperationView) => receipt.state === "completed";
+  const retainConfirmation = (target: string, receipt: WorkspaceOperationView) => {
+    setConfirmedOperations((previous) => ({
+      ...previous,
+      [target]: { operation: receipt.operation, observation_error: receipt.observation_error },
+    }));
+  };
   const unconfirmedFailure = (error: unknown) => {
     const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
     return ![
@@ -252,14 +282,20 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
       return;
     }
     let refused = false;
+    let observation: ManagedWorkspaceView | undefined;
+    let confirmed: WorkspaceOperationView | undefined;
     for (const reference of references) {
       const receipt = await apiClient.getWorkspaceOperation(reference);
       if (!owned() || retainedRef.current[target] !== retained) return;
       if (receipt.operation !== reference || !receiptConfirmed(receipt))
         throw new Error(t("localDevices.editor.unconfirmed"));
       if (receiptError(receipt)) refused = true;
+      else confirmed = receipt;
+      const result = receipt.outcome?.ok ? receipt.outcome.result : receipt.original;
+      if (isWorkspaceObservation(result)) observation = result;
     }
-    clearOperation(target);
+    if (observation || !confirmed) clearOperation(target);
+    else retainConfirmation(target, confirmed);
     setActionErrors((previous) => {
       const next = { ...previous };
       delete next[target];
@@ -267,7 +303,46 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
     });
     if (target === "create") setCreateError(null);
     if (target === "adopt") setAdoptError(null);
-    if (!(await reloadManagement({ sync: true, silent: true }))) throw new Error(loadFailed);
+    if (observation) {
+      const completed = { ...observation, pending_operations: [] };
+      replaceCodespace(completed);
+      setEffectSnapshots((previous) => ({ ...previous, [completed.codespace_id]: completed }));
+      try {
+        const fresh = await apiClient.observeWorkspace(completed.workspace);
+        if (!owned()) return;
+        replaceCodespace(fresh);
+        clearEffectSnapshot(fresh.codespace_id);
+      } catch (error) {
+        if (!owned()) return;
+        setCheckErrors((previous) => ({
+          ...previous,
+          [completed.codespace_id]: { message: failureMessage(error), origin: completed },
+        }));
+      }
+    } else {
+      const previous = view?.codespaces.find((entry) => entry.codespace_id === target);
+      if (previous) {
+        // A completed receipt without a projectable snapshot proves the operation's outcome,
+        // not that this old card is its result. Retain confirmation until a separate read settles.
+        setEffectSnapshots((current) => ({ ...current, [target]: previous }));
+        try {
+          const fresh = await apiClient.observeWorkspace(previous.workspace);
+          if (!owned()) return;
+          clearOperation(target);
+          replaceCodespace(fresh);
+          clearEffectSnapshot(fresh.codespace_id);
+        } catch (error) {
+          if (!owned()) return;
+          setCheckErrors((current) => ({
+            ...current,
+            [target]: {
+              message: failureMessage(error),
+              origin: previous,
+            },
+          }));
+        }
+      }
+    }
     if (refused) toast.error(t("localDevices.provisioning.failed"));
   };
   const selectOriginal = async (target: string, operation: string) => {
@@ -286,8 +361,18 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
     receipt: WorkspaceOperationView,
   ) => {
     const observation = receipt.outcome?.ok ? receipt.outcome.result : receipt.original;
-    if (isWorkspaceObservation(observation)) replaceCodespace(observation);
-    if (receiptConfirmed(receipt)) clearOperation(target);
+    if (isWorkspaceObservation(observation)) {
+      replaceCodespace(observation);
+      setEffectSnapshots((previous) => ({ ...previous, [observation.codespace_id]: observation }));
+    }
+    if (
+      receiptConfirmed(receipt) &&
+      !isWorkspaceObservation(observation) &&
+      !receiptError(receipt)
+    ) {
+      retainOperation(target, { ...retained, operation: receipt.operation });
+      retainConfirmation(target, receipt);
+    } else if (receiptConfirmed(receipt)) clearOperation(target);
     else retainOperation(target, { ...retained, operation: receipt.operation });
     const error = receiptError(receipt);
     if (error) throw Object.assign(new Error(error.message), { code: error.code });
@@ -297,9 +382,14 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
   const [checkErrors, setCheckErrors] = useState<Record<string, ResourceRequestError>>({});
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleteNeedsRefresh, setDeleteNeedsRefresh] = useState(false);
-  const checkState = async (codespace: ManagedWorkspaceView, trigger?: HTMLButtonElement) => {
+  const checkState = async (
+    codespace: ManagedWorkspaceView,
+    trigger?: HTMLButtonElement,
+    refreshOnly = false,
+  ) => {
     if (
       computer &&
+      !refreshOnly &&
       codespace.desired_state === "deleted" &&
       !hasUnconfirmedOperation(codespace.codespace_id)
     ) {
@@ -319,12 +409,11 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
         await collectOperation(id);
         return;
       }
-      const refreshed = await reloadManagement({ sync: true, silent: true, throwOnError: true });
-      if (owned() && !refreshed)
-        setCheckErrors((previous) => ({
-          ...previous,
-          [id]: { message: loadFailed, origin: codespace },
-        }));
+      const refreshed = await apiClient.observeWorkspace(codespace.workspace);
+      if (owned()) {
+        replaceCodespace(refreshed);
+        clearEffectSnapshot(id);
+      }
     } catch (error) {
       if (owned())
         setCheckErrors((previous) => ({
@@ -382,7 +471,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
   };
 
   // Keep the selected repository while it is still offered; otherwise take the first one.
-  const repositories = view?.repositories;
+  const repositories = targets?.repositories;
   const availableRepositories = useMemo(
     () =>
       repositories?.filter(
@@ -408,8 +497,8 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
   }, [loadError, loadFailed, computer]);
 
   /**
-   * A lifecycle response echoes one codespace, including a finished one the listing no longer
-   * offers. Show it at once, then take the server's listing as the authority on what remains.
+   * Publish only the addressed observation and retire older inventory reads. Completed deleted
+   * environments leave the actionable view without probing any unrelated environment.
    */
   const replaceCodespace = (codespace: ManagedWorkspaceView) => {
     setCheckErrors((previous) => {
@@ -423,7 +512,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
       return next;
     });
     setView((current) => {
-      if (!current) return current;
+      current ??= { provider, has_diagnostics: false, resources_stale: false, codespaces: [] };
       const exists = current.codespaces.some(
         (item) => item.codespace_id === codespace.codespace_id,
       );
@@ -432,14 +521,16 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
         unavailable: current.unavailable?.filter(
           (entry) => entry.codespace_id !== codespace.codespace_id,
         ),
-        codespaces: exists
-          ? current.codespaces.map((item) =>
-              item.codespace_id === codespace.codespace_id ? codespace : item,
-            )
-          : [...current.codespaces, codespace],
+        codespaces:
+          discoveryView === "actionable" && codespace.state === "deleted"
+            ? current.codespaces.filter((item) => item.codespace_id !== codespace.codespace_id)
+            : exists
+              ? current.codespaces.map((item) =>
+                  item.codespace_id === codespace.codespace_id ? codespace : item,
+                )
+              : [...current.codespaces, codespace],
       };
     });
-    void load({ silent: true });
   };
 
   // The server's own sentence is English and meant for agents; the reader gets the code's message.
@@ -452,7 +543,8 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
   };
 
   const selectedController = (deviceId?: string) =>
-    view?.controllers?.find((entry) => entry.device_id === (deviceId ?? controllerId))?.controller;
+    targets?.controllers?.find((entry) => entry.device_id === (deviceId ?? controllerId))
+      ?.controller;
   const create = async () => {
     const repository = availableRepositories?.find((entry) => entry.repository_id === repositoryId);
     if (!repository || hasUnconfirmedOperation("create") || !accessEnabled || !ref.trim()) return;
@@ -492,6 +584,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
   ) => {
     if (
       !accessEnabled ||
+      needsObservation(codespace) ||
       hasUnconfirmedOperation(codespace.codespace_id) ||
       (action === "start" && codespace.lifecycle_error === "CODESPACE_LOCAL_SETUP_INCOMPLETE")
     )
@@ -549,6 +642,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
       owner = selectedController();
     if (
       !owner ||
+      (codespace && needsObservation(codespace)) ||
       adopting ||
       hasUnconfirmedOperation(target) ||
       (!codespace && !providerName.trim())
@@ -578,8 +672,9 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
   const refreshDeleteTarget = async () => {
     // A new observation closes the previous decision; only another explicit confirmation can delete.
     deleteDecision.current++;
+    const captured = pendingDelete;
     setPendingDelete(null);
-    await refreshList();
+    if (captured) await checkState(captured, undefined, true);
   };
   const remove = async () => {
     const captured = pendingDelete;
@@ -588,6 +683,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
       discoveryView !== "actionable" ||
       deleteNeedsRefresh ||
       !ownerDeleteEnabled ||
+      needsObservation(captured) ||
       !view?.codespaces.some((entry) => entry.codespace_id === captured.codespace_id)
     )
       return;
@@ -647,48 +743,20 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
       ))}
     </div>
   );
-  if (loading && !view) {
-    return (
-      <Card data-testid={regionId} {...(!computer ? guideAnchor("settings.codespaces") : {})}>
-        <CardContent className="min-h-32 space-y-4 p-6">
-          {discoveryControls}
-          <Loader2 className="h-5 w-5 animate-spin" aria-label={t("common.loading")} />
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (!view) {
-    return (
-      <Card data-testid={regionId} {...(!computer ? guideAnchor("settings.codespaces") : {})}>
-        <CardContent className="space-y-4 p-6">
-          {discoveryControls}
-          <Alert variant="destructive">
-            <AlertCircle aria-hidden="true" />
-            <AlertTitle>{loadFailed}</AlertTitle>
-            <AlertDescription>
-              {t("pages.settings.codespaces.loadFailedDescription")}
-            </AlertDescription>
-          </Alert>
-          <Button variant="outline" onClick={() => void load()}>
-            {t("pages.settings.codespaces.retry")}
-          </Button>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const readiness = view.readiness;
-  const connection = view.connection;
-  const providerError = view.provider_errors?.find((entry) => entry.provider === provider)?.error;
-  const repositoriesStale = view.repositories_stale;
-  const resourcesStale = view.resources_stale;
-  const codespaces = view.codespaces.filter(
+  const readiness = targets?.readiness;
+  const connection = targets?.connection;
+  const providerError = view?.provider_errors?.find((entry) => entry.provider === provider)?.error;
+  const targetProviderError = targets?.provider_errors?.find(
+    (entry) => entry.provider === provider,
+  )?.error;
+  const repositoriesStale = targets?.repositories_stale;
+  const resourcesStale = view?.resources_stale;
+  const codespaces = (view?.codespaces ?? []).filter(
     (codespace) =>
       codespace.provider === provider &&
       (!computer || localComputerId(codespace.repository_id) === computer.deviceId),
   );
-  const unavailable = (view.unavailable ?? []).filter(
+  const unavailable = (view?.unavailable ?? []).filter(
     (entry) =>
       entry.provider === provider &&
       (!computer || localComputerId(entry.repository_id) === computer.deviceId),
@@ -739,21 +807,23 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
       </CardHeader>
       <CardContent className="space-y-4">
         {discoveryControls}
-        {discoveryView === "actionable" && view.has_diagnostics && (
+        {discoveryView === "actionable" && view?.has_diagnostics && (
           <p role="status" className="text-sm text-muted-foreground">
             {t("localDevices.codespaces.views.diagnosticsHint")}
           </p>
         )}
         <DataRegion
-          hasResult
-          pending={loading || refreshing}
+          hasResult={Boolean(targets)}
+          pending={targetsLoading}
           error={
-            ownerUnavailable
-              ? t("localDevices.ownerUnavailable")
-              : (refreshError ?? (loadError ? loadFailed : null))
+            targetsError
+              ? loadFailed
+              : targetProviderError
+                ? failureMessage(targetProviderError)
+                : null
           }
-          onRetry={computer ? refreshList : () => load()}
-          testId={computer ? `${regionId}-region` : "github-management-region"}
+          onRetry={reloadTargets}
+          testId={`${regionId}-targets-region`}
         >
           <Alert role="note" data-testid="github-codespace-disclosure">
             <ShieldAlert aria-hidden="true" />
@@ -772,15 +842,6 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
               )}
             </AlertDescription>
           </Alert>
-
-          {providerError && (
-            <InlineError
-              title={t("localDevices.codespaces.providerUnavailable")}
-              message={failureMessage(providerError)}
-              onRetry={() => void refreshList()}
-              retryLabel={t("localDevices.codespaces.reconcile")}
-            />
-          )}
 
           {readiness && !ready && (
             <Alert variant={readiness.state === "disabled" ? "default" : "destructive"}>
@@ -823,20 +884,6 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
               <AlertCircle aria-hidden="true" />
               <AlertTitle>{t("pages.settings.github.repositoriesStaleTitle")}</AlertTitle>
               <AlertDescription>{t("pages.settings.github.repositoriesStale")}</AlertDescription>
-            </Alert>
-          )}
-
-          {resourcesStale && (
-            <Alert data-testid="github-codespace-resources-stale">
-              <AlertCircle aria-hidden="true" />
-              <AlertTitle>{t("pages.settings.codespaces.resourcesStaleTitle")}</AlertTitle>
-              <AlertDescription>
-                {t(
-                  computer
-                    ? "localDevices.codespaces.resourcesStale"
-                    : "pages.settings.codespaces.resourcesStale",
-                )}
-              </AlertDescription>
             </Alert>
           )}
 
@@ -999,17 +1046,33 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
               }
             />
           )}
-          {Object.entries(unconfirmedOperations).map(([target, retained]) => (
+        </DataRegion>
+        {Object.entries({ ...confirmedOperations, ...unconfirmedOperations }).map(
+          ([target, retained]) => (
             <Alert key={target} data-testid={`workspace-original-${target}`}>
-              <AlertTitle>{t("localDevices.codespaces.originalTitle")}</AlertTitle>
+              <AlertTitle>
+                {t(
+                  confirmedOperations[target]
+                    ? "localDevices.codespaces.originalCompletedTitle"
+                    : "localDevices.codespaces.originalTitle",
+                )}
+              </AlertTitle>
               <AlertDescription>
                 <p>
                   {t(
-                    retained.operation
-                      ? "localDevices.editor.unconfirmed"
-                      : "localDevices.codespaces.findOriginalHint",
+                    confirmedOperations[target]
+                      ? "localDevices.codespaces.originalCompletedHint"
+                      : retained.operation
+                        ? "localDevices.editor.unconfirmed"
+                        : "localDevices.codespaces.findOriginalHint",
                   )}
                 </p>
+                {confirmedOperations[target]?.observation_error && (
+                  <InlineError
+                    title={t("localDevices.codespaces.observationFailed")}
+                    message={failureMessage(confirmedOperations[target].observation_error)}
+                  />
+                )}
                 <Button
                   size="sm"
                   variant="outline"
@@ -1063,7 +1126,33 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                 )}
               </AlertDescription>
             </Alert>
-          ))}
+          ),
+        )}
+        <DataRegion
+          hasResult={Boolean(view)}
+          pending={loading || refreshing}
+          error={
+            ownerUnavailable
+              ? t("localDevices.ownerUnavailable")
+              : (refreshError ??
+                (loadError ? loadFailed : providerError ? failureMessage(providerError) : null))
+          }
+          onRetry={refreshList}
+          testId={computer ? `${regionId}-region` : "github-management-region"}
+        >
+          {resourcesStale && (
+            <Alert data-testid="github-codespace-resources-stale">
+              <AlertCircle aria-hidden="true" />
+              <AlertTitle>{t("pages.settings.codespaces.resourcesStaleTitle")}</AlertTitle>
+              <AlertDescription>
+                {t(
+                  computer
+                    ? "localDevices.codespaces.resourcesStale"
+                    : "pages.settings.codespaces.resourcesStale",
+                )}
+              </AlertDescription>
+            </Alert>
+          )}
           {!accessEnabled && (
             <p className="text-sm text-muted-foreground">
               {t("localDevices.codespaces.accessDisabled")}
@@ -1095,6 +1184,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                 const setupIncomplete =
                   codespace.lifecycle_error === "CODESPACE_LOCAL_SETUP_INCOMPLETE";
                 const busy =
+                  needsObservation(codespace) ||
                   BUSY_STATES.has(codespace.state) ||
                   busyCodespaces.has(codespace.codespace_id) ||
                   checkingCodespaces.has(codespace.codespace_id) ||
@@ -1242,7 +1332,12 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                               <Button
                                 size="sm"
                                 variant="outline"
-                                disabled={requestBusy || !accessEnabled || outcomeUnconfirmed}
+                                disabled={
+                                  requestBusy ||
+                                  needsObservation(codespace) ||
+                                  !accessEnabled ||
+                                  outcomeUnconfirmed
+                                }
                                 onClick={() => void lifecycle(codespace, "resume_setup")}
                                 data-testid={`codespace-resume-setup-${codespace.codespace_id}`}
                               >
@@ -1254,13 +1349,19 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                             <Button
                               size="sm"
                               variant="outline"
-                              disabled={requestBusy || adopting || !controllerId}
+                              disabled={
+                                requestBusy ||
+                                needsObservation(codespace) ||
+                                adopting ||
+                                !controllerId
+                              }
                               onClick={() => void adopt(codespace)}
                             >
                               {t("localDevices.provisioning.adopt")}
                             </Button>
                           )}
                           {(errorMessage ||
+                            needsObservation(codespace) ||
                             outcomeUnconfirmed ||
                             (computer && BUSY_STATES.has(codespace.state))) && (
                             <Button
@@ -1307,7 +1408,12 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                           <Button
                             size="sm"
                             variant="destructive"
-                            disabled={requestBusy || !ownerDeleteEnabled || outcomeUnconfirmed}
+                            disabled={
+                              requestBusy ||
+                              needsObservation(codespace) ||
+                              !ownerDeleteEnabled ||
+                              outcomeUnconfirmed
+                            }
                             onClick={(event) => {
                               openDeleteDialog(codespace, event.currentTarget);
                             }}
@@ -1431,7 +1537,8 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
           discoveryView !== "actionable" ||
           deleteNeedsRefresh ||
           !ownerDeleteEnabled ||
-          !view.codespaces.some((entry) => entry.codespace_id === pendingDelete?.codespace_id)
+          Boolean(pendingDelete && needsObservation(pendingDelete)) ||
+          !view?.codespaces.some((entry) => entry.codespace_id === pendingDelete?.codespace_id)
         }
         content={
           deleteError ? (

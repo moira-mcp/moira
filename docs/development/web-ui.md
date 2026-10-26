@@ -75,6 +75,16 @@ administrator settings owns section query navigation through presentation-only `
 Activate the owning view before following a section hash or guide target.
 
 Development environments, GitHub connection and local-computer settings refresh independently.
+Repository/controller targets and VM inventory also own separate loading, error, retained-result
+and retry state, so an unresolved inventory does not remove the creation form or its draft.
+Checking one card uses addressed observation rather than refreshing every VM. A collected effect
+snapshot remains visible if that read fails, but requires a fresh observation before another
+lifecycle action. Completed success without a projectable snapshot retains its original reference
+and a separate confirmation message; it neither falls back to a full inventory nor enables repeat
+creation. An existing card's old state is not presented as that effect's result. Authority refusal
+remains a refused read, not a successful confirmation with an observation warning.
+Neither a card refresh nor a historical receipt replaces the captured observation
+in an open delete confirmation.
 Show desired/pending and effective owner state separately. An unavailable or uncertain original
 operation remains associated with that operation; refreshing discovery must not silently replay
 creation, publication or another external effect. Their authority and recovery contracts live in

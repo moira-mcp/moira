@@ -449,7 +449,18 @@ A revoked device requires a new pairing and browser confirmation.
 Open that computer's codespace card and use **Check state again** for a pending start, stop or
 delete. It collects the original lifecycle receipt when its identity is known, otherwise it
 performs a read-only refresh. It never resubmits start/stop/delete or creates a replacement VM.
-Errors and loaders stay on the affected card.
+That refresh observes only the selected VM. Errors and loaders stay on the affected card.
+A collected successful result can describe the operation's historical observation. It remains
+confirmed if a subsequent read fails, but does not authorize another lifecycle action. Use
+**Check state again** to obtain current state before making that next decision.
+For both Local and GitHub, collection returns the same public workspace shape as the immediate
+result without another full scan. If the confirmed receipt cannot provide that snapshot, the UI
+shows **Original operation completed** and retains the same original for another check. The API
+returns `outcome:{ok:true,result:null}` with a separate safe `observation_error`; this is not an
+unknown effect or permission to create again. A lost first create reply needs no existing card to
+retain its confirmation. Current account/controller authority is still required: revocation during
+collection refuses the response even when the private operation completed. Restore the permitted
+access and inspect that same original rather than repeating the effect.
 **Delete** is available with confirmation during pending creation, cleanup or uncertain
 local state when a current summary supplies a returned workspace reference. Unavailable identities
 have no lifecycle controls. Deletion targets that same captured observation and completes only
@@ -488,6 +499,10 @@ A selected-provider failure is not an empty inventory, and Local does not await 
 Device/settings reads and exact repository Git authorization do not await all-VM native inventory.
 They still require current owner policy and binding; reachable management or a healthy heartbeat
 does not prove guest readiness or physical VM state. A pending settings request is not applied permission.
+Repository/controller choices and VM inventory load and retry independently; a delayed inventory
+does not remove the creation form or its draft. An authority or response-schema failure belonging
+to one computer makes its owner observation unavailable without hiding healthy computers or
+accepting its untrusted policy. An account-wide admission failure still refuses the request.
 In Settings, select Diagnostics or History for that provider; billing has its own read and retry
 in the GitHub subsection. A pending unknown creation
 remains collectable as its original operation, not a replacement VM. A nullable machine is not a
@@ -586,7 +601,9 @@ Device `active`/`enabled` and setup `ready` describe authorization and configura
 successful guest connection. A working guest Unix API is ready before optional workspace-credential
 acquisition and can remain ready while remote access is not. A held cloud reply does not hold local
 work/lifecycle admission; current runtime, generation, grant and connection are revalidated before
-applying it. Warm preparation uses configured or exact retained author data; public checkout does
+applying it. Each VM has at most one active enrollment attempt; a held response for one VM does
+not delay another VM's attempt or its retry after a confirmed failure. This does not replay commands
+or bypass current authority. Warm preparation uses configured or exact retained author data; public checkout does
 not depend on optional Git author lookup. Initial private checkout still requires current authority.
 Optional observed `remote.state` is `unconfigured`, `enrollment_unavailable`, `connecting`, `connected`,
 `unavailable` or `refused`; missing observation is unknown. Enrollment unavailability needs current
@@ -712,9 +729,9 @@ Do not erase approval/journals, create replacement state or kill arbitrary guard
 can be interrupted; mixed-edition rolling upgrade is unsupported. Live append in a matched edition
 does not make the upgrade itself uninterrupted.
 
-For the management-read contract, activate the matching controller producer through supported
-maintenance before switching the server reader. An unavailable management route does not fall back
-to full native inventory. Check the active release and every VM's recovery result; staging a bundle,
+For the management and addressed-resource read contracts, activate the matching controller producer
+through supported maintenance before switching the server reader. An unavailable management or
+addressed-resource route does not fall back to full native inventory. Check the active release and every VM's recovery result; staging a bundle,
 server health or completed maintenance alone does not confirm that each VM recovered.
 
 Archived cloud Local policy/control, relay, grants and operational rows remain diagnostic data;

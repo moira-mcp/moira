@@ -84,6 +84,154 @@ async function create(requestId = createWorkspaceRequestId()) {
 }
 
 describe("Local cloud facade routes to the authoritative owner", () => {
+  test("collecting a lost create and an older stop projects the real receipt while inventory and fresh observation are unavailable", async () => {
+    const requestId = createWorkspaceRequestId();
+    lostReply = true;
+    await expect(create(requestId)).rejects.toMatchObject({
+      code: "CODESPACE_LOCAL_CREATION_UNKNOWN",
+    });
+    const retained = await devices.getOperation("owner", deviceId, requestId);
+    const local = {
+      ...createLocalCodespaceServices({ sqlite: db, controller: owner!.client }),
+      resource,
+      provider: "local-sandboxes" as const,
+      guidance: () => ({
+        provider: "local-sandboxes",
+        situation: "ready" as const,
+        instruction: null,
+        links: [],
+      }),
+    };
+    const semantic = createWorkspaceSemanticServices({
+      providers: [local],
+      select: () => local,
+      devices,
+      workspace: owner!.client,
+      controller: owner!.client,
+      repositories: {} as never,
+      repositoryCreation: {} as never,
+    });
+    const operation = (id: string) =>
+      encodeReference("operation", {
+        owner: {
+          kind: "controller",
+          deviceId,
+          connectionId: devices.getDeviceIdentity("owner", deviceId).connectionId,
+        },
+        requestId: id,
+        kind: "lifecycle",
+      });
+    const snapshot = owner!.manager.snapshot.bind(owner!.manager);
+    let release!: () => void, entered!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    owner!.manager.snapshot = async (...args) => {
+      if (args[0] === undefined) {
+        entered();
+        await held;
+      } else throw new LocalRefusal("LOCAL_RUNTIME_UNAVAILABLE", "Controlled exact read failure");
+      return snapshot(...args);
+    };
+    const inventory = resource.listResources("owner");
+    await started;
+    try {
+      const collected = await semantic.invoke("owner", "operation_get", {
+        reference: operation(requestId),
+      });
+      expect(collected).toMatchObject({
+        operation: operation(requestId),
+        state: "completed",
+        outcome: {
+          ok: true,
+          result: {
+            workspace: expect.any(String),
+            state: "usable",
+            observed_at: retained.outcome?.ok
+              ? (retained.outcome.result as { observedAt: number }).observedAt
+              : null,
+          },
+        },
+      });
+      expect(await devices.getOperation("owner", deviceId, requestId)).toEqual(retained);
+      await expect(resource.getCodespace("owner", requestId.slice(4))).rejects.toBeDefined();
+      owner!.manager.snapshot = snapshot;
+      const stopId = createWorkspaceRequestId();
+      await resource.stopCodespace("owner", requestId.slice(4), stopId, 1);
+      const stopReceipt = await devices.getOperation("owner", deviceId, stopId);
+      await resource.startCodespace("owner", requestId.slice(4), createWorkspaceRequestId(), 2);
+      owner!.manager.snapshot = async () => {
+        throw new Error("No observation while collecting history");
+      };
+      const stopped = await semantic.invoke("owner", "operation_get", {
+        reference: operation(stopId),
+      });
+      expect(stopped).toMatchObject({
+        state: "completed",
+        outcome: {
+          ok: true,
+          result: {
+            state: "stopped",
+            workspace: expect.any(String),
+            observed_at: stopReceipt.outcome?.ok
+              ? (stopReceipt.outcome.result as { observedAt: number }).observedAt
+              : null,
+          },
+        },
+      });
+      const result = (stopped as { outcome: { result: { workspace: string } } }).outcome.result;
+      expect(decodeReference(result.workspace, "workspace").generation).toBe(2);
+      expect(await devices.getOperation("owner", deviceId, stopId)).toEqual(stopReceipt);
+      expect(await owner!.records.list()).toHaveLength(2);
+      owner!.manager.snapshot = snapshot;
+      await resource.deleteCodespace("owner", requestId.slice(4), 3, {
+        requestId: createWorkspaceRequestId(),
+        ownerConfirmed: true,
+      });
+      expect(
+        await semantic.invoke("owner", "operation_get", { reference: operation(stopId) }),
+      ).toMatchObject({
+        state: "completed",
+        outcome: { ok: true, result: null },
+        observation_error: { code: "CODESPACE_AUTHORIZATION_REQUIRED" },
+      });
+      expect(await devices.getOperation("owner", deviceId, stopId)).toEqual(stopReceipt);
+    } finally {
+      owner!.manager.snapshot = snapshot;
+      release();
+      await inventory;
+    }
+  });
+  test("a malformed device projection does not discard a healthy peer or hide account refusal", async () => {
+    const badDevice = randomUUID(),
+      pair = devices.beginEnrollment("owner");
+    devices.approveLocalEnrollment({
+      pairingId: pair.pairingId,
+      pairingToken: pair.pairingToken,
+      credential: randomBytes(32).toString("base64url"),
+      deviceId: badDevice,
+      label: "Malformed peer",
+    });
+    await devices.confirmEnrollment("owner", pair.pairingId, 2);
+    const original = owner!.client.json;
+    owner!.client.json = async (...args) => (args[1] === badDevice ? {} : original(...args));
+    const listed = await devices.listOwned("owner");
+    expect(listed.devices.find((device) => device.deviceId === deviceId)?.owner.state).toBe(
+      "available",
+    );
+    expect(listed.devices.find((device) => device.deviceId === badDevice)?.owner).toEqual({
+      state: "unavailable",
+      code: "LOCAL_PROTOCOL_INVALID",
+    });
+    expect(await resource.listRepositories("owner")).toEqual([
+      { id: target, fullName: owner!.policy.repositories[0].fullName, private: false },
+    ]);
+    db.prepare("UPDATE user SET approvedAt=NULL WHERE id='owner'").run();
+    await expect(devices.listOwned("owner")).rejects.toMatchObject({ code: "LOCAL_UNAUTHORIZED" });
+  });
   test("pending native inventory cannot block management or exact Git authority in the same request", async () => {
     const created = await create(),
       observation = devices.createObservation("owner"),
@@ -96,13 +244,28 @@ describe("Local cloud facade routes to the authoritative owner", () => {
       release = resolve;
     });
     owner!.manager.snapshot = async (...args) => {
-      entered();
-      await held;
+      if (args[0] === undefined) {
+        entered();
+        await held;
+      }
       return snapshot(...args);
     };
     const native = observation.localSnapshot(deviceId);
     await started;
     try {
+      expect(await resource.getCodespace("owner", created.codespace_id)).toMatchObject({
+        state: "usable",
+        generation: created.generation,
+      });
+      const second = await create();
+      expect(second.state).toBe("usable");
+      const stopped = await resource.stopCodespace(
+        "owner",
+        second.codespace_id,
+        createWorkspaceRequestId(),
+        second.generation,
+      );
+      expect(stopped).toMatchObject({ state: "stopped", generation: second.generation + 1 });
       const metadata = await observation.snapshot(deviceId);
       expect(metadata.local).not.toHaveProperty("resources");
       expect(metadata.local).not.toHaveProperty("resourceObservation");
@@ -245,6 +408,11 @@ describe("Local cloud facade routes to the authoritative owner", () => {
     await expect(observation.localSnapshot(deviceId)).rejects.toMatchObject({
       code: "LOCAL_UNAUTHORIZED",
     });
+    expect((await observation.listOwned()).devices[0].owner).toMatchObject({
+      state: "unavailable",
+      code: "LOCAL_UNAUTHORIZED",
+    });
+    db.prepare("UPDATE user SET approvedAt=NULL WHERE id='owner'").run();
     await expect(observation.listOwned()).rejects.toMatchObject({ code: "LOCAL_UNAUTHORIZED" });
   });
   test("actionable setup, unknown diagnostics and proven retirement stay separate without changing original records", async () => {

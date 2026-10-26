@@ -32,7 +32,7 @@ beforeAll(async () => {
 });
 
 describe("codespace management on a default-disabled installation", () => {
-  test("lists a disabled readiness decision with no codespaces and no secrets", async () => {
+  test("reads disabled targets separately from empty inventory without exposing secrets", async () => {
     const response = await fetch(
       `${baseUrl}/api/integrations/github/codespaces?provider=github-codespaces`,
       {
@@ -41,7 +41,16 @@ describe("codespace management on a default-disabled installation", () => {
     );
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.data).toMatchObject({
+    expect(body.data).toMatchObject({ codespaces: [], has_diagnostics: false });
+    expect(body.data).not.toHaveProperty("readiness");
+    expect(body.data).not.toHaveProperty("repositories");
+    const targets = await fetch(
+      `${baseUrl}/api/integrations/github/codespaces/targets?provider=github-codespaces`,
+      { headers: { Cookie: userCookie } },
+    );
+    expect(targets.status).toBe(200);
+    const targetBody = await targets.json();
+    expect(targetBody.data).toMatchObject({
       readiness: {
         state: "disabled",
         reason: null,
@@ -49,9 +58,8 @@ describe("codespace management on a default-disabled installation", () => {
       },
       connection: { state: "disabled" },
       repositories: [],
-      codespaces: [],
-      has_diagnostics: false,
     });
+    expect(targetBody.data).not.toHaveProperty("codespaces");
     expect(body.data).not.toHaveProperty("provider_billing");
     const billing = await fetch(`${baseUrl}/api/integrations/github/codespaces/billing`, {
       headers: { Cookie: userCookie },
@@ -60,6 +68,9 @@ describe("codespace management on a default-disabled installation", () => {
     expect((await billing.json()).data).toBe("unavailable");
     expect(body.data).not.toHaveProperty("limits");
     expect(JSON.stringify(body)).not.toMatch(/accessToken|refreshToken|clientSecret|vaultKey/);
+    expect(JSON.stringify(targetBody)).not.toMatch(
+      /accessToken|refreshToken|clientSecret|vaultKey/,
+    );
   });
 
   test("refuses an unowned controller and rejects legacy mutation inputs", async () => {
@@ -105,6 +116,10 @@ describe("codespace management on a default-disabled installation", () => {
 
     const unauthenticated = await fetch(`${baseUrl}/api/integrations/github/codespaces`);
     expect(unauthenticated.status).toBe(401);
+    const unauthenticatedTargets = await fetch(
+      `${baseUrl}/api/integrations/github/codespaces/targets?provider=github-codespaces`,
+    );
+    expect(unauthenticatedTargets.status).toBe(401);
   });
 
   test("exposes the same readiness through backend health and admin system status", async () => {

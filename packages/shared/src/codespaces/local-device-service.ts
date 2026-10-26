@@ -116,7 +116,7 @@ export type LocalControllerSnapshot = Extract<
 export interface LocalDeviceObservation {
   readonly userId: string;
   snapshot(deviceId: string): Promise<ControllerManagementSnapshot>;
-  localSnapshot(deviceId: string): Promise<LocalControllerSnapshot>;
+  localSnapshot(deviceId: string, resourceId?: string): Promise<LocalControllerSnapshot>;
   listOwned(): Promise<ReturnType<LocalDeviceService["listRegistered"]>>;
 }
 type ActiveDevice = LocalDeviceView & {
@@ -178,21 +178,53 @@ export class LocalDeviceService {
         // A previously validated response is not authority for a new registration.
         return this.validateManagementSnapshot(userId, deviceId, await pending);
       },
-      localSnapshot: async (deviceId) => {
-        let pending = nativeSnapshots.get(deviceId);
+      localSnapshot: async (deviceId, resourceId) => {
+        const key = `${deviceId}/${resourceId ?? "*"}`;
+        let pending = nativeSnapshots.get(key);
         if (!pending) {
-          pending = this.nativeSnapshot(userId, deviceId);
-          nativeSnapshots.set(deviceId, pending);
+          pending = this.nativeSnapshot(userId, deviceId, resourceId);
+          nativeSnapshots.set(key, pending);
         }
-        return this.projectLocalSnapshot(this.validateSnapshot(userId, deviceId, await pending));
+        const snapshot = this.validateSnapshot(userId, deviceId, await pending);
+        if (resourceId !== undefined)
+          this.validateScopedSnapshot(userId, deviceId, resourceId, snapshot);
+        return this.projectLocalSnapshot(snapshot);
       },
       listOwned: async () => {
         const registered = this.listRegistered(userId);
+        const devices = await Promise.all(
+          registered.devices.map(async (device) => {
+            try {
+              return await this.project(device, observation);
+            } catch (error) {
+              if (
+                !(error instanceof z.ZodError) &&
+                !(error instanceof LocalDeviceError && error.code === "LOCAL_UNAUTHORIZED")
+              )
+                throw error;
+              // An account-wide refusal stays a refusal. Only this device's bad or
+              // retired observation may become an isolated diagnostic.
+              const current = this.listRegistered(userId).devices.find(
+                (row) => row.deviceId === device.deviceId,
+              );
+              if (!current) return undefined;
+              return {
+                ...current,
+                owner: {
+                  state: "unavailable" as const,
+                  code:
+                    error instanceof z.ZodError
+                      ? ("LOCAL_PROTOCOL_INVALID" as const)
+                      : ("LOCAL_UNAUTHORIZED" as const),
+                },
+              };
+            }
+          }),
+        );
+        this.repository.assertAdmitted(userId);
         return {
           ...registered,
-          devices: await Promise.all(
-            registered.devices.map((device) => this.project(device, observation)),
-          ),
+          devices: devices.filter((device): device is LocalDeviceView => device !== undefined),
         };
       },
     };
@@ -259,12 +291,41 @@ export class LocalDeviceService {
       await this.readSnapshot(userId, deviceId, "/v1/controller/management"),
     );
   }
-  private async nativeSnapshot(userId: string, deviceId: string): Promise<ControllerSnapshot> {
-    return this.validateSnapshot(
+  private async nativeSnapshot(
+    userId: string,
+    deviceId: string,
+    resourceId?: string,
+  ): Promise<ControllerSnapshot> {
+    const binding = resourceId === undefined ? undefined : this.getBinding(userId, resourceId);
+    if (resourceId !== undefined && (!binding || binding.deviceId !== deviceId))
+      throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Resource routing authority changed.");
+    const snapshot = this.validateSnapshot(
       userId,
       deviceId,
-      await this.readSnapshot(userId, deviceId, "/v1/controller"),
+      await this.readSnapshot(
+        userId,
+        deviceId,
+        resourceId === undefined
+          ? "/v1/controller"
+          : "/v1/controller/resources/" + id.parse(resourceId),
+      ),
     );
+    if (resourceId !== undefined) {
+      const current = this.getBinding(userId, resourceId);
+      const identity = this.getDeviceIdentity(userId, deviceId);
+      if (
+        !current ||
+        canonicalJson(current) !== canonicalJson(binding) ||
+        current.deviceGeneration !== identity.deviceGeneration ||
+        current.connectionId !== identity.connectionId
+      )
+        throw new LocalDeviceError(
+          "LOCAL_UNAUTHORIZED",
+          "Resource routing authority changed during observation.",
+        );
+      this.validateScopedSnapshot(userId, deviceId, resourceId, snapshot);
+    }
+    return snapshot;
   }
   private async readSnapshot(userId: string, deviceId: string, path: string) {
     const identity = this.getDeviceIdentity(userId, deviceId);
@@ -287,6 +348,38 @@ export class LocalDeviceService {
     const snapshot = snapshotSchema.parse(value);
     this.validateIdentity(userId, deviceId, snapshot);
     return snapshot;
+  }
+  private validateScopedSnapshot(
+    userId: string,
+    deviceId: string,
+    resourceId: string,
+    snapshot: ControllerSnapshot,
+  ) {
+    const current = this.getBinding(userId, resourceId);
+    if (
+      !current ||
+      current.deviceId !== deviceId ||
+      current.deviceGeneration !== snapshot.deviceGeneration ||
+      current.connectionId !== snapshot.connectionId
+    )
+      throw new LocalDeviceError(
+        "LOCAL_UNAUTHORIZED",
+        "Resource routing authority changed during observation.",
+      );
+    if (
+      snapshot.local.state !== "configured" ||
+      snapshot.local.resources.length > 1 ||
+      (snapshot.local.resources.length === 0 &&
+        !snapshot.local.pendingResourceOperations.some((row) => row.resourceId === resourceId)) ||
+      (snapshot.local.resources.length === 1 &&
+        (snapshot.local.resources[0].resourceId !== resourceId ||
+          snapshot.local.resources[0].repositoryId !== current.repositoryId)) ||
+      snapshot.local.pendingResourceOperations.some((row) => row.resourceId !== resourceId)
+    )
+      throw new LocalDeviceError(
+        "LOCAL_INVALID",
+        "The owner returned a different resource observation.",
+      );
   }
   private validateManagementSnapshot(userId: string, deviceId: string, value: unknown) {
     const snapshot = managementSnapshotSchema.parse(value);
@@ -313,8 +406,12 @@ export class LocalDeviceService {
         "Device authority changed during observation.",
       );
   }
-  async localSnapshot(userId: string, deviceId: string): Promise<LocalControllerSnapshot> {
-    return this.projectLocalSnapshot(await this.nativeSnapshot(userId, deviceId));
+  async localSnapshot(
+    userId: string,
+    deviceId: string,
+    resourceId?: string,
+  ): Promise<LocalControllerSnapshot> {
+    return this.projectLocalSnapshot(await this.nativeSnapshot(userId, deviceId, resourceId));
   }
   private projectLocalSnapshot(snapshot: ControllerSnapshot): LocalControllerSnapshot {
     if (snapshot.local.state !== "configured")

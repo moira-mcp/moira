@@ -100,6 +100,8 @@
     "needsAttention": "{{state}} · Needs attention",
     "requestAccepted": "Request accepted. Completion has not been confirmed yet.",
     "originalTitle": "Original operation result is not confirmed",
+    "originalCompletedTitle": "Original operation completed",
+    "originalCompletedHint": "The operation succeeded. Its workspace state is unavailable in this receipt. Keep this original result and check it again; do not submit the action again.",
     "findOriginalHint": "The first reply was lost. Find the original operation on the selected computer and choose it yourself. Searching does not submit the action again.",
     "findOriginal": "Find original operation",
     "collectOriginal": "Check original result",

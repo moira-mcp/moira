@@ -181,14 +181,19 @@ describe("website codespace management routes", () => {
           provider: "local-sandboxes",
           codespaces: [{ state: "usable" }],
           provider_errors: [],
-          repositories: [{ target: expect.any(String), controller }],
         });
         expect(response.body.data).not.toHaveProperty("providers");
         expect(response.body.data).not.toHaveProperty("provider_billing");
-        expect(decodeReference(response.body.data.repositories[0].target, "target").provider).toBe(
-          "local-sandboxes",
-        );
+        expect(response.body.data).not.toHaveProperty("repositories");
       }
+      const targets = await request(app)
+        .get(prefix + "/targets")
+        .query({ provider: "github-codespaces" });
+      expect(targets.status).toBe(200);
+      expect(decodeReference(targets.body.data.repositories[0].target, "target").provider).toBe(
+        "github-codespaces",
+      );
+      expect(targets.body.data).not.toHaveProperty("codespaces");
       expect(githubDone).toBe(false);
       expect(billingDone).toBe(false);
       expect(local.connection.refreshGrants).not.toHaveBeenCalled();
@@ -259,7 +264,9 @@ describe("website codespace management routes", () => {
     });
     const local = services({ provider: "local-sandboxes", resource: null });
     const app = appWith(services({ providers: [failed, local] }));
-    const failure = await request(app).get(prefix).query({ provider: "github-codespaces" });
+    const failure = await request(app)
+      .get(prefix + "/targets")
+      .query({ provider: "github-codespaces" });
     expect(failure.status).toBe(409);
     expect(failure.body.error.code).toBe("CODESPACE_AUTHORIZATION_REQUIRED");
     expect(failure.text).not.toContain("private credential diagnostic");
@@ -281,7 +288,19 @@ describe("website codespace management routes", () => {
       .query({ provider: "github-codespaces" });
     expect(response.status).toBe(200);
     expect(response.body.data.codespaces).toHaveLength(1);
-    expect(response.body.data.provider_errors).toEqual([
+    expect(response.body.data.provider_errors).toEqual([]);
+    const targets = await request(
+      appWith(
+        services({
+          controllers: async () => {
+            throw new Error("private controller diagnostic");
+          },
+        }),
+      ),
+    )
+      .get(prefix + "/targets")
+      .query({ provider: "github-codespaces" });
+    expect(targets.body.data.provider_errors).toEqual([
       { provider: "github-codespaces", error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" } },
     ]);
     expect(response.text).not.toContain("private controller diagnostic");
@@ -323,10 +342,6 @@ describe("website codespace management routes", () => {
     expect(response.status).toBe(200);
     expect(response.headers["cache-control"]).toBe("no-store");
     expect(response.body.data).toMatchObject({
-      readiness: { state: "ready" },
-      connection: { state: "connected" },
-      repositories: [{ repository_id: "42", name: "owner/repository", private: true }],
-      repositories_stale: false,
       codespaces: [{ codespace_id: CODESPACE_ID, state: "usable" }],
     });
     expect(response.body.data.codespaces[0]).not.toHaveProperty("generation");
@@ -376,10 +391,13 @@ describe("website codespace management routes", () => {
       },
     });
     const response = await request(appWith(disabled))
-      .get(prefix)
+      .get(prefix + "/targets")
       .query({ provider: "github-codespaces" });
     expect(response.status).toBe(200);
-    expect(response.body.data).toMatchObject({ readiness: { state: "disabled" }, codespaces: [] });
+    expect(response.body.data).toMatchObject({
+      readiness: { state: "disabled" },
+      repositories: [],
+    });
   });
   test("stored grant fallback remains explicit and avoids absence reconciliation", async () => {
     const base = services();
@@ -390,13 +408,11 @@ describe("website codespace management routes", () => {
       },
     });
     const response = await request(appWith(dependencies))
-      .post(`${prefix}/refresh`)
+      .post(`${prefix}/targets/refresh`)
       .send({ provider: "github-codespaces" });
     expect(response.status).toBe(200);
     expect(response.body.data).toMatchObject({
       repositories_stale: true,
-      resources_stale: true,
-      codespaces: [{ codespace_id: CODESPACE_ID }],
     });
     expect(dependencies.semantic.invoke).not.toHaveBeenCalled();
   });
@@ -424,7 +440,7 @@ describe("website codespace management routes", () => {
       .post(`${prefix}/refresh`)
       .send({ provider: "github-codespaces" });
     expect(response.body.data).toMatchObject({ resources_stale: false, codespaces: [] });
-    expect(dependencies.connection.refreshGrants).toHaveBeenCalledWith("user-a", { force: true });
+    expect(dependencies.connection.refreshGrants).not.toHaveBeenCalled();
     expect(dependencies.resource!.listResources).toHaveBeenCalledTimes(2);
     expect(dependencies.semantic.invoke).not.toHaveBeenCalled();
   });

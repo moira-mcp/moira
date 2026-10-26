@@ -258,12 +258,13 @@ export class LocalController {
       );
     return false;
   }
-  async snapshot(completingRequestId?: string) {
+  async snapshot(completingRequestId?: string, resourceId?: string) {
     const metadata = await this.managementSnapshot(completingRequestId);
     if (metadata.local.state !== "configured") return { ...metadata, local: metadata.local };
     return {
       ...metadata,
-      local: { ...metadata.local, ...(await this.localResources()) },
+      local: { ...metadata.local, ...(await this.localResources(resourceId)) },
+      observedAt: Date.now(),
     };
   }
   /** Current control evidence never waits for physical runtime inventory. */
@@ -1492,14 +1493,29 @@ export class LocalController {
       );
     return resource;
   }
-  private async localResources() {
+  private async localResources(resourceId?: string) {
     const policy = await this.manager.records.policy();
+    const bindings = (await this.state.bindings(this.identity)).filter(
+      (binding) => resourceId === undefined || binding.resourceId === resourceId,
+    );
+    const pendingResources = await this.state.pendingResources(this.identity);
+    if (resourceId !== undefined && bindings.length !== 1 && !pendingResources.has(resourceId))
+      throw new LocalRefusal(
+        "LOCAL_IDENTITY_CHANGED",
+        "The selected resource has no owner binding.",
+      );
+    const selected = bindings[0];
     let snapshot: Awaited<ReturnType<LocalManager["snapshot"]>>;
     let resourceObservation: { state: "available" | "unavailable"; code?: string } = {
       state: "available",
     };
     try {
-      snapshot = await this.manager.snapshot();
+      snapshot =
+        resourceId !== undefined && !selected?.localSpaceId
+          ? { ...publicPolicy(policy), spaces: [] }
+          : await this.manager.snapshot(
+              resourceId === undefined ? undefined : selected.localSpaceId!,
+            );
     } catch (error) {
       snapshot = { ...publicPolicy(policy), spaces: [] };
       resourceObservation = {
@@ -1507,8 +1523,16 @@ export class LocalController {
         code: error instanceof LocalRefusal ? error.code : "LOCAL_RUNTIME_UNAVAILABLE",
       };
     }
-    const pendingResources = await this.state.pendingResources(this.identity);
-    const resources = (await this.state.bindings(this.identity)).map((binding) => ({
+    if (
+      resourceId !== undefined &&
+      canonicalJson((await this.state.binding(resourceId, this.identity)) ?? null) !==
+        canonicalJson(selected ?? null)
+    )
+      throw new LocalRefusal(
+        "LOCAL_GENERATION_CONFLICT",
+        "The selected resource changed during observation.",
+      );
+    const resources = bindings.map((binding) => ({
       resourceId: binding.resourceId,
       resourceGeneration: binding.resourceGeneration,
       routeGeneration: binding.routeGeneration ?? binding.resourceGeneration,
@@ -1520,10 +1544,9 @@ export class LocalController {
     }));
     return {
       resources,
-      pendingResourceOperations: [...pendingResources].map(([resourceId, requestIds]) => ({
-        resourceId,
-        requestIds,
-      })),
+      pendingResourceOperations: [...pendingResources]
+        .filter(([id]) => resourceId === undefined || id === resourceId)
+        .map(([resourceId, requestIds]) => ({ resourceId, requestIds })),
       resourceObservation,
     };
   }
@@ -1966,6 +1989,7 @@ export class LocalController {
     return {
       resourceId,
       resourceGeneration: binding.resourceGeneration,
+      observedAt: Date.now(),
       creation: { state: "manifest", spaceId: binding.localSpaceId },
       ...snapshot,
     };
@@ -2030,6 +2054,14 @@ export async function startLocalController(controller: LocalController) {
         result = await controller.snapshot();
       else if (request.method === "GET" && path === "/v1/controller/management")
         result = await controller.managementSnapshot();
+      else if (
+        request.method === "GET" &&
+        /^\/v1\/controller\/resources\/[a-f0-9-]{36}$/.test(path)
+      )
+        result = await controller.snapshot(
+          undefined,
+          z.string().uuid().parse(path.split("/").at(-1)),
+        );
       else if (request.method === "GET" && /^\/v1\/publications\/[A-Za-z0-9_-]{43}$/.test(path)) {
         await (
           await controller.communication()

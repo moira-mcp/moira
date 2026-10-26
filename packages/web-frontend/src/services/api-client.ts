@@ -212,6 +212,8 @@ import {
   AdminSystemStatusResponse,
   NodeTypeCatalog,
   CodespaceManagementView,
+  CodespaceTargetsView,
+  ManagedWorkspaceView,
   WorkspaceOperationView,
   WorkspaceDiscoveryProvider,
   WorkspaceDiscoveryView,
@@ -1057,6 +1059,24 @@ export class MoiraApiClient {
     return response.data.data!;
   }
 
+  async getCodespaceTargets(provider: WorkspaceDiscoveryProvider): Promise<CodespaceTargetsView> {
+    const response = await this.client.get<ApiResponse<CodespaceTargetsView>>(
+      "/integrations/github/codespaces/targets",
+      { params: { provider } },
+    );
+    return response.data.data!;
+  }
+
+  async refreshCodespaceTargets(
+    provider: WorkspaceDiscoveryProvider,
+  ): Promise<CodespaceTargetsView> {
+    const response = await this.client.post<ApiResponse<CodespaceTargetsView>>(
+      "/integrations/github/codespaces/targets/refresh",
+      { provider },
+    );
+    return response.data.data!;
+  }
+
   async getCodespaces(
     provider: WorkspaceDiscoveryProvider,
     view: WorkspaceDiscoveryView = "actionable",
@@ -1100,6 +1120,10 @@ export class MoiraApiClient {
     devcontainer_path?: string;
   }): Promise<WorkspaceOperationView> {
     return this.workspacePurpose("workspace_create", input);
+  }
+
+  observeWorkspace(workspace: string): Promise<ManagedWorkspaceView> {
+    return this.workspacePurpose("workspace_observe", { workspace });
   }
 
   changeWorkspace(

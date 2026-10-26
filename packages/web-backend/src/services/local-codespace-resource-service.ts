@@ -7,6 +7,7 @@ import {
   LocalDeviceError,
   LocalResourceRepository,
   controllerRequestIdSchema,
+  localResourceSnapshotSchema,
   localRepositoryTargetId,
   parseLocalRepositoryTargetId,
   codespaceObservationErrorCode,
@@ -22,6 +23,7 @@ import {
   type ControllerResourceRegistration,
 } from "@mcp-moira/shared";
 import { LocalCodespaceProvider, localCodespaceCredential } from "./local-codespace-provider.js";
+import { CodespaceEffectObservationError } from "./codespace-effect-observation-error.js";
 
 /** A Local resource is an authority/route record; the device owns its lifecycle and current state. */
 export class LocalCodespaceResourceService {
@@ -124,15 +126,25 @@ export class LocalCodespaceResourceService {
   async getCodespace(userId: string, resourceId: string): Promise<CodespaceSummaryView> {
     return this.observeCodespace(userId, resourceId);
   }
+  /** A retained owner result is historical evidence, never a new native observation. */
+  async projectRetainedSnapshot(userId: string, value: unknown): Promise<CodespaceSummaryView> {
+    try {
+      const { resourceId } = z.object({ resourceId: z.string().uuid() }).parse(value);
+      return await this.observeCodespace(userId, resourceId, undefined, value);
+    } catch (error) {
+      throw new CodespaceEffectObservationError(error);
+    }
+  }
   private async observeCodespace(
     userId: string,
     resourceId: string,
     observation?: LocalDeviceObservation,
+    receipt?: unknown,
   ): Promise<CodespaceSummaryView> {
     const resource = this.repository.getOwned(userId, resourceId);
     if (!resource)
       throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Local resource was not found.");
-    if (resource.retiredAt !== null)
+    if (resource.retiredAt !== null && receipt === undefined)
       return this.summary(resource, {
         state: "deleted",
         desired_state: "deleted",
@@ -147,18 +159,38 @@ export class LocalCodespaceResourceService {
         "Local resource binding is missing.",
       );
     try {
-      const snapshot = observation
-        ? await observation.localSnapshot(binding.deviceId)
-        : await this.devices.localSnapshot(userId, binding.deviceId);
-      const ownedResource = snapshot.resources.find((entry) => entry.resourceId === resourceId);
+      const captured =
+        receipt === undefined
+          ? undefined
+          : localResourceSnapshotSchema
+              .extend({
+                resourceId: z.literal(resourceId),
+                resourceGeneration: z.number().int().positive().safe(),
+                observedAt: z.number().int().nonnegative().optional(),
+              })
+              .parse(receipt);
+      const snapshot = captured
+        ? undefined
+        : observation
+          ? await observation.localSnapshot(binding.deviceId)
+          : await this.devices.localSnapshot(userId, binding.deviceId, resourceId);
+      const ownedResource = captured
+        ? {
+            resourceGeneration: captured.resourceGeneration,
+            space: captured.spaces.find(
+              (space) =>
+                space.id ===
+                (captured.creation.state === "manifest" ? captured.creation.spaceId : undefined),
+            ),
+          }
+        : snapshot!.resources.find((entry) => entry.resourceId === resourceId);
+      const observedAt = captured ? (captured.observedAt ?? null) : snapshot!.observedAt;
       const pendingRequestIds =
-        snapshot.pendingResourceOperations.find((entry) => entry.resourceId === resourceId)
+        snapshot?.pendingResourceOperations.find((entry) => entry.resourceId === resourceId)
           ?.requestIds ?? [];
-      const actual = await this.provider.getExact(
-        localCodespaceCredential(userId),
-        resourceId,
-        snapshot,
-      );
+      const actual = captured
+        ? await this.provider.fromSnapshot(localCodespaceCredential(userId), resourceId, captured)
+        : await this.provider.getExact(localCodespaceCredential(userId), resourceId, snapshot);
       const unavailable = () => {
         const error = new CodespaceResourceError(
           pendingRequestIds.length
@@ -194,7 +226,7 @@ export class LocalCodespaceResourceService {
           state: "ambiguous",
           observed_state: "unknown",
           lifecycle_error: "CODESPACE_LOCAL_CREATION_UNKNOWN",
-          updated_at: snapshot.observedAt,
+          updated_at: observedAt ?? resource.createdAt,
         });
       const state =
         actual.state === "available"
@@ -226,8 +258,8 @@ export class LocalCodespaceResourceService {
               ? "stopped"
               : "unknown",
         current_ref: actual.ref,
-        observed_at: snapshot.observedAt,
-        updated_at: snapshot.observedAt,
+        observed_at: observedAt,
+        updated_at: observedAt ?? resource.createdAt,
         lifecycle_error: actual.stateError ?? null,
         ...(actual.remote ? { remote: actual.remote } : {}),
         ...(actual.setupFailure ? { setup_failure: actual.setupFailure } : {}),
@@ -271,8 +303,10 @@ export class LocalCodespaceResourceService {
       try {
         const operation = await this.devices.getOperation(userId, device.deviceId, operationId);
         if (operation.state === "completed") {
-          this.devices.resourceOperationResult(operation);
-          return this.getCodespace(userId, resourceId);
+          return this.projectRetainedSnapshot(
+            userId,
+            this.devices.resourceOperationResult(operation),
+          );
         }
         if (operation.state !== "absent")
           throw new LocalDeviceError(
@@ -294,15 +328,20 @@ export class LocalCodespaceResourceService {
       ref: requestedRef,
     });
     try {
-      await this.devices.executeResourceLifecycle(userId, device.deviceId, resourceId, {
-        requestId: operationId,
-        expectedGeneration: 1,
-        action: "create",
-        repositoryId: repository.id,
-        ref: requestedRef,
-        operationMarker,
-      });
-      return await this.getCodespace(userId, resourceId);
+      const result = await this.devices.executeResourceLifecycle(
+        userId,
+        device.deviceId,
+        resourceId,
+        {
+          requestId: operationId,
+          expectedGeneration: 1,
+          action: "create",
+          repositoryId: repository.id,
+          ref: requestedRef,
+          operationMarker,
+        },
+      );
+      return await this.projectRetainedSnapshot(userId, result);
     } catch (error) {
       this.failure(error, { requestId: operationId, deviceId: device.deviceId, resourceId });
     }
@@ -471,7 +510,10 @@ export class LocalCodespaceResourceService {
           })
           .immediate();
       }
-      const observed = await this.getCodespace(userId, resourceId);
+      const observed =
+        action === "delete"
+          ? await this.getCodespace(userId, resourceId)
+          : await this.projectRetainedSnapshot(userId, result);
       return deletedGeneration ? { ...observed, generation: deletedGeneration } : observed;
     } catch (error) {
       this.failure(error, { requestId: operationId, deviceId: binding.deviceId, resourceId });
