@@ -16,6 +16,13 @@ Do not regenerate encryption keys as a troubleshooting step. Settings ciphertext
 
 The image entrypoint clears stale initialization sentinels before Supervisor can start any waiter. Supervisor then runs the self-host startup guard around secret bootstrap, database migrations and bundled-catalog reconciliation. MCP, backend and nginx wait for initialization; an old success marker cannot admit them after a container restart. The child initializer cannot publish success independently of the guard.
 
+Database initialization converts existing workflow-history text into complete compressed payloads,
+preserving revision identities, authors, timestamps and recorded sizes. The conversion is atomic
+and safe to repeat. Invalid historical JSON fails and rolls back that conversion instead of
+discarding history; it does not undo previously completed schema migrations. Use the startup
+recovery boundary below rather than deleting the failing history or running an older writer
+directly against the converted database.
+
 For an existing self-host database, the guard takes an integrity-checked SQLite online snapshot together with the prompt manifest (including its explicit absence) under `<dirname(DB_PATH)>/.moira-startup-backups/`. The `current`, `previous-1` and `previous-2` slots rotate only after preparing the new snapshot. A persistent pending marker makes an interrupted initialization restore the protected state before taking the next backup. Success transitions the marker to committed before publishing `/tmp/init-success`; initialization failure attempts restoration before publishing `/tmp/init-failed`. If restoration fails, services remain blocked and recovery material stays available for inspection. These startup snapshots do not replace an operator's protected backups or preserve every external effect.
 
 A first start has no database to back up. Its separate marker preserves the original prompt-manifest state without inventing an empty database backup; failure/interruption removes the incomplete database and restores that manifest state. Do not delete markers, touch success sentinels or bypass the guard to make services start. Inspect `docker compose logs moira`, the reported cause and retained live/backup integrity before repairing configuration or selecting a previous image. Do not repeatedly restart an unchanged failing image or use reconciliation commands for arbitrary migration/storage failures. Only a confirmed bundled-workflow conflict follows the [bundled-catalog recovery procedure](../reference/bundled-catalog.md).

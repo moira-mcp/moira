@@ -14,7 +14,8 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { entityRevision } from "../schema.js";
+import { entityRevision, revisionPayload } from "../schema.js";
+import { readRevisionPayload, storeWorkflowRevisionPayload } from "../revision-payload.js";
 import { createLogger } from "../../logging/logger.js";
 import { compareRevisionContent, type RevisionDiffPart } from "../../services/revision-diff.js";
 import type * as schema from "../schema.js";
@@ -89,7 +90,12 @@ export class RevisionRepository {
 
   private appendContent(options: AppendRevisionOptions): Revision {
     const { entityType, entityId, content, authorId = null, maxRevisions } = options;
-    const size = Buffer.byteLength(content ?? "", "utf8");
+    const payload =
+      entityType === REVISION_ENTITY_TYPES.workflow && content !== null
+        ? storeWorkflowRevisionPayload(this.db, entityId, content)
+        : undefined;
+    const returnedContent = payload?.readable ?? content;
+    const size = payload?.size ?? Buffer.byteLength(content ?? "", "utf8");
     const createdAt = new Date();
     const revision = this.highestRevision({ entityType, entityId }) + 1;
 
@@ -100,7 +106,8 @@ export class RevisionRepository {
         entityType,
         entityId,
         revision,
-        content,
+        content: payload ? null : content,
+        payloadId: payload?.id,
         size,
         authorId,
         createdAt,
@@ -111,7 +118,7 @@ export class RevisionRepository {
       this.prune({ entityType, entityId }, maxRevisions);
     }
 
-    return { revision, content, size, authorId, createdAt: createdAt.getTime() };
+    return { revision, content: returnedContent, size, authorId, createdAt: createdAt.getTime() };
   }
 
   /** The newest revision, or null when the entity has no history. */
@@ -121,8 +128,9 @@ export class RevisionRepository {
 
   latestSync(target: RevisionTarget): Revision | null {
     const row = this.db
-      .select()
+      .select({ row: entityRevision, payload: revisionPayload })
       .from(entityRevision)
+      .leftJoin(revisionPayload, eq(entityRevision.payloadId, revisionPayload.id))
       .where(
         and(
           eq(entityRevision.entityType, target.entityType),
@@ -132,14 +140,15 @@ export class RevisionRepository {
       .orderBy(desc(entityRevision.revision))
       .limit(1)
       .get();
-    return row ? this.toRevision(row) : null;
+    return row ? this.toRevision(row.row, row.payload) : null;
   }
 
   /** One revision by number, or null when it is absent or already pruned. */
   async get(target: RevisionTarget, revision: number): Promise<Revision | null> {
     const [row] = await this.db
-      .select()
+      .select({ row: entityRevision, payload: revisionPayload })
       .from(entityRevision)
+      .leftJoin(revisionPayload, eq(entityRevision.payloadId, revisionPayload.id))
       .where(
         and(
           eq(entityRevision.entityType, target.entityType),
@@ -148,7 +157,7 @@ export class RevisionRepository {
         ),
       )
       .limit(1);
-    return row ? this.toRevision(row) : null;
+    return row ? this.toRevision(row.row, row.payload) : null;
   }
 
   /** The stored history, newest first, with a preview in place of the full content. */
@@ -161,11 +170,19 @@ export class RevisionRepository {
       .select({
         revision: entityRevision.revision,
         size: entityRevision.size,
-        prefix: revisionPreviewPrefix(entityRevision.content, previewChars),
+        prefix: revisionPreviewPrefix(
+          sql`CASE WHEN ${entityRevision.payloadId} IS NULL THEN ${entityRevision.content} ELSE ${revisionPayload.preview} END`,
+          previewChars,
+        ),
+        payloadId: entityRevision.payloadId,
+        storedPayloadId: revisionPayload.id,
+        payloadEntityType: revisionPayload.entityType,
+        payloadEntityId: revisionPayload.entityId,
         authorId: entityRevision.authorId,
         createdAt: entityRevision.createdAt,
       })
       .from(entityRevision)
+      .leftJoin(revisionPayload, eq(entityRevision.payloadId, revisionPayload.id))
       .where(
         and(
           eq(entityRevision.entityType, target.entityType),
@@ -174,13 +191,22 @@ export class RevisionRepository {
       )
       .orderBy(desc(entityRevision.revision));
 
-    return rows.map((row) => ({
-      revision: row.revision,
-      size: row.size,
-      preview: renderRevisionPreview(row.prefix, previewChars),
-      authorId: row.authorId ?? null,
-      createdAt: (row.createdAt as Date).getTime(),
-    }));
+    return rows.map((row) => {
+      if (
+        row.payloadId !== null &&
+        (row.storedPayloadId !== row.payloadId ||
+          row.payloadEntityType !== target.entityType ||
+          row.payloadEntityId !== target.entityId)
+      )
+        throw new Error("Revision payload is missing or corrupt");
+      return {
+        revision: row.revision,
+        size: row.size,
+        preview: renderRevisionPreview(row.prefix, previewChars),
+        authorId: row.authorId ?? null,
+        createdAt: (row.createdAt as Date).getTime(),
+      };
+    });
   }
 
   /**
@@ -216,7 +242,7 @@ export class RevisionRepository {
       .run();
   }
 
-  /** Total stored size of an entity's history, in bytes. */
+  /** Sum of logical revision content sizes; physical shared payload storage is separate. */
   async totalSize(target: RevisionTarget): Promise<number> {
     const [row] = await this.db
       .select({ total: sql<number>`coalesce(sum(${entityRevision.size}), 0)` })
@@ -278,10 +304,13 @@ export class RevisionRepository {
     });
   }
 
-  private toRevision(row: typeof entityRevision.$inferSelect): Revision {
+  private toRevision(
+    row: typeof entityRevision.$inferSelect,
+    payload: typeof revisionPayload.$inferSelect | null,
+  ): Revision {
     return {
       revision: row.revision,
-      content: row.content,
+      content: row.payloadId === null ? row.content : readRevisionPayload(payload, row.entityId),
       size: row.size,
       authorId: row.authorId ?? null,
       createdAt: (row.createdAt as Date).getTime(),

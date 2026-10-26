@@ -477,6 +477,13 @@
       "when": 1792198800000,
       "tag": "0066_artifact_file_size_override",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1792285200000,
+      "tag": "0067_revision_payload",
+      "breakpoints": true
     }
   ]
 }

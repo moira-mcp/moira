@@ -9,13 +9,12 @@ export function recordWorkflowRevision(
 ): number {
   const revisions = new RevisionRepository(db);
   const target = { entityType: REVISION_ENTITY_TYPES.workflow, entityId: options.id };
-  const snapshot = (content: string) => JSON.stringify(JSON.parse(content), null, 2);
   if (options.previousGraph !== undefined && !revisions.latestSync(target)) {
-    revisions.appendSync({ ...target, content: snapshot(options.previousGraph), authorId: null });
+    revisions.appendSync({ ...target, content: options.previousGraph, authorId: null });
   }
   return revisions.appendSync({
     ...target,
-    content: snapshot(options.graph),
+    content: options.graph,
     authorId: options.authorId ?? null,
   }).revision;
 }

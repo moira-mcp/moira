@@ -15,13 +15,14 @@ import { UserRepository } from "../../packages/shared/src/database/repositories/
 import { auth } from "../../packages/web-backend/src/auth.js";
 import { requireAuth } from "../../packages/web-backend/src/middleware/auth-middleware.js";
 import { requireAdmin } from "../../packages/web-backend/src/middleware/admin-middleware.js";
+import { apiLimiter } from "../../packages/web-backend/src/middleware/rate-limit-middleware.js";
 import { setupErrorMiddleware } from "../../packages/web-backend/src/middleware/error-middleware.js";
 import { adminRoutes } from "../../packages/web-backend/src/routes/admin.js";
 
 test("admin file-size override persists, omitted fields survive and reset returns effective inheritance", async () => {
   const app = express();
   app.use(express.json());
-  app.use("/api/admin", requireAuth, requireAdmin, adminRoutes);
+  app.use("/api/admin", apiLimiter, requireAuth, requireAdmin, adminRoutes);
   app.use(setupErrorMiddleware());
   const db = getDatabase();
   const registration = await auth.handler(

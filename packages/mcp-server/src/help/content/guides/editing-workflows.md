@@ -490,8 +490,14 @@ Three values describe different things:
 - `revision` in `manage history` identifies an immutable snapshot of the complete saved definition.
   Separate saves retain separate snapshots even when their semantic versions are equal.
 
-Only the workflow owner can read, compare or restore its history. Permission to use a shared or
-public current definition does not expose past private definitions. History records definition
+History compresses complete definitions and reuses identical content within a workflow. Each save
+still retains its own history number, author and time; storage reuse does not discard revisions.
+Reading or restoring a snapshot does not require replaying earlier changes, and JSON is returned
+in a readable format.
+
+Reading, comparing or restoring history requires editing authority: ownership or an explicit
+`edit` grant, directly or through a group. Public visibility or a `use` grant alone does not expose
+past private definitions. History records definition
 writes, including catalog synchronization and stored-schema upgrades. When a definition has no
 recorded history, its actual current content becomes the baseline before its next content write;
 earlier unrecorded saves cannot be recovered. CLI file backups are separate from server history.

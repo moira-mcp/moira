@@ -137,6 +137,16 @@ stores an opaque entity kind/ID, revision content and retention chosen by its en
 lists transfer bounded previews, comparison distinguishes a missing revision from equal content,
 and restoring appends a revision. Null content is distinct from an absent or pruned revision.
 
+Workflow history stores complete, independently gzip-compressed JSON payloads. Object keys use
+locale-independent ordinal ordering; array order remains significant. Equal canonical content
+shares one payload within the same workflow, while every save retains its own revision number,
+author and timestamp. Reads and comparisons return formatted JSON. Lists read a bounded stored
+preview without decompressing every payload. Deleting or pruning a revision removes its payload
+only after the last reference is gone; Notes, Playbooks and settings retain their text storage.
+The schema initializer atomically converts existing workflow history to this representation,
+preserving revision metadata. Conversion is idempotent; malformed content fails rather than
+discarding the original history.
+
 Workflow snapshots and graph writes share the owning synchronous transaction. Ordinary guarded
 mutations also keep the optimistic check and gate recomputation in that transaction. Catalog
 reconciliation and stored definition upgrades use the same history writer. A definition without history gains its actual

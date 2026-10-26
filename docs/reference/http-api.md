@@ -152,6 +152,11 @@ and `restoredFrom` is the selected history number. Separate writes remain separa
 when semantic versions repeat. A definition without recorded history acquires its actual baseline
 before its next content write; earlier unrecorded saves are unavailable.
 
+`size` is logical revision-content metadata, not the physical allocation of its compressed payload.
+Conversion of existing history retains its recorded sizes. Identical definitions can share stored
+content while keeping separate history numbers, authors and timestamps; reads return complete,
+formatted JSON.
+
 Malformed numbers/UUIDs are 400; absent snapshots or comparison pairs are 404, while comparing equal
 content succeeds with unchanged diff parts. An unreadable current workflow is 404; a readable one
 without editing authority is 403. A stale rollback is 409, with
