@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { watch as watchDirectory } from "node:fs";
@@ -15,7 +15,7 @@ import {
   unlink,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import { connect } from "node:net";
 import {
@@ -54,6 +54,7 @@ beforeEach(async () => {
   ]);
 });
 afterEach(async () => {
+  jest.restoreAllMocks();
   for (const child of children) {
     if (child.exitCode === null && child.signalCode === null) {
       const closed = once(child, "close");
@@ -66,10 +67,10 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-async function socketProcess(name: string, ignoresTerm = false) {
-  const socket = join(root, name);
+async function socketProcess(name: string, ignoresTerm = false, binary = executable) {
+  const socket = isAbsolute(name) ? name : join(root, name);
   const child = spawn(
-    executable,
+    binary,
     [
       "-e",
       `const n=require('node:net');${ignoresTerm ? "process.on('SIGTERM',()=>{});" : ""}n.createServer(c=>{c.on('error',()=>{});c.on('data',bytes=>c.write(bytes));}).listen(process.argv[1],()=>process.stdout.write('ready\\n'));`,
@@ -117,7 +118,7 @@ function nextOutput(child: ChildProcess): Promise<string> {
   });
 }
 
-async function vmProcess(foreign = false, containerId = "a".repeat(64)) {
+async function vmBundle() {
   const sdk = join(root, "Sbx.app", "Contents", "MacOS", "sbx");
   const worker = join(root, "Sbx.app", "Contents", "Helpers", "containerd-shim-nerdbox-v1");
   await mkdir(join(root, "Sbx.app", "Contents", "MacOS"), { recursive: true, mode: 0o700 });
@@ -132,7 +133,10 @@ async function vmProcess(foreign = false, containerId = "a".repeat(64)) {
     #include <stdio.h>
     #include <string.h>
     #include <unistd.h>
-    int main(int argc,char **argv){if(argc!=6)return 2;struct sockaddr_un address={.sun_family=AF_UNIX};if(strlen(argv[1])>=sizeof(address.sun_path))return 2;strcpy(address.sun_path,argv[1]);int fd=socket(AF_UNIX,SOCK_DGRAM,0);if(bind(fd,(struct sockaddr*)&address,sizeof(address)))return 2;puts("ready");fflush(stdout);for(;;)pause();}
+    #include <stdlib.h>
+    int main(int argc,char **argv){
+      if(argc==3){for(int i=0;i<atoi(argv[2]);i++){struct sockaddr_un a={.sun_family=AF_UNIX};int n=snprintf(a.sun_path,sizeof(a.sun_path),"%s/%012x-vm.sock",argv[1],i);if(n<0||(size_t)n>=sizeof(a.sun_path))return 2;int fd=socket(AF_UNIX,SOCK_DGRAM,0);if(fd<0||bind(fd,(struct sockaddr*)&a,sizeof(a)))return 2;close(fd);}return 0;}
+      if(argc!=6)return 2;struct sockaddr_un address={.sun_family=AF_UNIX};if(strlen(argv[1])>=sizeof(address.sun_path))return 2;strcpy(address.sun_path,argv[1]);int fd=socket(AF_UNIX,SOCK_DGRAM,0);if(bind(fd,(struct sockaddr*)&address,sizeof(address)))return 2;puts("ready");fflush(stdout);for(;;)pause();}
   `,
   );
   await execute(process.platform === "darwin" ? "/usr/bin/clang" : "/usr/bin/cc", [
@@ -140,7 +144,16 @@ async function vmProcess(foreign = false, containerId = "a".repeat(64)) {
     "-o",
     worker,
   ]);
-  const socket = join(root, "aaaaaaaaaaaa-vm.sock");
+  return { sdk, worker };
+}
+
+async function vmProcess(
+  foreign = false,
+  containerId = "a".repeat(64),
+  bundle?: Awaited<ReturnType<typeof vmBundle>>,
+  socket = join(root, "aaaaaaaaaaaa-vm.sock"),
+) {
+  const { sdk, worker } = bundle ?? (await vmBundle());
   const activeBinary = foreign ? join(root, "foreign-worker") : worker;
   if (foreign) await copyFile(worker, activeBinary);
   const child = spawn(activeBinary, [socket, "-namespace", "docker", "-id", containerId], {
@@ -165,6 +178,177 @@ async function roundTrip(socketPath: string) {
 }
 
 describe("credential-independent captured process shutdown", () => {
+  vmTest(
+    "repeated scans skip stale datagrams but discover replacements and retain unknown siblings",
+    async () => {
+      const bundle = await vmBundle();
+      const policy = localPolicy(root);
+      policy.runtime.binary = bundle.sdk;
+      policy.runtime.storageRoot = root;
+      const context = new SbxRuntime(policy);
+      await mkdir(context.home, { recursive: true, mode: 0o700 });
+      const directory = join(
+        context.home,
+        ".sbx",
+        `run_${context.environment.DOCKER_SANDBOXES_APP_NAME}`,
+      );
+      await mkdir(join(directory, "d"), { recursive: true, mode: 0o700 });
+      const daemon = await socketProcess(join(directory, "d", "sandboxd.sock"), false, bundle.sdk);
+      const docker = await socketProcess(join(directory, "d", "docker.sock"), false, bundle.sdk);
+      await execute(bundle.worker, [directory, "113"]);
+      const first = await vmProcess(
+        false,
+        "a".repeat(64),
+        bundle,
+        join(directory, "aaaaaaaaaaaa-vm.sock"),
+      );
+      const sibling = await vmProcess(
+        false,
+        "b".repeat(64),
+        bundle,
+        join(directory, "bbbbbbbbbbbb-vm.sock"),
+      );
+      const original = RuntimeControl.capture;
+      let captures = 0;
+      jest.spyOn(RuntimeControl, "capture").mockImplementation(async (identity) => {
+        if (identity.transport === "vm") captures++;
+        return original.call(RuntimeControl, identity);
+      });
+      const control = new DeviceRuntimeControl(policy);
+      try {
+        const started = performance.now();
+        await control.protect();
+        await control.protect();
+        console.info(
+          JSON.stringify({
+            nativeScanFixture: {
+              stale: 113,
+              scans: 2,
+              fullVmCaptures: captures,
+              elapsedMs: performance.now() - started,
+            },
+          }),
+        );
+        expect(control.holdsWorker("a".repeat(64))).toBe(true);
+        expect(control.holdsWorker("b".repeat(64))).toBe(true);
+        expect(control.hasUnindexedWorkers(new Set())).toBe(true);
+        const initialCaptures = captures;
+        const replacementSocket = join(directory, "000000000000-vm.sock");
+        await unlink(replacementSocket);
+        const replacement = await vmProcess(false, "c".repeat(64), bundle, replacementSocket);
+        await control.protect();
+        expect(control.holdsWorker("c".repeat(64))).toBe(true);
+        expect(control.holdsWorker("a".repeat(64))).toBe(true);
+        expect(control.holdsWorker("b".repeat(64))).toBe(true);
+        expect(control.hasUnindexedWorkers(new Set())).toBe(true);
+        expect(initialCaptures).toBe(2);
+        expect(captures).toBe(3);
+        const foreignSocket = join(directory, "000000000001-vm.sock");
+        await unlink(foreignSocket);
+        const foreign = await vmProcess(true, "d".repeat(64), bundle, foreignSocket);
+        await control.protect();
+        expect(captures).toBe(4);
+        expect(control.hasWorker("d".repeat(64))).toBe(false);
+        await control.release();
+        for (const peer of [daemon, docker, first, sibling, replacement, foreign]) {
+          expect(peer.child.exitCode).toBeNull();
+          expect(peer.child.signalCode).toBeNull();
+        }
+      } finally {
+        await control.release();
+      }
+    },
+  );
+
+  vmTest("shutdown refuses invalid SDK closure even when every VM endpoint is stale", async () => {
+    const bundle = await vmBundle();
+    const policy = localPolicy(root);
+    policy.runtime.binary = bundle.sdk;
+    policy.runtime.storageRoot = root;
+    const context = new SbxRuntime(policy);
+    await mkdir(context.home, { recursive: true, mode: 0o700 });
+    const directory = join(
+      context.home,
+      ".sbx",
+      `run_${context.environment.DOCKER_SANDBOXES_APP_NAME}`,
+    );
+    await mkdir(join(directory, "d"), { recursive: true, mode: 0o700 });
+    await socketProcess(join(directory, "d", "sandboxd.sock"), false, bundle.sdk);
+    await socketProcess(join(directory, "d", "docker.sock"), false, bundle.sdk);
+    await execute(bundle.worker, [directory, "1"]);
+    await chmod(bundle.worker, 0o777);
+    const control = new DeviceRuntimeControl(policy);
+    try {
+      await expect(control.captureForShutdown()).rejects.toMatchObject({
+        code: "LOCAL_CONTROL_UNOWNED",
+      });
+    } finally {
+      await control.release();
+    }
+  });
+
+  vmTest(
+    "a replacement during the scan and a late exact-CID coverage worker still require attestation",
+    async () => {
+      const bundle = await vmBundle();
+      const policy = localPolicy(root);
+      policy.runtime.binary = bundle.sdk;
+      policy.runtime.storageRoot = root;
+      const context = new SbxRuntime(policy);
+      await mkdir(context.home, { recursive: true, mode: 0o700 });
+      const directory = join(
+        context.home,
+        ".sbx",
+        `run_${context.environment.DOCKER_SANDBOXES_APP_NAME}`,
+      );
+      await mkdir(join(directory, "d"), { recursive: true, mode: 0o700 });
+      const daemonSocket = join(directory, "d", "sandboxd.sock");
+      await socketProcess(daemonSocket, false, bundle.sdk);
+      await socketProcess(join(directory, "d", "docker.sock"), false, bundle.sdk);
+      await execute(bundle.worker, [directory, "2"]);
+      await vmProcess(false, "b".repeat(64), bundle, join(directory, "bbbbbbbbbbbb-vm.sock"));
+      const firstId = "000000000000" + "a".repeat(52);
+      const lateId = "000000000001" + "c".repeat(52);
+      const original = RuntimeControl.capture;
+      const captured: string[] = [];
+      jest.spyOn(RuntimeControl, "capture").mockImplementation(async (identity) => {
+        if (identity.sockets[0] === daemonSocket) {
+          const socket = join(directory, "000000000000-vm.sock");
+          await unlink(socket);
+          await vmProcess(false, firstId, bundle, socket);
+        }
+        const control = await original.call(RuntimeControl, identity);
+        if (control.containerId) captured.push(control.containerId);
+        return control;
+      });
+      const control = new DeviceRuntimeControl(policy);
+      const assertDockerHeld = control.assertDockerHeld.bind(control);
+      let late = false;
+      jest.spyOn(control, "assertDockerHeld").mockImplementation(async () => {
+        if (!late) {
+          late = true;
+          const socket = join(directory, "000000000001-vm.sock");
+          await unlink(socket);
+          await vmProcess(false, lateId, bundle, socket);
+        }
+        await assertDockerHeld();
+      });
+      try {
+        await control.protect([
+          { runtimeId: "late", name: "late", state: "running", containerId: lateId },
+        ]);
+        expect(captured).toHaveLength(3);
+        expect(captured).toEqual(expect.arrayContaining([firstId, "b".repeat(64), lateId]));
+        expect(captured.at(-1)).toBe(lateId);
+        expect(control.holdsWorker(firstId)).toBe(true);
+        expect(control.holdsWorker(lateId)).toBe(true);
+        expect(control.holdsWorker("b".repeat(64))).toBe(true);
+        expect(control.hasUnindexedWorkers(new Set([lateId]))).toBe(true);
+      } finally {
+        await control.release();
+      }
+    },
+  );
   unsupportedVmTest(
     "fixed VM mode refuses unproven Linux transport without signalling its worker",
     async () => {

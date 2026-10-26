@@ -1,5 +1,5 @@
 import { PassThrough } from "node:stream";
-import { readdir } from "node:fs/promises";
+import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { LocalRefusal, type LocalPolicy } from "./policy.js";
 import { runProcess, type ProcessResult } from "./process.js";
@@ -19,6 +19,45 @@ interface RuntimeLaunchIdentity {
   executable: string;
   environment: Readonly<Record<string, string>>;
   initialize: boolean;
+}
+
+/** An unchanged directory entry is necessary to use this scan's absence hint. */
+async function socketEntry(path: string): Promise<string | undefined> {
+  const stat = await lstat(path, { bigint: true }).catch(() => undefined);
+  return stat?.isSocket()
+    ? `${stat.dev}:${stat.ino}:${stat.ctimeNs}:${stat.mode}:${stat.uid}`
+    : undefined;
+}
+
+async function absentVmEntries(identity: RuntimeControlIdentity): Promise<Map<string, string>> {
+  const absent = new Map<string, string>();
+  if (!identity.sockets.length) return absent;
+  const entries = await Promise.all(identity.sockets.map(socketEntry));
+  try {
+    const result = await runProcess({
+      binary: runtimeControlAsset(),
+      argv: ["--vm-absent", identity.root, identity.executable, ...identity.sockets],
+      cwd: identity.root,
+      env: {},
+      timeoutMs: null,
+      // One byte per supplied path and its terminating newline; no custody frames.
+      maxBytes: identity.sockets.length + 1,
+    });
+    const bitmap = result.stdout.toString("utf8");
+    if (
+      result.exitCode !== 0 ||
+      bitmap.length !== identity.sockets.length + 1 ||
+      !/^[01]+\n$/.test(bitmap)
+    )
+      return absent;
+    identity.sockets.forEach((socket, index) => {
+      const entry = entries[index];
+      if (bitmap[index] === "0" && entry !== undefined) absent.set(socket, entry);
+    });
+  } catch {
+    // A failed candidate filter does not suppress the ordinary native inventory.
+  }
+  return absent;
 }
 
 export interface RuntimeCoverage {
@@ -160,7 +199,15 @@ export class DeviceRuntimeControl {
           .filter((entry) => entry.isSocket() && /^[a-f0-9]{12}-vm\.sock$/.test(entry.name))
           .map((entry) => join(directory, entry.name)),
       ];
+      const absent = await absentVmEntries({
+        root,
+        executable: this.policy.runtime.binary,
+        sockets: sockets.slice(2).filter((socket) => !this.controls.has(socket)),
+        transport: "vm",
+      });
       for (const socket of sockets) {
+        const entry = absent.get(socket);
+        if (entry !== undefined && (await socketEntry(socket)) === entry) continue;
         const existing = this.controls.get(socket);
         if (existing) {
           if (!shutdown || existing.active) continue;

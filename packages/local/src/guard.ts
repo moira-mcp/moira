@@ -21,6 +21,8 @@ import { prepareControlApprovalUpgrade } from "./control-approval.js";
 import {
   localManagementOutcomeSchema,
   type LocalManagementOutcome,
+  localSetupDiagnosticSchema,
+  type LocalSetupDiagnostic,
 } from "../../shared/src/codespaces/local-protocol.js";
 
 const receiptSchema = z
@@ -505,6 +507,7 @@ export interface SpaceGuard {
   /** Exact admitted generation only while the fixed setup operation is pending. */
   readonly setupGeneration?: number;
   prepare(): Promise<void>;
+  setupOutcome?(requestId: string, diagnostic: LocalSetupDiagnostic): Promise<void>;
   refreshRemote?(): Promise<void>;
   validate(): Promise<void>;
   stop(): Promise<void>;
@@ -538,6 +541,14 @@ const callSchema = z.discriminatedUnion("action", [
   z.object({ ...scope, action: z.literal("start-space") }).strict(),
   z.object({ ...scope, action: z.literal("resume-setup") }).strict(),
   z.object({ ...admittedScope, action: z.literal("prepare") }).strict(),
+  z
+    .object({
+      ...admittedScope,
+      action: z.literal("setup-outcome"),
+      requestId: z.string().regex(/^ws1-[a-f0-9-]{36}$/),
+      diagnostic: localSetupDiagnosticSchema,
+    })
+    .strict(),
   z.object({ ...admittedScope, action: z.literal("refresh-remote") }).strict(),
   z.object({ ...admittedScope, action: z.literal("validate") }).strict(),
   z.object({ ...admittedScope, action: z.literal("stop-space") }).strict(),
@@ -606,6 +617,7 @@ export const startGuard: StartGuard = (root, mode = "work", signal) =>
         | "start-space"
         | "resume-setup"
         | "prepare"
+        | "setup-outcome"
         | "refresh-remote"
         | "validate"
         | "stop-space"
@@ -628,9 +640,17 @@ export const startGuard: StartGuard = (root, mode = "work", signal) =>
             ? { id, action, ...(spaceId ? { spaceId } : {}) }
             : action === "remove-space"
               ? { id, action, spaceId, generation, localApproval: value }
-              : action === "admit" || action === "start-space" || action === "resume-setup"
-                ? { id, action, spaceId }
-                : { id, action, spaceId, generation };
+              : action === "setup-outcome"
+                ? {
+                    id,
+                    action,
+                    spaceId,
+                    generation,
+                    ...(value as { requestId: string; diagnostic: LocalSetupDiagnostic }),
+                  }
+                : action === "admit" || action === "start-space" || action === "resume-setup"
+                  ? { id, action, spaceId }
+                  : { id, action, spaceId, generation };
         child.send(message, (error) => {
           if (error) {
             pending.delete(id);
@@ -773,6 +793,9 @@ export const startGuard: StartGuard = (root, mode = "work", signal) =>
                 } finally {
                   preparing--;
                 }
+              },
+              setupOutcome: async (requestId, diagnostic) => {
+                await request(spaceId, "setup-outcome", { requestId, diagnostic }, generation);
               },
               validate: async () => {
                 await request(spaceId, "validate", undefined, generation);
@@ -1164,6 +1187,12 @@ async function runGuard(
           "LOCAL_GENERATION_CONFLICT",
           "The independent space admission changed.",
         );
+      if (call.action === "setup-outcome") {
+        // Bootstrap can be waiting on the broker that reports this outcome. Never
+        // enter prepareSpace or the owner's serial/native lane for this message.
+        owner.setupOutcome(call.requestId, call.diagnostic);
+        return;
+      }
       if (call.action === "prepare") {
         try {
           return await control.prepareSpace(call.spaceId, call.generation, () => owner.prepare());

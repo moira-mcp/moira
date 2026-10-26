@@ -138,6 +138,126 @@ async function preparationFixture() {
   };
 }
 
+test("a pending bootstrap accepts its exact diagnostic without waiting for its own prepare lane", async () => {
+  const f = await preparationFixture();
+  const entered = pending<string>(),
+    reply = pending<Buffer>();
+  jest.mocked(SbxRuntime.prototype.runFixedGuest).mockImplementation(async (...args) => {
+    if (args[1] === "bootstrap") {
+      entered.resolve(JSON.parse(Buffer.from(args[2] as Uint8Array).toString()).setupRequestId);
+      return reply.promise;
+    }
+    return f.runtime.runFixedGuest(...args);
+  });
+  await f.owner.admit("resume-setup");
+  const preparing = f.owner.prepare();
+  const outcome = preparing.catch((error) => error);
+  const requestId = await entered.promise;
+  expect(() =>
+    f.owner.setupOutcome(`ws1-${randomUUID()}`, {
+      code: "LOCAL_RELAY_UNAVAILABLE",
+      outcome: "unavailable",
+    }),
+  ).toThrow("another setup attempt");
+  f.owner.setupOutcome(requestId, { code: "LOCAL_RELAY_UNAVAILABLE", outcome: "unavailable" });
+  expect((await f.records.get(f.space.id))!.setupAttempt).toMatchObject({
+    requestId,
+    state: "preparing",
+  });
+  expect((await f.records.get(f.space.id))!.setupAttempt).not.toHaveProperty("diagnostic");
+  reply.resolve(Buffer.from(JSON.stringify({ ok: false, reason: "repository_checkout_failed" })));
+  const error = await outcome;
+  expect(error).toMatchObject({
+    code: "LOCAL_SETUP_INCOMPLETE",
+    message: expect.stringContaining("LOCAL_RELAY_UNAVAILABLE"),
+  });
+  expect(error.message).not.toContain("requested ref");
+  expect((await f.records.get(f.space.id))!.setupAttempt).toMatchObject({
+    requestId,
+    state: "completed",
+    diagnostic: { code: "LOCAL_RELAY_UNAVAILABLE", outcome: "unavailable" },
+  });
+  await f.owner.release();
+});
+
+test("repeated warm preparation has a new durable attempt while preserving the same VM and generation", async () => {
+  const f = await preparationFixture();
+  await f.owner.admit("resume-setup");
+  await f.owner.prepare();
+  const first = (await f.records.get(f.space.id))!;
+  await f.owner.prepare();
+  const second = (await f.records.get(f.space.id))!;
+  expect(second.runtimeId).toBe(first.runtimeId);
+  expect(second.generation).toBe(first.generation);
+  expect(second.setupAttempt!.requestId).not.toBe(first.setupAttempt!.requestId);
+  expect(second.setupAttempt!.state).toBe("completed");
+  expect(second.brokerToken).toBe(first.brokerToken);
+  await f.owner.release();
+});
+
+test.each([false, true])(
+  "completed bootstrap ok=%s retains exact security uncertainty and fences another prepare without a new VM",
+  async (ok) => {
+    const f = await preparationFixture();
+    let bootstraps = 0;
+    const securityRequestId = `ws1-${randomUUID()}`;
+    jest.mocked(SbxRuntime.prototype.runFixedGuest).mockImplementation(async (...args) => {
+      if (args[1] !== "bootstrap") return f.runtime.runFixedGuest(...args);
+      bootstraps++;
+      const parentRequestId = JSON.parse(
+        Buffer.from(args[2] as Uint8Array).toString(),
+      ).setupRequestId;
+      const space = (await f.records.get(f.space.id))!;
+      const attempt = space.setupAttempt!;
+      await f.records.state.write(`credential-request-${securityRequestId}.json`, {
+        requestId: securityRequestId,
+        resourceId: randomUUID(),
+        resourceGeneration: 1,
+        action: "fetch",
+        state: "unconfirmed",
+        parentRequestId,
+        localSetup: {
+          spaceId: space.id,
+          generation: space.generation,
+          runtimeId: space.runtimeId,
+          repositoryId: space.repositoryId,
+          operationMarker: space.operationMarker,
+        },
+      });
+      f.owner.setupOutcome(attempt.requestId, {
+        code: "SCOPED_CREDENTIAL_AUTHORITY_REFUSED",
+        outcome: "refused",
+      });
+      return Buffer.from(
+        JSON.stringify(
+          ok ? { ok: true, result: {} } : { ok: false, reason: "repository_checkout_failed" },
+        ),
+      );
+    });
+    await f.owner.admit("resume-setup");
+    await expect(f.owner.prepare()).rejects.toMatchObject({
+      code: "LOCAL_SETUP_INCOMPLETE",
+      message: expect.stringContaining(securityRequestId),
+    });
+    const failed = (await f.records.get(f.space.id))!;
+    expect(failed.runtimeId).toBe(f.space.runtimeId);
+    expect(failed.setupAttempt!.state).toBe("completed");
+    expect(failed.setupAttempt!.diagnostic).toEqual({
+      code: "WORKSPACE_OUTCOME_UNCONFIRMED",
+      outcome: "unconfirmed",
+    });
+    await expect(f.owner.prepare()).rejects.toMatchObject({
+      code: "LOCAL_SETUP_INCOMPLETE",
+      message: expect.stringContaining(securityRequestId),
+    });
+    expect(bootstraps).toBe(1);
+    expect((await f.records.get(f.space.id))!.setupAttempt!.requestId).toBe(
+      failed.setupAttempt!.requestId,
+    );
+    await f.owner.release();
+  },
+);
+
 test.each(["same-life", "cold-life"] as const)(
   "same-release %s preparation preserves the VM and selects the correct Local binding",
   async (mode) => {

@@ -13,7 +13,11 @@ import { controllerIdentitySchema } from "../../shared/src/codespaces/local-cont
 import {
   localManagementOutcomeSchema,
   workspaceSetupFailureSchema,
+  localSetupDiagnosticSchema,
+  type LocalSetupAttempt,
+  type LocalSetupDiagnostic,
 } from "../../shared/src/codespaces/local-protocol.js";
+import { createWorkspaceRequestId } from "../../shared/src/codespaces/workspace-request-id.js";
 import type { LocalVmRuntime } from "./local-vm-runtime.js";
 import { createLocalVmRuntime } from "./local-vm-runtime-factory.js";
 import { runProcess, type RunProcess, type ProcessRequest, type ProcessResult } from "./process.js";
@@ -46,6 +50,47 @@ export class RuntimeOwner {
   private managementTail: Promise<unknown> = Promise.resolve();
   private assets?: Promise<GuestAssets>;
   private enrollment?: Promise<void>;
+  private setupAttempt?: LocalSetupAttempt;
+
+  /** Broker diagnostics must never wait behind the bootstrap that is awaiting that broker. */
+  setupOutcome(requestId: string, diagnostic: LocalSetupDiagnostic): void {
+    const attempt = this.setupAttempt;
+    if (
+      !attempt ||
+      attempt.state !== "preparing" ||
+      attempt.requestId !== requestId ||
+      this.stopping ||
+      this.space?.generation !== attempt.generation ||
+      this.space.runtimeId !== attempt.runtimeId
+    )
+      throw new LocalRefusal(
+        "LOCAL_IDENTITY_CHANGED",
+        "The diagnostic belongs to another setup attempt.",
+      );
+    attempt.diagnostic = localSetupDiagnosticSchema.parse(diagnostic);
+  }
+
+  private async setupDiagnosis(fallback: string): Promise<{ pending: boolean; message: string }> {
+    const attempt = this.setupAttempt;
+    if (!attempt) return { pending: false, message: fallback };
+    const children = await new LocalRelay(this.records).setupCredentialRequests(attempt);
+    const pending = children.filter(
+      (child) => !["disposed", "absent", "refused"].includes(child.state),
+    );
+    if (pending.length) {
+      attempt.diagnostic = { code: "WORKSPACE_OUTCOME_UNCONFIRMED", outcome: "unconfirmed" };
+      return {
+        pending: true,
+        message: `Setup did not complete and its credential outcome is unconfirmed. Collect the original security requests before resuming this same environment: ${pending.map((child) => child.requestId).join(", ")}.`,
+      };
+    }
+    if (attempt.diagnostic)
+      return {
+        pending: false,
+        message: `Setup did not complete: its approved Git operation was ${attempt.diagnostic.outcome} (${attempt.diagnostic.code}). Resume this same environment after repairing that prerequisite.`,
+      };
+    return { pending: false, message: fallback };
+  }
 
   private ownerAssets(): Promise<GuestAssets> {
     this.assets ??= this.loadAssets().catch((error) => {
@@ -289,6 +334,8 @@ export class RuntimeOwner {
     const work = this.settleGuestResult(
       this.serial(async () => {
         const { space, policy, runtime } = await this.current();
+        if (space.setupAttempt)
+          await new LocalRelay(this.records).requireSetupCredentialsSettled(space.setupAttempt);
         const repository = requireSpaceGrant(policy, space);
         const clone = space.lastStartedAt === null;
         await this.protectRuntime();
@@ -323,157 +370,193 @@ export class RuntimeOwner {
         const assets = await this.ownerAssets();
         await installGuest(runtime, identity, assets, this.controller.signal);
         await this.current();
-        let gitAuthor = policy.gitAuthor ?? null;
-        if (!gitAuthor) {
-          const cached = await this.records.state.read(
-            `controller-git-identity-${space.id}.json`,
-            (value) =>
-              z
-                .object({
-                  repositoryId: z.literal(space.repositoryId),
-                  runtimeId: z.literal(space.runtimeId),
-                  author: z.object({ name: z.string().min(1), email: z.string().email() }).strict(),
-                })
-                .strict()
-                .parse(value),
-          );
-          gitAuthor = cached?.author ?? null;
-        }
-        if (
-          clone &&
-          !gitAuthor &&
-          repository.private &&
-          (await this.records.state.read("connection.json", (value) => value))
-        ) {
-          gitAuthor = await new LocalRelay(this.records).gitIdentity(
-            space.id,
-            space.repositoryId,
+        const attempt: LocalSetupAttempt = {
+          requestId: createWorkspaceRequestId(),
+          spaceId: space.id,
+          generation: space.generation,
+          runtimeId: space.runtimeId,
+          repositoryId: space.repositoryId,
+          operationMarker: space.operationMarker,
+          state: "preparing",
+        };
+        this.setupAttempt = attempt;
+        space.setupAttempt = attempt;
+        await this.persist(space);
+        try {
+          let gitAuthor = policy.gitAuthor ?? null;
+          if (!gitAuthor) {
+            const cached = await this.records.state.read(
+              `controller-git-identity-${space.id}.json`,
+              (value) =>
+                z
+                  .object({
+                    repositoryId: z.literal(space.repositoryId),
+                    runtimeId: z.literal(space.runtimeId),
+                    author: z
+                      .object({ name: z.string().min(1), email: z.string().email() })
+                      .strict(),
+                  })
+                  .strict()
+                  .parse(value),
+            );
+            gitAuthor = cached?.author ?? null;
+          }
+          if (
+            clone &&
+            !gitAuthor &&
+            repository.private &&
+            (await this.records.state.read("connection.json", (value) => value))
+          ) {
+            gitAuthor = await new LocalRelay(this.records).gitIdentity(
+              space.id,
+              space.repositoryId,
+              this.controller.signal,
+            );
+            await this.records.state.write(`controller-git-identity-${space.id}.json`, {
+              repositoryId: space.repositoryId,
+              runtimeId: space.runtimeId,
+              author: gitAuthor,
+            });
+          }
+          const output = await runtime.runFixedGuest(
+            identity,
+            "bootstrap",
+            Buffer.from(
+              JSON.stringify({
+                proxySource: assets.proxy,
+                hostPort: saved.port,
+                spaceId: space.id,
+                operationMarker: space.operationMarker,
+                brokerToken: space.brokerToken,
+                repository: repository.fullName,
+                ref: space.ref,
+                clone,
+                gitAuthor,
+                setupRequestId: attempt.requestId,
+              }),
+            ),
+            null,
             this.controller.signal,
           );
-          await this.records.state.write(`controller-git-identity-${space.id}.json`, {
-            repositoryId: space.repositoryId,
-            runtimeId: space.runtimeId,
-            author: gitAuthor,
-          });
-        }
-        const output = await runtime.runFixedGuest(
-          identity,
-          "bootstrap",
-          Buffer.from(
-            JSON.stringify({
-              proxySource: assets.proxy,
-              hostPort: saved.port,
-              spaceId: space.id,
-              operationMarker: space.operationMarker,
-              brokerToken: space.brokerToken,
-              repository: repository.fullName,
-              ref: space.ref,
-              clone,
-              gitAuthor,
-            }),
-          ),
-          null,
-          this.controller.signal,
-        );
-        const setup = z
-          .discriminatedUnion("ok", [
-            z.object({ ok: z.literal(true), result: z.unknown() }).strict(),
-            z.object({ ok: z.literal(false), reason: workspaceSetupFailureSchema }).strict(),
-          ])
-          .parse(JSON.parse(output.toString("utf8")));
-        if (!setup.ok) {
-          await this.current();
-          await this.persist({ ...space, setupFailure: setup.reason });
+          const setup = z
+            .discriminatedUnion("ok", [
+              z.object({ ok: z.literal(true), result: z.unknown() }).strict(),
+              z.object({ ok: z.literal(false), reason: workspaceSetupFailureSchema }).strict(),
+            ])
+            .parse(JSON.parse(output.toString("utf8")));
+          attempt.state = "completed";
           const remedies = {
             repository_unproven:
               "The existing repository was preserved because its setup ownership is not proved. Inspect it locally before recovery.",
             prerequisite_unavailable:
               "Safe repository publication requires Linux Python3, libc renameat2 and filesystem no-replace support.",
             repository_checkout_failed:
-              "Repository preparation did not complete. Repair the repository access or requested ref, then resume this same setup.",
+              "The repository preparation phase did not complete. Inspect its prerequisite and resume this same environment.",
             configuration_failed:
               "Fixed guest configuration did not complete. Inspect local prerequisite diagnostics before resuming this same setup.",
           };
-          throw new LocalRefusal("LOCAL_SETUP_INCOMPLETE", remedies[setup.reason]);
-        }
-        const probe = z
-          .object({
-            environmentIdentity: z.string().regex(/^[a-f0-9]{64}$/),
-            architecture: z.string(),
-          })
-          .strict()
-          .parse(
-            JSON.parse(
-              (
-                await runtime.runFixedGuest(
-                  identity,
-                  "probe",
-                  undefined,
-                  30_000,
-                  this.controller.signal,
-                )
-              ).toString("utf8"),
-            ),
+          // Terminal Git framing normally follows trusted child disposal. A
+          // completed guest program alone cannot close uncertain security work.
+          const diagnosis = await this.setupDiagnosis(
+            setup.ok ? "Setup credentials need original collection." : remedies[setup.reason],
           );
-        const authority = await this.remoteAuthority();
-        // Local Unix readiness precedes optional cloud enrollment. The daemon's
-        // existing reconciliation will acquire authority outside work lanes.
-        const connection = authority.connection;
-        const remoteState = connection?.authorityRefused ? "refused" : "unconfigured";
-        const configureLocal =
-          space.lastStartedAt === null ||
-          space.failure !== null ||
-          space.workspaceReadiness?.release !== assets.payload.release ||
-          space.workspaceReadiness?.environmentIdentity !== probe.environmentIdentity;
-        if (configureLocal)
+          if (!setup.ok || diagnosis.pending) {
+            await this.current();
+            await this.persist({ ...space, ...(!setup.ok ? { setupFailure: setup.reason } : {}) });
+            throw new LocalRefusal("LOCAL_SETUP_INCOMPLETE", diagnosis.message);
+          }
+          delete attempt.diagnostic;
+          await this.persist(space);
+          const probe = z
+            .object({
+              environmentIdentity: z.string().regex(/^[a-f0-9]{64}$/),
+              architecture: z.string(),
+            })
+            .strict()
+            .parse(
+              JSON.parse(
+                (
+                  await runtime.runFixedGuest(
+                    identity,
+                    "probe",
+                    undefined,
+                    30_000,
+                    this.controller.signal,
+                  )
+                ).toString("utf8"),
+              ),
+            );
+          const authority = await this.remoteAuthority();
+          // Local Unix readiness precedes optional cloud enrollment. The daemon's
+          // existing reconciliation will acquire authority outside work lanes.
+          const connection = authority.connection;
+          const remoteState = connection?.authorityRefused ? "refused" : "unconfigured";
+          const configureLocal =
+            space.lastStartedAt === null ||
+            space.failure !== null ||
+            space.workspaceReadiness?.release !== assets.payload.release ||
+            space.workspaceReadiness?.environmentIdentity !== probe.environmentIdentity;
+          if (configureLocal)
+            await runtime.runFixedGuest(
+              identity,
+              "configure",
+              Buffer.from(
+                JSON.stringify({
+                  version: 1,
+                  repositoryFullName: repository.fullName,
+                  root: `/workspaces/${repository.fullName.split("/")[1]}`,
+                  expectedOrigin: `http://${space.id}:${space.brokerToken}@127.0.0.1:3437/git/${repository.fullName}.git`,
+                  environmentIdentity: probe.environmentIdentity,
+                  ownerSelector: {
+                    kind: "local",
+                    deviceId: policy.deviceId,
+                    spaceId: space.id,
+                    operationMarker: space.operationMarker,
+                  },
+                  mode: "local-only",
+                  remoteState,
+                }),
+              ),
+              30_000,
+              this.controller.signal,
+            );
           await runtime.runFixedGuest(
             identity,
-            "configure",
-            Buffer.from(
-              JSON.stringify({
-                version: 1,
-                repositoryFullName: repository.fullName,
-                root: `/workspaces/${repository.fullName.split("/")[1]}`,
-                expectedOrigin: `http://${space.id}:${space.brokerToken}@127.0.0.1:3437/git/${repository.fullName}.git`,
-                environmentIdentity: probe.environmentIdentity,
-                ownerSelector: {
-                  kind: "local",
-                  deviceId: policy.deviceId,
-                  spaceId: space.id,
-                  operationMarker: space.operationMarker,
-                },
-                mode: "local-only",
-                remoteState,
-              }),
-            ),
-            30_000,
+            "start-service",
+            undefined,
+            null,
             this.controller.signal,
           );
-        await runtime.runFixedGuest(
-          identity,
-          "start-service",
-          undefined,
-          null,
-          this.controller.signal,
-        );
-        const observed = await this.waitWorkspaceHealth(
-          runtime,
-          identity,
-          probe.environmentIdentity,
-          assets.payload.release,
-        );
-        await this.current();
-        space.phase = "usable";
-        space.lastStartedAt = Date.now();
-        space.failure = null;
-        space.remote = observed;
-        if (configureLocal) space.remoteAuthority = authority.identity;
-        space.workspaceReadiness = {
-          release: assets.payload.release,
-          environmentIdentity: probe.environmentIdentity,
-        };
-        delete space.setupFailure;
-        await this.persist(space);
+          const observed = await this.waitWorkspaceHealth(
+            runtime,
+            identity,
+            probe.environmentIdentity,
+            assets.payload.release,
+          );
+          await this.current();
+          space.phase = "usable";
+          space.lastStartedAt = Date.now();
+          space.failure = null;
+          space.remote = observed;
+          if (configureLocal) space.remoteAuthority = authority.identity;
+          space.workspaceReadiness = {
+            release: assets.payload.release,
+            environmentIdentity: probe.environmentIdentity,
+          };
+          delete space.setupFailure;
+          await this.persist(space);
+        } catch (error) {
+          if (attempt.state === "preparing") {
+            attempt.state =
+              error instanceof LocalRefusal && error.code === "LOCAL_GUEST_SETTLEMENT_UNKNOWN"
+                ? "unknown"
+                : "completed";
+            if (!this.stopping) await this.persist({ ...space, setupAttempt: attempt });
+          }
+          throw error;
+        } finally {
+          if (this.setupAttempt === attempt) this.setupAttempt = undefined;
+        }
       }),
     );
     this.preparations.add(work);

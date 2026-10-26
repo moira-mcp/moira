@@ -17,6 +17,7 @@ import {
   canonicalJson,
   codespaceObservationErrorCode,
   controllerOperationSchema,
+  controllerWorkspaceResolutionSchema,
   type CodespaceSummaryView,
   type CodespaceUnavailableResourceView,
   type CodespaceDiscoveryView,
@@ -63,17 +64,6 @@ export interface WorkspaceSemanticDependencies {
   repositories: ReturnType<typeof getLocalRepositoryAdmissionService>;
   repositoryCreation: ReturnType<typeof getLocalPrivateRepositoryCreationService>;
 }
-const resolvedLocalSchema = z
-  .object({
-    resourceId: z.string().uuid(),
-    resourceGeneration: z.number().int().positive().safe(),
-    routeGeneration: z.number().int().positive().safe(),
-    repositoryId: z.string().uuid(),
-    localSpaceId: z.string().uuid(),
-    localGeneration: z.number().int().positive().safe(),
-    operationMarker: z.string().regex(/^moira-[a-f0-9]{24}$/),
-  })
-  .strict();
 const discoveryCursorSchema = z
   .string()
   .transform((value, context) => {
@@ -142,7 +132,7 @@ export function createWorkspaceSemanticServices(dependencies: WorkspaceSemanticD
     selector: { resourceId: string } | { spaceId: string; operationMarker: string },
   ): Promise<ResolvedWorkspace> => {
     const selected = controllerIdentity(userId, deviceId);
-    const retained = resolvedLocalSchema.parse(
+    const retained = controllerWorkspaceResolutionSchema.parse(
       await checkedControllerRead(userId, selected, "/v1/controller/workspaces/resolve", {
         deviceId,
         ...selector,

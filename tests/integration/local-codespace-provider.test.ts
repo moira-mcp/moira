@@ -84,11 +84,98 @@ async function create(requestId = createWorkspaceRequestId()) {
 }
 
 describe("Local cloud facade routes to the authoritative owner", () => {
+  test("pending native inventory cannot block management or exact Git authority in the same request", async () => {
+    const created = await create(),
+      observation = devices.createObservation("owner"),
+      snapshot = owner!.manager.snapshot.bind(owner!.manager);
+    let entered!: () => void, release!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    owner!.manager.snapshot = async (...args) => {
+      entered();
+      await held;
+      return snapshot(...args);
+    };
+    const native = observation.localSnapshot(deviceId);
+    await started;
+    try {
+      const metadata = await observation.snapshot(deviceId);
+      expect(metadata.local).not.toHaveProperty("resources");
+      expect(metadata.local).not.toHaveProperty("resourceObservation");
+      expect((await observation.listOwned()).devices[0].owner.state).toBe("available");
+      await owner!.state.remove("web-control.json");
+      expect(
+        await devices.authorizeOwnedGitHubOperation("owner", created.codespace_id, "fetch"),
+      ).toMatchObject({ resourceId: created.codespace_id, resourceGeneration: 1 });
+      const policy = await owner!.records.policy();
+      policy.enabled = false;
+      await owner!.state.write("policy.json", policy);
+      await expect(
+        devices.authorizeOwnedGitHubOperation("owner", created.codespace_id, "fetch"),
+      ).rejects.toMatchObject({ code: "LOCAL_UNAUTHORIZED" });
+    } finally {
+      release();
+      await native;
+    }
+  });
+  test.each(["/v1/controller/management", "/v1/controller/workspaces/resolve"])(
+    "Git refuses route retirement during %s without adopting another owner resource",
+    async (path) => {
+      const created = await create(),
+        original = owner!.client.json;
+      const calls: Array<{ method: string; path: string; body?: unknown }> = [];
+      owner!.client.json = async (...args) => {
+        calls.push(args[2]);
+        const result = await original(...args);
+        if (args[2].path === path)
+          db.prepare("UPDATE codespaceLocalResourceBinding SET revokedAt=1 WHERE resourceId=?").run(
+            created.codespace_id,
+          );
+        return result;
+      };
+      await expect(
+        devices.authorizeOwnedGitHubOperation("owner", created.codespace_id, "fetch"),
+      ).rejects.toMatchObject({ code: "LOCAL_UNAUTHORIZED" });
+      const metadataCall = { method: "GET", path: "/v1/controller/management" };
+      expect(calls).toEqual(
+        path === "/v1/controller/management"
+          ? [metadataCall]
+          : [
+              metadataCall,
+              {
+                method: "POST",
+                path: "/v1/controller/workspaces/resolve",
+                body: { deviceId, resourceId: created.codespace_id },
+              },
+            ],
+      );
+    },
+  );
+  test("Git refuses a replaced registration after its exact resolver reply", async () => {
+    const created = await create(),
+      original = owner!.client.json;
+    owner!.client.json = async (...args) => {
+      const result = await original(...args);
+      if (args[2].path === "/v1/controller/workspaces/resolve")
+        db.prepare("UPDATE codespaceLocalDevice SET generation=generation+1 WHERE id=?").run(
+          deviceId,
+        );
+      return result;
+    };
+    await expect(
+      devices.authorizeOwnedGitHubOperation("owner", created.codespace_id, "fetch"),
+    ).rejects.toMatchObject({ code: "LOCAL_UNAUTHORIZED" });
+  });
   test("one discovery observation shares exact device evidence while individual get and lifecycle remain fresh", async () => {
     const first = await create(),
       second = await create(),
       observation = devices.createObservation("owner"),
-      before = await observation.localSnapshot(deviceId);
+      before = await observation.localSnapshot(deviceId),
+      metadata = await observation.snapshot(deviceId);
     await resource.stopCodespace(
       "owner",
       second.codespace_id,
@@ -110,7 +197,7 @@ describe("Local cloud facade routes to the authoritative owner", () => {
     expect(repositories.map((repository) => repository.id)).toContain(target);
     expect(owned.devices[0].owner).toMatchObject({
       state: "available",
-      observedAt: before.observedAt,
+      observedAt: metadata.observedAt,
     });
     expect(await observation.localSnapshot(deviceId)).toEqual(before);
     const fresh = await resource.getCodespace("owner", second.codespace_id);
@@ -141,7 +228,7 @@ describe("Local cloud facade routes to the authoritative owner", () => {
     });
     owner!.client.json = async (...args) => {
       const response = await original(...args);
-      if (args[2].path === "/v1/controller") {
+      if (args[2].path === "/v1/controller/management") {
         entered();
         await held;
       }
@@ -572,7 +659,7 @@ describe("Local cloud facade routes to the authoritative owner", () => {
       let changed = false;
       owner!.client.json = async (...args) => {
         const result = await original(...args);
-        if (!changed && args[2].path === "/v1/controller") {
+        if (!changed && args[2].path === "/v1/controller/management") {
           changed = true;
           await owner!.state.write("policy.json", {
             ...policy,

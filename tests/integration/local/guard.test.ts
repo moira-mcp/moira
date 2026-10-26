@@ -116,7 +116,7 @@ else if(args[0]==='worker-id')f.writeFileSync(path+'.worker-id',cid(args[1]));
 else if(args[0]==='initial-worker')process.exit(current().status==='running'?0:1);
 else if(args[0]==='api-guest'){
   const bytes=f.readFileSync(0);const name=args[1];
-  const finish=result=>{f.writeFileSync(path+'.guest-exit.'+name,'0');if(result!==undefined)process.stdout.write(JSON.stringify({ok:true,result}));};
+  const finish=result=>{f.writeFileSync(path+'.guest-exit.'+name,'0');if(args[2]==='bootstrap'&&f.existsSync(path+'.bootstrap-refused'))process.stdout.write(JSON.stringify({ok:false,reason:'repository_checkout_failed'}));else if(result!==undefined)process.stdout.write(JSON.stringify({ok:true,result}));};
   if(args[2]==='bootstrap'){
     const body=JSON.parse(bytes.toString());
     if(!body.repository||typeof body.brokerToken!=='string')process.exit(2);
@@ -582,6 +582,53 @@ const vmTest = process.platform === "darwin" ? test : test.skip;
 const supportedGuard = process.platform === "darwin" ? describe : describe.skip;
 
 supportedGuard("independent guard with a real subprocess SDK substitute", () => {
+  vmTest(
+    "setup diagnostic IPC acknowledges during pending bootstrap and preserves the exact safe owner outcome",
+    async () => {
+      const local = await fixture();
+      await writeFile(local.observation + ".bootstrap-wait", "hold");
+      await writeFile(local.observation + ".bootstrap-refused", "logical refusal");
+      await execute(process.execPath, [
+        "--input-type=module",
+        "-e",
+        driver(local) +
+          `
+      import assert from 'node:assert/strict';
+      let completed=false;
+      const work=guard.prepare();
+      const outcome=work.then(()=>({ok:true}),error=>({ok:false,error})).finally(()=>{completed=true;});
+      try {
+        await Promise.race([wait(),work.then(()=>{throw new Error('Bootstrap bypassed the held native invocation');})]);
+        const pending=await driverRecords.get(${JSON.stringify(local.space.id)});
+        assert.equal(pending.setupAttempt.state,'preparing');
+        await assert.rejects(guard.setupOutcome('ws1-00000000-0000-4000-8000-000000000001',{
+          code:'LOCAL_UNAUTHORIZED',outcome:'refused'
+        }),{code:'LOCAL_IDENTITY_CHANGED'});
+        await guard.setupOutcome(pending.setupAttempt.requestId,{
+          code:'LOCAL_RELAY_UNAVAILABLE',outcome:'unavailable'
+        });
+        assert.equal(completed,false,'Diagnostic waited behind the same bootstrap lane');
+        assert.equal((await driverRecords.get(${JSON.stringify(local.space.id)})).setupAttempt.diagnostic,undefined,
+          'The broker side persisted Space outside its RuntimeOwner');
+        await f.writeFile(${JSON.stringify(local.release)},'finish logical refusal');
+        const result=await outcome;
+        assert.equal(result.ok,false);
+        assert.equal(result.error.code,'LOCAL_SETUP_INCOMPLETE');
+        assert.match(result.error.message,/LOCAL_RELAY_UNAVAILABLE/);
+        assert.doesNotMatch(result.error.message,/requested ref/);
+        const failed=await driverRecords.get(${JSON.stringify(local.space.id)});
+        assert.equal(failed.setupAttempt.requestId,pending.setupAttempt.requestId);
+        assert.equal(failed.setupAttempt.state,'completed');
+        assert.deepEqual(failed.setupAttempt.diagnostic,{code:'LOCAL_RELAY_UNAVAILABLE',outcome:'unavailable'});
+      } finally {await device.stop();await outcome;}
+    `,
+      ]);
+      expect((await local.records.get(local.space.id))!.setupAttempt).toMatchObject({
+        state: "completed",
+        diagnostic: { code: "LOCAL_RELAY_UNAVAILABLE", outcome: "unavailable" },
+      });
+    },
+  );
   vmTest.each(["bootstrap", "service"] as const)(
     "explicit setup recovery preserves original identity and failure through the held %s stage",
     async (stage) => {

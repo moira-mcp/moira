@@ -115,6 +115,47 @@ async function localSnapshot(controller: LocalController) {
 }
 
 describe("One owner HTTP surface for local and remote control", () => {
+  test("management HTTP never starts native observation and composes policy/control from one actual policy", async () => {
+    const f = await fixture();
+    await f.control.optIn(
+      { ...f.identity, origin: "https://moira.example" },
+      {
+        cpuCores: 4,
+        memoryBytes: 8 * GiB,
+        storageBytes: 64 * GiB,
+        dockerBytes: 8 * GiB,
+      },
+      true,
+    );
+    let nativeReads = 0;
+    f.manager.snapshot = async () => {
+      nativeReads++;
+      throw new Error("Physical inventory unavailable");
+    };
+    const report = f.control.report.bind(f.control);
+    f.control.report = async (identity, policy) => {
+      // A concurrent later applied policy must not mix into this observation's settings.
+      await f.state.write("policy.json", { ...f.policy, label: "Later policy" });
+      return report(identity, policy);
+    };
+    const metadata = await controllerRequest(
+      f.endpoint.socketPath,
+      "GET",
+      "/v1/controller/management",
+    );
+    expect(metadata).toMatchObject({
+      local: {
+        policy: { label: f.policy.label },
+        control: { settings: { label: f.policy.label } },
+      },
+    });
+    expect(metadata).not.toHaveProperty("local.resources");
+    expect(nativeReads).toBe(0);
+    expect(await controllerRequest(f.endpoint.socketPath, "GET", "/v1/controller")).toMatchObject({
+      local: { resourceObservation: { state: "unavailable" } },
+    });
+    expect(nativeReads).toBe(1);
+  });
   test.each([
     ["WORKSPACE_OUTCOME_UNCONFIRMED", "unconfirmed"],
     ["OWNER_DELIVERY_UNCONFIRMED", "unconfirmed"],

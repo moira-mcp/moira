@@ -51,6 +51,7 @@ export class LocalManager {
   private cleanupOnlyOwner = false;
   private broker?: Awaited<ReturnType<typeof startBroker>>;
   private tunnel?: Awaited<ReturnType<typeof startBrokerTunnel>>;
+  private git?: ReturnType<typeof gitBroker>;
   private releaseLock?: () => Promise<void>;
   private readonly lanes = new Map<string, Promise<unknown>>();
   private openingOwner?: Promise<DeviceGuard>;
@@ -170,14 +171,58 @@ export class LocalManager {
         const onFault = this.dependencies.onFault ?? (() => undefined);
         const budget = new NetworkBudget();
         const relay = new LocalRelay(this.records);
-        const github = gitBroker(budget, onFault, (grant, action, signal) => {
-          if (!grant.spaceId)
-            throw new LocalRefusal(
-              "LOCAL_IDENTITY_CHANGED",
-              "Git requires its original locally owned sandbox.",
+        const github = gitBroker(
+          budget,
+          onFault,
+          (grant, action, signal, requestId) => {
+            if (!grant.spaceId)
+              throw new LocalRefusal(
+                "LOCAL_IDENTITY_CHANGED",
+                "Git requires its original locally owned sandbox.",
+              );
+            return relay.acquireGitCredential(
+              grant.spaceId,
+              grant.repository.id,
+              action,
+              signal,
+              requestId && grant.generation
+                ? { requestId, generation: grant.generation }
+                : undefined,
             );
-          return relay.acquireGitCredential(grant.spaceId, grant.repository.id, action, signal);
-        });
+          },
+          undefined,
+          {
+            authorize: async (grant, requestId) => {
+              const space = grant.spaceId ? await this.records.get(grant.spaceId) : null;
+              if (
+                !space ||
+                this.guards.get(space.id)?.setupGeneration !== grant.generation ||
+                space.generation !== grant.generation ||
+                space.setupAttempt?.requestId !== requestId ||
+                space.setupAttempt.state !== "preparing"
+              )
+                throw new LocalRefusal(
+                  "LOCAL_IDENTITY_CHANGED",
+                  "This request does not belong to the current fixed setup.",
+                );
+            },
+            outcome: async (grant, requestId, diagnostic) => {
+              if (!grant.spaceId || !grant.generation)
+                throw new LocalRefusal(
+                  "LOCAL_IDENTITY_CHANGED",
+                  "The setup diagnostic has no owner.",
+                );
+              const guard = this.guards.get(grant.spaceId);
+              if (!guard?.setupOutcome)
+                throw new LocalRefusal(
+                  "LOCAL_GUARD_UNAVAILABLE",
+                  "The setup diagnostic owner is unavailable.",
+                );
+              await guard.setupOutcome(requestId, diagnostic);
+            },
+          },
+        );
+        this.git = github;
         this.broker = await startBroker(
           {
             authorize: (credential) =>
@@ -252,6 +297,7 @@ export class LocalManager {
       try {
         const guard = await device.space(space.id);
         this.guards.set(space.id, guard);
+        await this.settleSetupRequests(space.id);
         await guard.prepare();
         result.restored.push(space.id);
       } catch (error) {
@@ -344,6 +390,12 @@ export class LocalManager {
   async close(keepLock = false): Promise<void> {
     await this.closeResources(keepLock);
   }
+  private async settleSetupRequests(spaceId: string): Promise<void> {
+    const space = await this.records.get(spaceId);
+    if (!space?.setupAttempt) return;
+    await this.git?.settleSetupRequests(spaceId, space.setupAttempt.requestId);
+    await new LocalRelay(this.records).requireSetupCredentialsSettled(space.setupAttempt);
+  }
   /** The host service relinquishes observations; no VM stop intent is manufactured. */
   async release(keepLock = false): Promise<void> {
     await this.openingOwner?.catch(() => undefined);
@@ -362,6 +414,7 @@ export class LocalManager {
     this.tunnel = undefined;
     await this.broker?.close();
     this.broker = undefined;
+    this.git = undefined;
     if (!keepLock) {
       await this.releaseLock?.();
       this.releaseLock = undefined;
@@ -392,6 +445,7 @@ export class LocalManager {
     try {
       await this.broker?.close();
       this.broker = undefined;
+      this.git = undefined;
     } catch (error) {
       errors.push(error);
     }
@@ -497,6 +551,7 @@ export class LocalManager {
       throw new LocalRefusal("LOCAL_NOT_RUNNING", "Start the local companion first.");
     if (clone !== (space.phase === "creating"))
       throw new LocalRefusal("LOCAL_SETUP_INCOMPLETE", "The local setup phase changed.");
+    await this.settleSetupRequests(space.id);
     const guard = await (await this.owner()).space(space.id, activate);
     this.guards.set(space.id, guard);
     try {
@@ -564,6 +619,7 @@ export class LocalManager {
         try {
           await onAdmitted?.();
           await guard.validate();
+          await this.settleSetupRequests(space.id);
           await guard.prepare();
           return this.require(id);
         } catch (error) {
@@ -592,6 +648,7 @@ export class LocalManager {
       if (!this.tunnel)
         throw new LocalRefusal("LOCAL_NOT_RUNNING", "Start the local companion first.");
       await (this.dependencies.storage ?? admitStorage)(policy);
+      await this.settleSetupRequests(space.id);
       const guard = await (await this.owner()).space(id, "resume-setup");
       this.guards.set(id, guard);
       await onAdmitted?.();
@@ -816,6 +873,17 @@ export class LocalManager {
         failure: observationFailure ?? actual?.failure ?? space.failure,
         ...(space.remote ? { remote: space.remote } : {}),
         ...(space.setupFailure ? { setupFailure: space.setupFailure } : {}),
+        ...(space.setupAttempt
+          ? {
+              setupAttempt: {
+                requestId: space.setupAttempt.requestId,
+                state: space.setupAttempt.state,
+                ...(space.setupAttempt.diagnostic
+                  ? { diagnostic: space.setupAttempt.diagnostic }
+                  : {}),
+              },
+            }
+          : {}),
         // Only the independent native owner can attest physical settlement. The persisted
         // phase alone is historical; an injected runtime or unavailable observation cannot.
         nativeStopConfirmed:

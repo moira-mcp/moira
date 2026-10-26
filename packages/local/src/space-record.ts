@@ -15,6 +15,7 @@ import { controllerIdentitySchema } from "../../shared/src/codespaces/local-cont
 import {
   workspaceRemoteObservationSchema,
   workspaceSetupFailureSchema,
+  localSetupAttemptSchema,
 } from "../../shared/src/codespaces/local-protocol.js";
 export { workspaceRemoteObservationSchema } from "../../shared/src/codespaces/local-protocol.js";
 
@@ -46,6 +47,7 @@ export const spaceSchema = z
     remote: workspaceRemoteObservationSchema.optional(),
     remoteAuthority: controllerIdentitySchema.optional(),
     setupFailure: workspaceSetupFailureSchema.optional(),
+    setupAttempt: localSetupAttemptSchema.optional(),
     workspaceReadiness: z
       .object({
         release: z.string().regex(/^[a-f0-9]{64}$/),
@@ -56,6 +58,16 @@ export const spaceSchema = z
   })
   .strict()
   .superRefine((space, context) => {
+    const setup = space.setupAttempt;
+    if (
+      setup &&
+      (setup.spaceId !== space.id ||
+        setup.repositoryId !== space.repositoryId ||
+        setup.operationMarker !== space.operationMarker ||
+        setup.runtimeId !== space.runtimeId ||
+        setup.generation > space.generation)
+    )
+      context.addIssue({ code: "custom", message: "Invalid fixed setup association." });
     if (
       space.recoveryGeneration !== undefined &&
       (!space.runtimeId ||

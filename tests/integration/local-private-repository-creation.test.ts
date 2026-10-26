@@ -57,11 +57,11 @@ async function fixture() {
   };
   const devices = new LocalDeviceService(new LocalDeviceRepository(sqlite), () => now, {
     async json(user, id, input) {
-      if (!owner.current || (observation.unavailable && input.path === "/v1/controller"))
+      if (!owner.current || (observation.unavailable && input.path === "/v1/controller/management"))
         throw Object.assign(new Error("Owner unavailable"), { code: "ECONNREFUSED" });
       const result = await owner.current.client.json(user, id, input);
       if (
-        input.path === "/v1/controller" &&
+        input.path === "/v1/controller/management" &&
         observation.verified &&
         observation.disconnectAfterVerified
       )
@@ -653,6 +653,9 @@ describe("Private repository creation precedes local admission without repeating
   });
   test("private create and selected installation apply on the owner and replay the same identity", async () => {
     const f = await fixture();
+    const native = jest
+      .spyOn(f.local.manager, "snapshot")
+      .mockRejectedValue(new Error("Native inventory unavailable"));
     const pending = await f.makeService().createRepository("owner", f.input);
     expect(pending).toMatchObject({
       status: "applied",
@@ -681,6 +684,7 @@ describe("Private repository creation precedes local admission without repeating
     expect(f.state.posts).toBe(1);
     expect(f.state.puts).toBe(1);
     expect((await f.devices.getActiveDevice("owner", f.deviceId)).deviceGeneration).toBe(1);
+    expect(native).not.toHaveBeenCalled();
   });
   test("lost create response recovers only its exact marker after process reconstruction", async () => {
     const f = await fixture();

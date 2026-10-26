@@ -34,9 +34,14 @@ import {
   prepareCredentialRequest,
   inspectCredentialRequest,
   updateCredentialRequest,
+  findCredentialRequests,
   type CredentialRequestStore,
   type CredentialRequestRecord,
 } from "../../workspace-service/src/credential-request.mjs";
+import {
+  localSetupContextSchema,
+  type LocalSetupAttempt,
+} from "../../shared/src/codespaces/local-protocol.js";
 
 const uuid = z.string().uuid();
 const secret = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
@@ -461,7 +466,32 @@ export class LocalRelay {
         this.records.state.read(`credential-request-${requestId}.json`, (value) => value),
       write: (requestId, record) =>
         this.records.state.write(`credential-request-${requestId}.json`, record),
+      requestIds: async () =>
+        (await this.records.state.keys("credential-request-")).map((key) =>
+          key.slice("credential-request-".length, -".json".length),
+        ),
     };
+  }
+  async setupCredentialRequests(attempt: LocalSetupAttempt): Promise<CredentialRequestRecord[]> {
+    const records = await findCredentialRequests(this.credentialRequests(), attempt.requestId);
+    const context = localSetupContextSchema.strip().parse(attempt);
+    for (const record of records)
+      if (JSON.stringify(record.localSetup) !== JSON.stringify(context))
+        throw new LocalRefusal(
+          "LOCAL_IDENTITY_CHANGED",
+          "Original setup credential association changed.",
+        );
+    return records;
+  }
+  async requireSetupCredentialsSettled(attempt: LocalSetupAttempt): Promise<void> {
+    const pending = (await this.setupCredentialRequests(attempt)).filter(
+      (record) => !["disposed", "absent", "refused"].includes(record.state),
+    );
+    if (pending.length)
+      throw new LocalRefusal(
+        "LOCAL_SETUP_INCOMPLETE",
+        `Collect the original setup security requests before continuing this same environment: ${pending.map((record) => record.requestId).join(", ")}.`,
+      );
   }
   async pendingGitCredentialRequests(): Promise<CredentialRequestRecord[]> {
     const store = this.credentialRequests(),
@@ -577,6 +607,7 @@ export class LocalRelay {
     repositoryId: string,
     action: ScopedCredentialAction,
     signal?: AbortSignal,
+    setup?: { requestId: string; generation: number },
   ): Promise<
     Extract<GitHubOwnerLease, { mode: "scoped" }> & {
       securityRequestId: string;
@@ -587,6 +618,7 @@ export class LocalRelay {
       action,
       (checkSignal) => this.gitAuthority(spaceId, repositoryId, checkSignal),
       signal,
+      setup && { ...setup, spaceId, repositoryId },
     );
   }
   /** One security receipt/issuer path; provider-specific authority stays with its owner. */
@@ -596,20 +628,54 @@ export class LocalRelay {
       signal?: AbortSignal,
     ) => Promise<{ resourceId: string; resourceGeneration: number }>,
     signal?: AbortSignal,
+    setup?: { requestId: string; generation: number; spaceId: string; repositoryId: string },
   ): Promise<
     Extract<GitHubOwnerLease, { mode: "scoped" }> & {
       securityRequestId: string;
       validate(signal?: AbortSignal): Promise<void>;
     }
   > {
+    const requireSetup = async () => {
+      if (!setup) return undefined;
+      const space = await this.records.get(setup.spaceId),
+        attempt = space?.setupAttempt;
+      if (
+        !space ||
+        space.generation !== setup.generation ||
+        space.repositoryId !== setup.repositoryId ||
+        space.desiredState !== "running" ||
+        !attempt ||
+        attempt.requestId !== setup.requestId ||
+        attempt.state !== "preparing" ||
+        attempt.generation !== space.generation ||
+        attempt.runtimeId !== space.runtimeId ||
+        attempt.spaceId !== space.id ||
+        attempt.repositoryId !== space.repositoryId ||
+        attempt.operationMarker !== space.operationMarker
+      )
+        throw new LocalRefusal(
+          "LOCAL_IDENTITY_CHANGED",
+          "The fixed setup attempt changed before credential issuance.",
+        );
+      return {
+        parentRequestId: attempt.requestId,
+        localSetup: localSetupContextSchema.strip().parse(attempt),
+      };
+    };
+    await requireSetup();
     const authority = await authorize(signal);
     const connection = await this.confirmed(signal);
     const store = this.credentialRequests();
-    const record = await prepareCredentialRequest(store, {
+    const parent = await requireSetup();
+    const target = {
       resourceId: authority.resourceId,
       resourceGeneration: authority.resourceGeneration,
       action,
-    });
+    };
+    const record = await prepareCredentialRequest(
+      store,
+      parent ? { ...target, ...parent } : target,
+    );
     const input = {
       requestId: record.requestId,
       resourceId: record.resourceId,
@@ -618,6 +684,7 @@ export class LocalRelay {
     };
     let child: ScopedCredentialView;
     try {
+      await requireSetup();
       child = scopedCredentialViewSchema.parse(
         await this.json(connection, "/acquire", input, signal, "scoped"),
       );

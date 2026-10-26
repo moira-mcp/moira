@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { createServer } from "node:http";
+import { LOCAL_SETUP_HEADER } from "../../../packages/shared/src/codespaces/local-protocol.js";
 import {
   checkoutGuestRepository,
   configureGuestGitIdentity,
@@ -29,6 +31,46 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 describe("Guest initialization of a proven empty repository", () => {
+  test("fixed bootstrap marks actual Git HTTP requests without changing origin or later ordinary Git", async () => {
+    const observed: Array<string | string[] | undefined> = [];
+    const server = createServer((request, response) => {
+      observed.push(request.headers[LOCAL_SETUP_HEADER]);
+      if (request.url?.startsWith("/repo.git/info/refs"))
+        response.writeHead(200, { "content-type": "text/plain" }).end();
+      else if (request.url === "/repo.git/HEAD")
+        response.writeHead(200, { "content-type": "text/plain" }).end("ref: refs/heads/main\n");
+      else response.writeHead(404).end();
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(3100, "127.0.0.1", resolve);
+    });
+    try {
+      const origin = "http://127.0.0.1:3100/repo.git",
+        attempt = `ws1-${randomUUID()}`;
+      const direct = { ...environment, NO_PROXY: "127.0.0.1", no_proxy: "127.0.0.1" };
+      await run("git", ["-C", clone, "remote", "set-url", "origin", origin], { env: environment });
+      const config = await readFile(join(clone, ".git", "config"));
+      await checkoutGuestRepository(clone, "main", direct, attempt);
+      expect(observed.length).toBeGreaterThan(0);
+      expect(observed.every((marker) => marker === attempt)).toBe(true);
+      expect(await readFile(join(clone, ".git", "config"))).toEqual(config);
+      expect(
+        (
+          await run("git", ["-C", clone, "remote", "get-url", "origin"], { env: environment })
+        ).stdout.trim(),
+      ).toBe(origin);
+      observed.length = 0;
+      await run("git", ["-C", clone, "ls-remote", "origin"], { env: direct });
+      expect(observed.length).toBeGreaterThan(0);
+      expect(observed.every((marker) => marker === undefined)).toBe(true);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
   test("identity configuration refuses a linked local config without changing foreign bytes", async () => {
     const foreignConfig = join(root, "foreign-config");
     const original = await readFile(join(clone, ".git", "config"));

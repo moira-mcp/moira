@@ -485,6 +485,9 @@ environments and known incomplete setup; diagnostics preserves uncertain or unav
 safe errors and original-operation references without lifecycle generations. `has_diagnostics`
 points to retained diagnostics; `view: "history"` exposes confirmed retired environments.
 A selected-provider failure is not an empty inventory, and Local does not await GitHub or billing.
+Device/settings reads and exact repository Git authorization do not await all-VM native inventory.
+They still require current owner policy and binding; reachable management or a healthy heartbeat
+does not prove guest readiness or physical VM state. A pending settings request is not applied permission.
 In Settings, select Diagnostics or History for that provider; billing has its own read and retry
 in the GitHub subsection. A pending unknown creation
 remains collectable as its original operation, not a replacement VM. A nullable machine is not a
@@ -499,6 +502,16 @@ Python3/libc/exclusive-publication prerequisites (`prerequisite_unavailable`), r
 repair (`repository_checkout_failed`) or fixed configuration diagnostics (`configuration_failed`).
 Unknown creation or guest settlement still requires original collection, not adoption by name.
 An owner-confirmed custody acknowledgement preserves incomplete setup; explicitly resume it afterward.
+
+Preparation retains an exact setup-attempt identity and links its security requests before issuing
+credentials. If the safe failure asks for original security collection, inspect `moira-local status --json`
+and use `moira-local collect ORIGINAL_ID` for those requests before explicitly resuming that same VM.
+Collection does not retry checkout. Older security originals without that association must be inspected
+by their known IDs; do not infer a match from time, repository or pending state. Unavailable authority,
+unconfirmed credential custody and a confirmed checkout/ref refusal require different repairs.
+Without exact evidence the diagnostic names the failed phase rather than claiming a GitHub refusal.
+Unknown physical execution retains its settlement/recovery requirement; a logical checkout refusal
+alone does not require stopping or recovering the entire VM.
 
 For `CODESPACE_LOCAL_PROTOCOL_ERROR`, coordinate matching server/companion builds and preserve
 saved identity and journals. For `CODESPACE_LOCAL_RUNTIME_ERROR`, repair the actual runtime and
@@ -698,6 +711,11 @@ preserve any writes made since the backup; do not restore an old database over n
 Do not erase approval/journals, create replacement state or kill arbitrary guard processes. Management
 can be interrupted; mixed-edition rolling upgrade is unsupported. Live append in a matched edition
 does not make the upgrade itself uninterrupted.
+
+For the management-read contract, activate the matching controller producer through supported
+maintenance before switching the server reader. An unavailable management route does not fall back
+to full native inventory. Check the active release and every VM's recovery result; staging a bundle,
+server health or completed maintenance alone does not confirm that each VM recovered.
 
 Archived cloud Local policy/control, relay, grants and operational rows remain diagnostic data;
 archives do not authorize dispatch. The owner imports only verified existing native bindings

@@ -157,6 +157,22 @@ refusal and runner exclusion; [runtime settlement](integration/local/runtime-set
 covers exact-profile shutdown and preservation on refusal. These fixtures do not establish
 physical VM or provider acceptance.
 
+Management independence and current policy are covered by [controller HTTP](unit/local/controller.test.ts)
+and [Local provider](integration/local-codespace-provider.test.ts): metadata and exact Git authority
+complete while native inventory is held, and changed registration/binding refuses. [Device control](integration/local-device-control.test.ts)
+owns settings CAS and unchanged collection of recognized historical receipts. [Native capture](integration/local/runtime-control.test.ts)
+covers per-scan absence filtering, endpoint replacement, late-worker fallback and retained kernel
+identity; it does not measure an installed owner's latency or authorize socket cleanup.
+
+Exact setup/security association and uncertain-original preservation belong to
+[credential receipts](unit/local/git-credential.test.ts), [Git broker](unit/local/git-broker.test.ts)
+and [runtime owner](unit/local/runtime-observation.test.ts). [Guard IPC](integration/local/guard.test.ts)
+delivers an addressed safe diagnostic during held bootstrap; [repository bootstrap](integration/local/empty-repository.test.ts)
+observes real Git's transient marker without changing persistent origin/configuration. That HTTP
+fixture does not traverse GuestProxy. [Native source](unit/workspace-service/native-source.test.cjs)
+and [Git/PR owner](unit/workspace-service/github-owner.test.cjs) exercise direct Node entry paths
+and distinguish absent PR dispatch from a lost reply; packaged builds alone do not cover raw imports.
+
 | Level                        | Boundary and suite                                                                                                                                                                                                                                                                                                             |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Unit                         | Local policy, durable controller receipts, exact generation/grant authority, runtime observation and custody: [Local](unit/local/). Common Unix owner, semantic references, exact bytes, retained input/output and physical reader settlement: [workspace service](unit/workspace-service/).                                   |

@@ -22,6 +22,8 @@ import {
   localGitAuthorSchema,
   type LocalGitAuthor,
 } from "../../shared/src/codespaces/local-management-types.js";
+import { LOCAL_SETUP_HEADER } from "../../shared/src/codespaces/local-protocol.js";
+import { WORKSPACE_REQUEST_ID_PATTERN } from "../../shared/src/codespaces/workspace-request-id.js";
 
 const execute = promisify(execFile);
 
@@ -181,8 +183,17 @@ async function requireGuestGitDirectory(
 }
 
 /** Consume Git output through actual close; only diagnostics are retained as a tail. */
-async function runGuestGit(argv: string[], environment: NodeJS.ProcessEnv): Promise<boolean> {
+async function runGuestGit(
+  argv: string[],
+  environment: NodeJS.ProcessEnv,
+  setupRequestId?: string,
+): Promise<boolean> {
   environment = guestGitEnvironment(environment);
+  if (setupRequestId) {
+    if (!WORKSPACE_REQUEST_ID_PATTERN.test(setupRequestId))
+      throw new Error("Invalid fixed setup identity");
+    argv = ["-c", `http.extraHeader=${LOCAL_SETUP_HEADER}: ${setupRequestId}`, ...argv];
+  }
   let advertised = false;
   const result = await runProcess({
     binary: "git",
@@ -216,6 +227,7 @@ export interface GuestBootstrap {
   ref: string;
   clone: boolean;
   gitAuthor?: LocalGitAuthor | null;
+  setupRequestId?: string;
 }
 
 export async function configureGuestGitIdentity(
@@ -242,11 +254,16 @@ export async function checkoutGuestRepository(
   root: string,
   ref: string,
   environment: NodeJS.ProcessEnv,
+  setupRequestId?: string,
 ): Promise<void> {
   environment = guestGitEnvironment(environment);
   await requireGuestGitDirectory(root, false, environment);
   const options = { env: environment, timeout: 10_000, maxBuffer: 64 * 1024 };
-  const advertised = await runGuestGit(["-C", root, "ls-remote", "--refs", "origin"], environment);
+  const advertised = await runGuestGit(
+    ["-C", root, "ls-remote", "--refs", "origin"],
+    environment,
+    setupRequestId,
+  );
   if (!advertised) {
     const branch = ref.replace(/^refs\/heads\//, "");
     if (ref.startsWith("refs/tags/") || /^[a-f0-9]{40}$/.test(ref))
@@ -259,6 +276,7 @@ export async function checkoutGuestRepository(
   await runGuestGit(
     ["-C", root, "-c", "core.hooksPath=/dev/null", "fetch", "origin", ref],
     environment,
+    setupRequestId,
   );
   const checkout =
     ref.startsWith("refs/tags/") || /^[a-f0-9]{40}$/.test(ref)
@@ -346,6 +364,7 @@ export async function prepareGuestRepository(
     origin: string;
     workspaces: string;
     directory: string;
+    setupRequestId?: string;
   },
   environment: NodeJS.ProcessEnv,
 ): Promise<string> {
@@ -474,7 +493,7 @@ export async function prepareGuestRepository(
                 env: environment,
               });
             await requireGuestOrigin(stageRoot, input.origin, environment);
-            await checkoutGuestRepository(stageRoot, input.ref, environment);
+            await checkoutGuestRepository(stageRoot, input.ref, environment, input.setupRequestId);
             preparation = { ...preparation, phase: "ready" };
             await writeDurableJson(input.directory, "repository.json", preparation);
           }
@@ -548,6 +567,7 @@ export async function bootstrap(input: GuestBootstrap) {
     ref: z.string().min(1).max(255),
     clone: z.boolean(),
     gitAuthor: localGitAuthorSchema.nullable().optional(),
+    setupRequestId: z.string().regex(WORKSPACE_REQUEST_ID_PATTERN).optional(),
   })
     .strict()
     .parse(input);
