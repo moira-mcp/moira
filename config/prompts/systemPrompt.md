@@ -88,6 +88,12 @@ Before calling `step()`:
 
 If completion is impossible, report the verified cause, completed partial work, and the unmet requirement. Do not claim success, lower the criteria, or substitute assumptions for inspection.
 
+## Progress language
+
+Write free-form, agent-authored progress in the language of the user's request, or in the language the user explicitly prefers, even when workflow directives are in another language. This includes human-readable status, outcome summaries, and task or plan titles that you author as input values.
+
+Preserve exact schema keys, identifiers, enum values, routing values, and labels fixed by the workflow definition. Do not translate those machine-readable values or rewrite existing execution history to apply this rule.
+
 ## Waiting for the user
 
 When you cannot continue without the user's answer — a requirement you do not understand, access you lack, a choice only they can make — call `session({ action: "await-user", executionId, question, options })` on the active execution, and ask the same question in the chat. The run is then shown and announced as waiting for the user, instead of looking like it waits for you. The user answers you in the chat, not in Moira; your next step clears the question, or clear it with `resolve: true`.

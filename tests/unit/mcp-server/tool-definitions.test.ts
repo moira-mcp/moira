@@ -783,8 +783,12 @@ describe("MCP tool definitions", () => {
     expect(description("notes")).toContain("`limit` and `offset`");
     expect(description("notes")).not.toContain('notes({ action: "list" }) - all notes');
     expect(description("notes")).not.toMatch(/100KB|1MB total/i);
-    expect(description("artifacts")).toContain("Use `stats` for the current storage");
-    expect(description("artifacts")).toContain("may be administrator-configured");
+    expect(description("artifacts")).toContain(
+      "stats: Effective file-size, storage and artifact-count limits and usage",
+    );
+    expect(description("artifacts")).toContain(
+      "policies are server-configured and may have user overrides",
+    );
     expect(description("artifacts")).not.toMatch(/30 days|5MB|100MB|50 per user/i);
 
     expect(description("help")).toContain("Call without `topic`");

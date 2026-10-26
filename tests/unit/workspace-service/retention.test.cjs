@@ -327,15 +327,32 @@ test("a present corrupt membership refuses collection and preserves live input a
   await start(value);
   await heldInput(value, id, bytes);
   const p = paths(value, id),
-    accepted = readFileSync(join(p.directory, "accepted.json"));
-  writeFileSync(p.member, "corrupt", { mode: 0o600 });
-  const response = await call(value, "GET", `/v1/operations/${id}`);
-  expect(response.status).toBe(409);
-  expect(JSON.parse(response.bytes.toString())).toMatchObject({ error: { code: "UNSAFE_STATE" } });
-  expect(readFileSync(p.member, "utf8")).toBe("corrupt");
-  expect(readFileSync(join(p.directory, "accepted.json"))).toEqual(accepted);
-  expect(readFileSync(join(p.directory, "input"))).toEqual(bytes);
-  writeFileSync(join(value.root, "release"), "release");
+    accepted = readFileSync(join(p.directory, "accepted.json")),
+    runner = JSON.parse(readFileSync(join(p.engine, "runner-pid"), "utf8")).pid;
+  try {
+    writeFileSync(p.member, "corrupt", { mode: 0o600 });
+    const response = await call(value, "GET", `/v1/operations/${id}`);
+    expect(response.status).toBe(409);
+    expect(JSON.parse(response.bytes.toString())).toMatchObject({
+      error: { code: "UNSAFE_STATE" },
+    });
+    expect(readFileSync(p.member, "utf8")).toBe("corrupt");
+    expect(readFileSync(join(p.directory, "accepted.json"))).toEqual(accepted);
+    expect(readFileSync(join(p.directory, "input"))).toEqual(bytes);
+  } finally {
+    writeFileSync(join(value.root, "release"), "release");
+    // Service shutdown leaves accepted commands alive. The detached observer still
+    // publishes its receipt after the command exits, so fixture removal must await it.
+    await until(() => {
+      try {
+        process.kill(runner, 0);
+        return false;
+      } catch (error) {
+        if (error.code === "ESRCH") return true;
+        throw error;
+      }
+    });
+  }
 });
 
 test("collection tolerates the same terminal membership disappearing during its guarded read", async () => {
