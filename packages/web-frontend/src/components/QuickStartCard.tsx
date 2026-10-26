@@ -8,8 +8,11 @@ import { useTranslation } from "react-i18next";
 import { Copy, Check, BookOpen, ExternalLink, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { mcpClients, configGenerators, deeplinkGenerators } from "@mcp-moira/shared/mcp-clients";
-import type { McpClient } from "@mcp-moira/shared/mcp-clients";
+import {
+  getClientSetupPresentation,
+  resolveClientDeeplink,
+  type ClientSetupPresentation,
+} from "@mcp-moira/shared/mcp-clients";
 import { useFeatures } from "@/hooks/useFeatures";
 import { localizedDocsPath } from "@/lib/docs-path";
 import { HidePanelButton } from "./onboarding/HidePanelButton";
@@ -104,6 +107,8 @@ function CollapsibleSection({ title, children }: { title: string; children: Reac
   return (
     <div className="mt-3">
       <button
+        type="button"
+        aria-expanded={open}
         onClick={() => setOpen(!open)}
         className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
       >
@@ -117,91 +122,73 @@ function CollapsibleSection({ title, children }: { title: string; children: Reac
   );
 }
 
-function ClientPanel({ client, mcpUrl }: { client: McpClient; mcpUrl: string }) {
-  const { t } = useTranslation();
-  const ct = useCallback(
-    (field: string) => t(`pages.dashboard.quickStart.clients.${client.id}.${field}`),
-    [t, client.id],
-  );
-
-  const { setup, setupType } = client;
-
-  if (setupType === "gui") {
-    return (
-      <div className="space-y-3">
-        <p className="text-sm text-muted-foreground whitespace-pre-line">{ct("description")}</p>
-      </div>
-    );
-  }
-
-  if (setupType === "config") {
-    const code = setup.primaryGenerator ? configGenerators[setup.primaryGenerator](mcpUrl) : "";
-    return (
-      <div className="space-y-3">
-        <CodeBlock code={code} title={setup.primaryTitle} />
-      </div>
-    );
-  }
-
-  if (setupType === "cli") {
-    const primaryCode = setup.primaryGenerator
-      ? configGenerators[setup.primaryGenerator](mcpUrl)
-      : "";
-    const altCode = setup.alternative?.generator
-      ? configGenerators[setup.alternative.generator](mcpUrl)
-      : "";
-
-    return (
-      <div className="space-y-3">
-        <CodeBlock code={primaryCode} title={setup.primaryTitle} />
-        {setup.auth && (
-          <>
-            <p className="text-sm text-muted-foreground">{ct("authIntro")}</p>
-            <CodeBlock code={ct("authContent")} title={setup.auth.title} />
-          </>
-        )}
-        {setup.alternative && altCode && (
-          <CollapsibleSection title={ct("alternativeTitle")}>
-            <CodeBlock code={altCode} title={setup.alternative.title} />
-          </CollapsibleSection>
-        )}
-      </div>
-    );
-  }
-
-  if (setupType === "deeplink") {
-    const deeplinkUrl = client.deeplinkGenerator
-      ? deeplinkGenerators[client.deeplinkGenerator](mcpUrl)
-      : "";
-    const altCode = setup.alternative?.generator
-      ? configGenerators[setup.alternative.generator](mcpUrl)
-      : "";
-
-    return (
-      <div className="space-y-3">
+function ClientPanel({
+  presentation,
+  mcpUrl,
+}: {
+  presentation: ClientSetupPresentation;
+  mcpUrl: string;
+}) {
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground whitespace-pre-line">{presentation.setup}</p>
+      {presentation.primary && (
+        <CodeBlock code={presentation.primary.code} title={presentation.primary.title} />
+      )}
+      {presentation.deeplink && (
         <a
-          href={deeplinkUrl}
+          href={resolveClientDeeplink(presentation, mcpUrl)}
+          aria-label={presentation.deeplink.ariaLabel}
           className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-colors text-sm"
         >
           <ExternalLink className="h-4 w-4" />
-          {ct("deeplinkButton")}
+          {presentation.deeplink.label}
         </a>
-        {setup.auth && (
-          <>
-            <p className="text-sm text-muted-foreground">{ct("authIntro")}</p>
-            <CodeBlock code={ct("authContent")} title={setup.auth.title} />
-          </>
-        )}
-        {setup.alternative && altCode && (
-          <CollapsibleSection title={ct("alternativeTitle")}>
-            <CodeBlock code={altCode} title={setup.alternative.title} />
-          </CollapsibleSection>
-        )}
-      </div>
-    );
-  }
-
-  return null;
+      )}
+      <p className="text-sm text-muted-foreground whitespace-pre-line">{presentation.authIntro}</p>
+      {presentation.auth && (
+        <CodeBlock code={presentation.auth.code} title={presentation.auth.title} />
+      )}
+      {presentation.alternative && (
+        <CollapsibleSection
+          title={
+            presentation.alternativeTitle ?? presentation.alternative.title ?? presentation.label
+          }
+        >
+          {presentation.alternativeDescription && (
+            <p className="text-sm text-muted-foreground whitespace-pre-line mb-2">
+              {presentation.alternativeDescription}
+            </p>
+          )}
+          <CodeBlock code={presentation.alternative.code} title={presentation.alternative.title} />
+        </CollapsibleSection>
+      )}
+      {presentation.tokenAuth && (
+        <CollapsibleSection title={presentation.tokenAuth.sectionTitle}>
+          <p className="text-sm text-muted-foreground mb-2">{presentation.tokenAuth.description}</p>
+          <p className="text-sm text-muted-foreground whitespace-pre-line mb-2">
+            {presentation.tokenAuth.steps}
+          </p>
+          <CodeBlock
+            code={presentation.tokenAuth.code.code}
+            title={presentation.tokenAuth.code.title}
+          />
+        </CollapsibleSection>
+      )}
+      <p className="text-sm text-muted-foreground whitespace-pre-line">
+        {presentation.verification}
+      </p>
+      <a
+        href={presentation.officialDocs.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+      >
+        {presentation.officialDocs.label}
+        <ExternalLink className="h-3.5 w-3.5" />
+      </a>
+    </div>
+  );
 }
 
 export const QuickStartCard: React.FC = () => {
@@ -212,7 +199,14 @@ export const QuickStartCard: React.FC = () => {
 
   const getDocsPath = () => localizedDocsPath("/docs/getting-started/quickstart/", i18n.language);
 
-  const defaultClient = useMemo(() => mcpClients[0].id, []);
+  const presentations = useMemo(
+    () =>
+      getClientSetupPresentation(
+        i18n.language.toLowerCase().startsWith("ru") ? "ru" : "en",
+        mcpUrl,
+      ),
+    [i18n.language, mcpUrl],
+  );
 
   if (!visible) return null;
   return (
@@ -241,18 +235,18 @@ export const QuickStartCard: React.FC = () => {
         {t("pages.dashboard.quickStart.description")}
       </p>
 
-      <Tabs defaultValue={defaultClient}>
-        <TabsList className="w-full flex-wrap h-auto gap-0.5">
-          {mcpClients.map((client) => (
+      <Tabs defaultValue={presentations[0].client.id}>
+        <TabsList className="w-full flex-wrap h-auto gap-0.5 group-data-[orientation=horizontal]/tabs:h-auto">
+          {presentations.map(({ client, label }) => (
             <TabsTrigger key={client.id} value={client.id} className="text-xs px-2.5 py-1.5">
-              {client.name}
+              {label}
             </TabsTrigger>
           ))}
         </TabsList>
 
-        {mcpClients.map((client) => (
-          <TabsContent key={client.id} value={client.id} className="mt-4">
-            <ClientPanel client={client} mcpUrl={mcpUrl} />
+        {presentations.map((presentation) => (
+          <TabsContent key={presentation.client.id} value={presentation.client.id} className="mt-4">
+            <ClientPanel presentation={presentation} mcpUrl={mcpUrl} />
           </TabsContent>
         ))}
       </Tabs>

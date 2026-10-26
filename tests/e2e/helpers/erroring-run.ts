@@ -15,7 +15,7 @@ import {
 export async function runWithAnError(
   client: Awaited<ReturnType<typeof createAuthenticatedMCPClient>>["client"],
 ): Promise<{ processId: string; workflowId: string }> {
-  const created = (await callMCPTool(client, "manage", {
+  const created = (await callMCPTool(client, "workflow", {
     action: "create",
     workflow: {
       id: `erroring-run-${Date.now()}`,

@@ -30,7 +30,7 @@ describe("MCP Workflow Token Tools E2E", () => {
     cleanup = mcpClient.cleanup;
 
     // Dedicated workflow so the download-token test never depends on catalog contents
-    const created = await callMCPTool(client, "manage", {
+    const created = await callMCPTool(client, "workflow", {
       action: "create",
       workflow: {
         metadata: {
@@ -53,7 +53,7 @@ describe("MCP Workflow Token Tools E2E", () => {
   });
 
   test("create_workflow_token upload action generates valid token", async () => {
-    const rawResult = await callMCPTool<string>(client, "token", {
+    const rawResult = await callMCPTool<string>(client, "workflow", {
       action: "upload",
       ttlMinutes: 60,
     });
@@ -70,7 +70,7 @@ describe("MCP Workflow Token Tools E2E", () => {
   });
 
   test("create_workflow_token download action generates valid token", async () => {
-    const rawResult = await callMCPTool<string>(client, "token", {
+    const rawResult = await callMCPTool<string>(client, "workflow", {
       action: "download",
       workflowId: downloadWorkflowId,
       ttlMinutes: 60,
@@ -103,7 +103,7 @@ describe("HTTP Token Endpoints E2E (Supertest)", () => {
     cleanup = mcpClient.cleanup;
 
     // Create upload token via MCP
-    const uploadRaw = await callMCPTool<string>(client, "token", {
+    const uploadRaw = await callMCPTool<string>(client, "workflow", {
       action: "upload",
     });
     const uploadResult = parseTokenResponse(uploadRaw);
@@ -111,7 +111,7 @@ describe("HTTP Token Endpoints E2E (Supertest)", () => {
 
     // Create a dedicated workflow for download token test (to avoid race conditions)
     // This ensures the workflow exists regardless of other tests' state
-    const createResult = await callMCPTool(client, "manage", {
+    const createResult = await callMCPTool(client, "workflow", {
       action: "create",
       workflow: {
         id: `test-download-workflow-${Date.now()}`,
@@ -129,7 +129,7 @@ describe("HTTP Token Endpoints E2E (Supertest)", () => {
     testWorkflowId = createResult.workflowId;
 
     // Create download token for our dedicated workflow
-    const downloadRaw = await callMCPTool<string>(client, "token", {
+    const downloadRaw = await callMCPTool<string>(client, "workflow", {
       action: "download",
       workflowId: testWorkflowId,
     });
@@ -171,7 +171,7 @@ describe("HTTP Token Endpoints E2E (Supertest)", () => {
       const uploadedWorkflowId = response.body.data.workflowId;
 
       // Verify workflow exists via MCP get (more reliable than list)
-      const verifyResult = await callMCPTool(client, "manage", {
+      const verifyResult = await callMCPTool(client, "workflow", {
         action: "get",
         workflowId: uploadedWorkflowId,
       });
@@ -208,7 +208,7 @@ describe("HTTP Token Endpoints E2E (Supertest)", () => {
 
   test("token reuse is prevented (single-use)", async () => {
     // Create new upload token
-    const tokenRaw = await callMCPTool<string>(client, "token", {
+    const tokenRaw = await callMCPTool<string>(client, "workflow", {
       action: "upload",
     });
     const tokenResult = parseTokenResponse(tokenRaw);
@@ -262,14 +262,14 @@ describe("HTTP Token Endpoints E2E (Supertest)", () => {
     };
 
     // Create original workflow via MCP (server generates UUID)
-    const createResult = await callMCPTool(client, "manage", {
+    const createResult = await callMCPTool(client, "workflow", {
       action: "create",
       workflow: originalWorkflow,
     });
     const originalId = createResult.workflowId;
 
     // Get new upload token
-    const tokenRaw = await callMCPTool<string>(client, "token", {
+    const tokenRaw = await callMCPTool<string>(client, "workflow", {
       action: "upload",
     });
     const tokenResult = parseTokenResponse(tokenRaw);
@@ -298,14 +298,14 @@ describe("HTTP Token Endpoints E2E (Supertest)", () => {
       expect(newId).not.toBe(originalId);
 
       // Verify original workflow still exists unchanged
-      const originalCheck = await callMCPTool(client, "manage", {
+      const originalCheck = await callMCPTool(client, "workflow", {
         action: "get",
         workflowId: originalId,
       });
       expect(originalCheck.metadata.name).toBe("Original ForceNew Test");
 
       // Verify new workflow was created
-      const newCheck = await callMCPTool(client, "manage", {
+      const newCheck = await callMCPTool(client, "workflow", {
         action: "get",
         workflowId: newId,
       });
@@ -330,14 +330,14 @@ describe("HTTP Token Endpoints E2E (Supertest)", () => {
     };
 
     // Create original (server generates UUID)
-    const createResult = await callMCPTool(client, "manage", {
+    const createResult = await callMCPTool(client, "workflow", {
       action: "create",
       workflow,
     });
     const workflowId = createResult.workflowId;
 
     // Get upload token
-    const tokenRaw = await callMCPTool<string>(client, "token", {
+    const tokenRaw = await callMCPTool<string>(client, "workflow", {
       action: "upload",
     });
     const tokenResult = parseTokenResponse(tokenRaw);
@@ -364,7 +364,7 @@ describe("HTTP Token Endpoints E2E (Supertest)", () => {
       expect(response.body.data.workflowId).toBe(workflowId);
 
       // Verify workflow was updated
-      const check = await callMCPTool(client, "manage", {
+      const check = await callMCPTool(client, "workflow", {
         action: "get",
         workflowId,
       });
@@ -393,13 +393,13 @@ describe("HTTP Token Endpoints E2E (Supertest)", () => {
       ],
     };
 
-    await callMCPTool(client, "manage", {
+    await callMCPTool(client, "workflow", {
       action: "create",
       workflow,
     });
 
     // Get upload token (as admin - should work with adminOverride)
-    const tokenRaw = await callMCPTool<string>(client, "token", {
+    const tokenRaw = await callMCPTool<string>(client, "workflow", {
       action: "upload",
     });
     const tokenResult = parseTokenResponse(tokenRaw);
@@ -443,7 +443,7 @@ describe("HTTP Token Endpoints E2E (Supertest)", () => {
     };
 
     // Admin creates the workflow (gets ownership), get actual ID
-    const createResult = await callMCPTool(client, "manage", {
+    const createResult = await callMCPTool(client, "workflow", {
       action: "create",
       workflow,
     });
@@ -468,7 +468,7 @@ describe("HTTP Token Endpoints E2E (Supertest)", () => {
 
     try {
       // Non-admin gets upload token
-      const tokenRaw = await callMCPTool<string>(nonAdminMcp.client, "token", {
+      const tokenRaw = await callMCPTool<string>(nonAdminMcp.client, "workflow", {
         action: "upload",
       });
       const tokenResult = parseTokenResponse(tokenRaw);
@@ -536,7 +536,7 @@ describe("HTTP Token Endpoints E2E (Supertest)", () => {
     };
 
     // Admin creates the workflow
-    await callMCPTool(client, "manage", {
+    await callMCPTool(client, "workflow", {
       action: "create",
       workflow,
     });
@@ -554,7 +554,7 @@ describe("HTTP Token Endpoints E2E (Supertest)", () => {
 
     try {
       // Non-admin gets upload token
-      const tokenRaw = await callMCPTool<string>(nonAdminMcp.client, "token", {
+      const tokenRaw = await callMCPTool<string>(nonAdminMcp.client, "workflow", {
         action: "upload",
       });
       const tokenResult = parseTokenResponse(tokenRaw);

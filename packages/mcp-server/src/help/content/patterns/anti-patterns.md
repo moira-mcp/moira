@@ -218,10 +218,10 @@ A `{{name}}` inside returned data stays literal when interpolated later. The def
 **Detection:** Returned `inputSchema` values that contain bare `{{...}}` template syntax.
 
 ```
-❌ step() returns: { summary: "Report for {{project_name}}" }
+❌ execution({ action: "step", processId, attemptId, input }) returns: { summary: "Report for {{project_name}}" }
    Next directive: "Publish {{step-id.summary}}"  // {{project_name}} remains literal
 
-✅ step() returns: { summary: "Report for acme-api" }
+✅ execution({ action: "step", processId, attemptId, input }) returns: { summary: "Report for acme-api" }
    // Substituted data values are treated as literal text, never re-parsed as templates
 ```
 
@@ -253,13 +253,13 @@ System-level consideration. `systemReminder` is static and applied to ALL steps.
 
 Passing entire workflow JSON through MCP tool parameters for large workflows. Hits size limits.
 
-**Detection:** `manage({ action: "create", workflow: <large JSON> })` where a file-based upload would avoid copying a large body.
+**Detection:** `workflow({ action: "create", workflow: <large JSON> })` where a file-based upload would avoid copying a large body.
 
 ```
-❌ manage({ action: "create", workflow: <large JSON> })
+❌ workflow({ action: "create", workflow: <large JSON> })
    // May hit parameter size limits
 
-✅ token({ action: "upload" }) → follow the returned upload instructions
+✅ workflow({ action: "upload" }) → follow the returned upload instructions
    // Observe active upload limits and response; do not assume a method or unlimited size
 ```
 

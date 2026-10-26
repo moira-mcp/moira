@@ -16,6 +16,8 @@ import {
 import { MCPEngine } from "../../packages/mcp-server/src/core/mcp-engine.js";
 import { requestContext } from "../../packages/mcp-server/src/core/request-context.js";
 import { getSessionInfo } from "../../packages/mcp-server/src/tools/get-session-info.js";
+import { invokeToolDefinition } from "../../packages/mcp-server/src/tools/tool-bindings.js";
+import { getToolDefinition } from "../../packages/mcp-server/src/tools/tool-definitions.js";
 import { catalogGraph } from "../helpers/catalog-graphs.js";
 
 const USER_ID = "catalog-task-identity-user";
@@ -807,30 +809,91 @@ describe("todo-list persisted naming and complete earlier-definition compatibili
     expect(continued.currentNodeId).toBe("execute-task");
   });
 
-  test("an unchanged actual task from complete3.10 continues under its captured attempt and old guide", async () => {
+  test("a complete3.10 task diagnoses the public-call change and safely recovers the same execution with its old guide", async () => {
     const run = await atIntake(earlierGraph("todo-list"));
     await run.advance({ ...intake, execution_note: "A legacy arbitrary note" });
     await rename(run.executionId, "Prepare release notes");
     const paused = (await run.repository.getExecution(run.executionId))!;
+    const original = (await run.repository.getCurrentExecutionAttempt(run.executionId, USER_ID))!;
     const deliveredOldGuide = readFileSync(run.guidePath, "utf8");
     const current = currentGraph("todo-list");
     expect(paused.globalContext.variables.workflow_guide).not.toBe(
       current.variableRegistry?.workflow_guide.default,
     );
     await run.repository.saveWorkflow({ ...current, id: run.stored.id }, USER_ID);
-    const diagnosis = await diagnoseContinuation(
-      run.repository,
-      paused,
-      await run.repository.getCurrentExecutionAttempt(run.executionId, USER_ID),
-    );
+    const diagnosis = await diagnoseContinuation(run.repository, paused, original);
     expect({ continuable: diagnosis.continuable, causes: diagnosis.causes }).toEqual({
-      continuable: true,
-      causes: [],
+      continuable: false,
+      causes: [
+        {
+          kind: "continuation_changed",
+          changed: ["node.directive"],
+          removed: [],
+          added: [],
+          blocks: true,
+        },
+      ],
     });
-    await run.advance({
-      evidence: "Draft directly inspected",
-      progress_execution_outcome: "Release notes drafted",
+    expect(await run.repository.getExecutionAttempt(original.attemptId)).toEqual(original);
+    expect(await run.repository.getExecution(run.executionId)).toEqual(paused);
+
+    const recovery = await requestContext.run({ userId: USER_ID }, () =>
+      invokeToolDefinition(getToolDefinition("execution"), {
+        action: "recover",
+        executionId: run.executionId,
+        nodeId: "execute-task",
+      }),
+    );
+    expect(recovery.isError).not.toBe(true);
+    const recoveryText = recovery.content.find((part) => part.type === "text");
+    if (!recoveryText || recoveryText.type !== "text") throw new Error("Missing recovery result");
+    const recovered = JSON.parse(recoveryText.text) as {
+      executionId: string;
+      nodeId: string;
+      presentation: string;
+    };
+    expect(recovered).toMatchObject({ executionId: paused.executionId, nodeId: "execute-task" });
+    expect(recovered.presentation).toContain(
+      'execution({ action: "step", processId, attemptId, input })',
+    );
+    const freshAttemptId = attemptId(recovered.presentation);
+    expect(freshAttemptId).not.toBe(original.attemptId);
+    expect(await run.repository.getExecutionAttempt(original.attemptId)).toMatchObject({
+      state: "superseded",
+      nextAttemptId: expect.stringMatching(/\S/),
+      response: original.response,
+      workflowVersion: original.workflowVersion,
+      workflowDigest: original.workflowDigest,
+      executionRevision: original.executionRevision,
+      continuationDigest: original.continuationDigest,
+      continuationFacts: original.continuationFacts,
+      requestPayload: original.requestPayload,
+      inputFingerprint: original.inputFingerprint,
     });
+    expect(await run.repository.getCurrentExecutionAttempt(run.executionId, USER_ID)).toMatchObject(
+      {
+        attemptId: freshAttemptId,
+        state: "presented",
+        nodeId: "execute-task",
+      },
+    );
+    const restored = (await run.repository.getExecution(run.executionId))!;
+    expect(restored.globalContext).toEqual(paused.globalContext);
+    expect(restored.note).toBe(paused.note);
+    expect(restored.taskIdentity).toEqual(paused.taskIdentity);
+    expect(readFileSync(run.guidePath, "utf8")).toBe(deliveredOldGuide);
+    const completion = await requestContext.run({ userId: USER_ID }, () =>
+      invokeToolDefinition(getToolDefinition("execution"), {
+        action: "step",
+        processId: run.executionId,
+        attemptId: freshAttemptId,
+        input: {
+          evidence: "Draft directly inspected",
+          progress_execution_outcome: "Release notes drafted",
+        },
+      }),
+    );
+    expect(completion.isError).not.toBe(true);
     const continued = (await run.repository.getExecution(run.executionId))!;
     expect(continued.executionId).toBe(paused.executionId);
     expect(continued.globalContext.variables.current_task).toBe(2);

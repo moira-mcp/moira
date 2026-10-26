@@ -29,7 +29,7 @@ describe("MCP Workflow Pagination E2E", () => {
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
       connections: { success: index + 1 < STEP_COUNT ? `step-${index + 2}` : "end" },
     }));
-    const created = await callMCPTool(client, "manage", {
+    const created = await callMCPTool(client, "workflow", {
       action: "create",
       workflow: {
         metadata: {
@@ -53,7 +53,7 @@ describe("MCP Workflow Pagination E2E", () => {
   });
 
   test("get_workflow_details without pagination returns all nodes", async () => {
-    const rawResult = await callMCPTool(client, "manage", {
+    const rawResult = await callMCPTool(client, "workflow", {
       action: "get",
       workflowId: largeWorkflowId,
     });
@@ -66,7 +66,7 @@ describe("MCP Workflow Pagination E2E", () => {
   });
 
   test("get_workflow_details with pagination returns subset", async () => {
-    const result = await callMCPTool(client, "manage", {
+    const result = await callMCPTool(client, "workflow", {
       action: "get",
       workflowId: largeWorkflowId,
       offset: 0,
@@ -79,13 +79,13 @@ describe("MCP Workflow Pagination E2E", () => {
   });
 
   test("pagination offset and limit work correctly", async () => {
-    const page1 = await callMCPTool(client, "manage", {
+    const page1 = await callMCPTool(client, "workflow", {
       action: "get",
       workflowId: largeWorkflowId,
       offset: 0,
       limit: 2,
     });
-    const page2 = await callMCPTool(client, "manage", {
+    const page2 = await callMCPTool(client, "workflow", {
       action: "get",
       workflowId: largeWorkflowId,
       offset: 2,
@@ -101,7 +101,7 @@ describe("MCP Workflow Pagination E2E", () => {
   });
 
   test("metadata-only mode excludes nodes", async () => {
-    const result = await callMCPTool(client, "manage", {
+    const result = await callMCPTool(client, "workflow", {
       action: "get",
       workflowId: largeWorkflowId,
       includeNodes: false,

@@ -5,6 +5,7 @@
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import {
+  deleteOwnedTestWorkflow,
   advanceWorkflowExecution,
   createAuthenticatedMCPClient,
   callMCPTool,
@@ -39,7 +40,7 @@ describe("MCP Expression Node E2E", () => {
       nodes: readonly unknown[];
     }) => {
       const { id: _id, ...workflowWithoutId } = workflow;
-      const result = await callMCPTool<{ workflowId: string }>(client, "manage", {
+      const result = await callMCPTool<{ workflowId: string }>(client, "workflow", {
         action: "create",
         workflow: workflowWithoutId,
       });
@@ -59,11 +60,7 @@ describe("MCP Expression Node E2E", () => {
   afterAll(async () => {
     // Cleanup all created workflows
     for (const workflowId of createdWorkflows) {
-      try {
-        await callMCPTool(client, "manage", { workflowId });
-      } catch (e) {
-        // Ignore cleanup errors
-      }
+      await deleteOwnedTestWorkflow(client, workflowId);
     }
     await cleanup();
   });
@@ -94,7 +91,7 @@ describe("MCP Expression Node E2E", () => {
     const processId = processIdMatch![1];
 
     // Check execution context contains expression results
-    const context = await callMCPTool(client, "session", {
+    const context = await callMCPTool(client, "execution", {
       action: "execution_context",
       executionId: processId,
     });
@@ -123,7 +120,7 @@ describe("MCP Expression Node E2E", () => {
     expect(startResult).toContain("iteration=1");
 
     // Verify in context
-    const context = await callMCPTool(client, "session", {
+    const context = await callMCPTool(client, "execution", {
       action: "execution_context",
       executionId: processId,
     });
@@ -145,7 +142,7 @@ describe("MCP Expression Node E2E", () => {
     expect(startResult).toContain("next_step=6");
 
     // Verify in context
-    const context = await callMCPTool(client, "session", {
+    const context = await callMCPTool(client, "execution", {
       action: "execution_context",
       executionId: processId,
     });

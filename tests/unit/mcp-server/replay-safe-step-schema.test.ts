@@ -17,7 +17,7 @@ describe("replay-safe step public contract", () => {
   });
 
   test("teaches every static step variant to carry the attempt identity", () => {
-    const step = TOOL_DEFINITIONS.find((definition) => definition.name === "step")!;
+    const step = TOOL_DEFINITIONS.find((definition) => definition.name === "execution")!;
     for (const description of [
       resolveToolDescription(step),
       resolveToolDescription(step, { agent: "cursor" }),
@@ -25,7 +25,7 @@ describe("replay-safe step public contract", () => {
       expect(description).toContain("attemptId");
       expect(description).toContain("required even when the workflow accepts an empty response");
       expect(description).toContain("ATTEMPT_CONFLICT");
-      expect(description).toContain("read session current_step automatically");
+      expect(description).toContain("read execution current_step automatically");
       expect(description).toContain("returned directive and input schema");
       expect(description).toContain("ATTEMPT_INVALID_OR_EXPIRED");
       expect(description).toContain("do not reuse the unavailable attempt");
@@ -35,9 +35,11 @@ describe("replay-safe step public contract", () => {
   });
 
   test("keeps runtime lifecycle instructions aligned with the attempt protocol", () => {
-    for (const name of ["list", "start"] as const) {
+    for (const name of ["workflow", "execution"] as const) {
       const definition = TOOL_DEFINITIONS.find((candidate) => candidate.name === name)!;
-      expect(resolveToolDescription(definition)).toContain("step({ processId, attemptId })");
+      expect(resolveToolDescription(definition)).toContain(
+        'execution({ action: "step", processId, attemptId })',
+      );
       expect(resolveToolDescription(definition)).not.toContain("step(processId) →");
     }
     for (const source of [
@@ -55,7 +57,7 @@ describe("replay-safe step public contract", () => {
       "utf8",
     );
     expect(systemPrompt).toContain("ATTEMPT_CONFLICT");
-    expect(systemPrompt).toContain('session({ action: "current_step", executionId })');
+    expect(systemPrompt).toContain('execution({ action: "current_step", executionId })');
     expect(systemPrompt).toContain("returned directive and input schema");
     expect(systemPrompt).toContain("ATTEMPT_INVALID_OR_EXPIRED");
     expect(systemPrompt).toContain("do not reuse the unavailable attempt");

@@ -60,7 +60,7 @@ the projection explicitly rather than being silently truncated into a misleading
 
 Block status comes from the execution's recorded route, never from block order. Every execution
 records one visit per node it runs — the node, the connection it left through (`teleport` for a
-jump), the variables it changed, and whether it paused — and `session({ action: "progress" })`
+jump), the variables it changed, and whether it paused — and `execution({ action: "progress" })`
 projects that route onto the process: the block of the last visit is `active`, or `waiting` when
 the run pauses there; a visited block is `done`, or `repeated` with the number of passes through
 its working steps; a block whose work never ran or that the run bypassed is `skipped`; the rest
@@ -83,7 +83,7 @@ completed runs of that version — the median with quartiles and range — so a 
 against what is usual; one user's runs are never another's statistics. The projection also says
 who a paused run waits for (`waitingFor`): `user` at a gate a person clears (a `lock` step's
 PIN) or on a step the workflow marks with `humanGate` whose condition held as the run arrived,
-or while the agent's own question (`session await-user`) is open, `agent` on any other paused step,
+or while the agent's own question (`execution` (`await-user`)) is open, `agent` on any other paused step,
 `null` when the run is not waiting. It also says what is asked of the person (`waitingForUser`):
 `{ source: "agent", question, options, since }` for the agent's question — which takes precedence —
 or `{ source: "gate", label }` for a marked step. A projection at a route cursor never carries the
@@ -131,7 +131,7 @@ shows the same state. The deprecated `telegram-notification` compatibility node 
 the same attachment for existing provider-specific workflows.
 
 The PNG is rendered and published by a live paired controller. Select it with `device_id` on
-`session({ action: "progress-image-token", executionId, device_id })`; omission requires exactly
+`execution({ action: "progress-image-token", executionId, device_id })`; omission requires exactly
 one eligible live controller. `COMMUNICATION_OWNER_UNAVAILABLE` is a coded MCP failure and HTTP
 503 on mint/public read. Restore the paired connection rather than recreating a VM.
 Ordinary progress reads and text notifications need no owner; an unavailable optional
@@ -156,10 +156,10 @@ without progress shows the technical node graph and the variables panel instead.
 
 A run's task name is independent of its workflow name, current step and arbitrary execution note.
 Establish it at the first evidence-bearing intake, before submitting that step. Read
-`session({ action: "execution_context", executionId })`, then use the returned revisions:
+`execution({ action: "execution_context", executionId })`, then use the returned revisions:
 
 ```javascript
-session({
+execution({
   action: "update-task-title",
   executionId,
   taskTitle: "Import October orders",
@@ -184,7 +184,7 @@ Headings use explicit identity, then the resolved authored `progress.title`, the
 workflow name. Notes never supply headings and remain separately inspectable. Sent messages retain
 their historical name; subsequent notifications resolve current identity at delivery.
 
-`session progress` and `GET /api/executions/:id/progress` return `source: "trace"` for authored
+`execution` (`progress`) and `GET /api/executions/:id/progress` return `source: "trace"` for authored
 progress. Without it they return `source: "metadata"` with task identity, workflow/version and
 execution revision/status, without invented blocks, route, variables or statistics. Runs without
 identity have `taskIdentity: null` and use the same fallback. PNG grants require authored progress
@@ -258,7 +258,8 @@ When a workflow starts:
 5. Engine atomically records the transition, exact response receipt, and next attempt
 6. Repeat until reaching an end node (type: `end`)
 
-Repeating the same attempt with the same input returns its stored response without advancing again.
+Repeating the same attempt with the same input returns its stored response with the current common
+language instruction without advancing again. The stored original bytes and attempt identity stay unchanged.
 Each later paused presentation has a different attempt ID.
 
 ## Execution Context

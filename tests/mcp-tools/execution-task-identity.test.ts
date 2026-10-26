@@ -30,11 +30,11 @@ describe("Execution task identity through a fresh MCP client", () => {
     other = stranger.client;
     cleanup = owner.cleanup;
     cleanupOther = stranger.cleanup;
-    const ownerUser = await callMCPTool(client, "session", { action: "user" });
-    const strangerUser = await callMCPTool(other, "session", { action: "user" });
+    const ownerUser = await callMCPTool(client, "execution", { action: "user" });
+    const strangerUser = await callMCPTool(other, "execution", { action: "user" });
     expect(strangerUser.email).toBe(otherEmail);
     expect(strangerUser.email).not.toBe(ownerUser.email);
-    const created = await callMCPTool(client, "manage", {
+    const created = await callMCPTool(client, "workflow", {
       action: "create",
       workflow: {
         metadata: {
@@ -70,10 +70,16 @@ describe("Execution task identity through a fresh MCP client", () => {
   });
 
   test("publishes the guarded rename action in the accepted session catalog", async () => {
-    const session = (await client.listTools()).tools.find((tool) => tool.name === "session");
+    const session = (await client.listTools()).tools.find((tool) => tool.name === "execution");
     expect(session).toBeDefined();
-    const properties = session!.inputSchema.properties as Record<string, { enum?: string[] }>;
-    expect(properties.action.enum).toContain("update-task-title");
+    const branches = (
+      session!.inputSchema as unknown as {
+        anyOf: Array<{ properties: Record<string, { const?: string }> }>;
+      }
+    ).anyOf;
+    const properties = branches.find(
+      (branch) => branch.properties.action.const === "update-task-title",
+    )!.properties;
     expect(properties).toHaveProperty("taskTitle");
     expect(properties).toHaveProperty("expectedTaskIdentityRevision");
   });
@@ -82,12 +88,12 @@ describe("Execution task identity through a fresh MCP client", () => {
     const running = await startWorkflowExecutionState(client, workflowId, {
       note: "Arbitrary diagnostic note",
     });
-    const context = await callMCPTool(client, "session", {
+    const context = await callMCPTool(client, "execution", {
       action: "execution_context",
       executionId: running.processId,
     });
     expect(context.taskTitle).toBe("Identity source without progress");
-    const renamed = await callMCPTool(client, "session", {
+    const renamed = await callMCPTool(client, "execution", {
       action: "update-task-title",
       executionId: running.processId,
       taskTitle: "  Implement task naming  ",
@@ -99,11 +105,11 @@ describe("Execution task identity through a fresh MCP client", () => {
       revision: context.revision,
       taskIdentity: { title: "Implement task naming" },
     });
-    const beforeNoop = await callMCPTool(client, "session", {
+    const beforeNoop = await callMCPTool(client, "execution", {
       action: "execution_context",
       executionId: running.processId,
     });
-    const noop = await callMCPTool(client, "session", {
+    const noop = await callMCPTool(client, "execution", {
       action: "update-task-title",
       executionId: running.processId,
       taskTitle: "Implement task naming",
@@ -111,18 +117,18 @@ describe("Execution task identity through a fresh MCP client", () => {
       expectedTaskIdentityRevision: renamed.taskIdentityRevision,
     });
     expect(noop).toMatchObject({ changed: false, taskIdentity: renamed.taskIdentity });
-    const afterNoop = await callMCPTool(client, "session", {
+    const afterNoop = await callMCPTool(client, "execution", {
       action: "execution_context",
       executionId: running.processId,
     });
     expect(afterNoop.metadataRevisions).toEqual(beforeNoop.metadataRevisions);
     expect(afterNoop.updatedAt).toBe(beforeNoop.updatedAt);
-    await callMCPTool(client, "session", {
+    await callMCPTool(client, "execution", {
       action: "update-note",
       executionId: running.processId,
       note: "A different arbitrary note",
     });
-    const progress = await callMCPTool(client, "session", {
+    const progress = await callMCPTool(client, "execution", {
       action: "progress",
       executionId: running.processId,
     });
@@ -134,19 +140,20 @@ describe("Execution task identity through a fresh MCP client", () => {
     });
     expect(progress).not.toHaveProperty("process");
     expect(progress).not.toHaveProperty("nodes");
-    const afterNote = await callMCPTool(client, "session", {
+    const afterNote = await callMCPTool(client, "execution", {
       action: "execution_context",
       executionId: running.processId,
     });
     expect(afterNote.note).toBe("A different arbitrary note");
     expect(afterNote.taskIdentity).toEqual(renamed.taskIdentity);
-    const result = await callMCPToolRaw(client, "step", {
+    const result = await callMCPToolRaw(client, "execution", {
+      action: "step",
       processId: running.processId,
       attemptId: running.attemptId,
       input: { result: "done" },
     });
     expect(result).toContain("Process ID:");
-    const completed = await callMCPTool(client, "session", {
+    const completed = await callMCPTool(client, "execution", {
       action: "execution_context",
       executionId: running.processId,
     });
@@ -156,11 +163,11 @@ describe("Execution task identity through a fresh MCP client", () => {
 
   test("refuses another user's rename without changing the owned execution", async () => {
     const running = await startWorkflowExecutionState(client, workflowId);
-    const context = await callMCPTool(client, "session", {
+    const context = await callMCPTool(client, "execution", {
       action: "execution_context",
       executionId: running.processId,
     });
-    const refused = await callMCPToolRaw(other, "session", {
+    const refused = await callMCPToolRaw(other, "execution", {
       action: "update-task-title",
       executionId: running.processId,
       taskTitle: "Unauthorized title",
@@ -168,7 +175,7 @@ describe("Execution task identity through a fresh MCP client", () => {
       expectedTaskIdentityRevision: context.metadataRevisions.taskIdentity,
     });
     expect(refused).toContain("Execution must belong to the authenticated user");
-    const unchanged = await callMCPTool(client, "session", {
+    const unchanged = await callMCPTool(client, "execution", {
       action: "execution_context",
       executionId: running.processId,
     });
@@ -178,16 +185,17 @@ describe("Execution task identity through a fresh MCP client", () => {
 
   test("refuses a rename after the execution completes", async () => {
     const running = await startWorkflowExecutionState(client, workflowId);
-    await callMCPToolRaw(client, "step", {
+    await callMCPToolRaw(client, "execution", {
+      action: "step",
       processId: running.processId,
       attemptId: running.attemptId,
       input: { result: "done" },
     });
-    const context = await callMCPTool(client, "session", {
+    const context = await callMCPTool(client, "execution", {
       action: "execution_context",
       executionId: running.processId,
     });
-    const refused = await callMCPToolRaw(client, "session", {
+    const refused = await callMCPToolRaw(client, "execution", {
       action: "update-task-title",
       executionId: running.processId,
       taskTitle: "Late title",
@@ -195,7 +203,7 @@ describe("Execution task identity through a fresh MCP client", () => {
       expectedTaskIdentityRevision: context.metadataRevisions.taskIdentity,
     });
     expect(refused).toMatch(/running|active|terminal|finished/i);
-    const unchanged = await callMCPTool(client, "session", {
+    const unchanged = await callMCPTool(client, "execution", {
       action: "execution_context",
       executionId: running.processId,
     });

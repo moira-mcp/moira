@@ -102,11 +102,14 @@ export class LocalWebControl {
       await release();
     }
   }
-  async report(identity: ControlIdentity): Promise<LocalControlReport | undefined> {
+  async report(
+    identity: ControlIdentity,
+    observedPolicy?: LocalPolicy,
+  ): Promise<LocalControlReport | undefined> {
     const approval = await this.records.state.read("web-control.json", approvalSchema.parse);
     if (!approval) return undefined;
     assertApprovalIdentity(approval, identity);
-    const policy = await this.records.policy();
+    const policy = observedPolicy ?? (await this.records.policy());
     return {
       ceiling: approval.ceiling,
       settings: controlSettings(policy),

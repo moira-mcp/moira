@@ -3,6 +3,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { Ajv } from "ajv";
+import addFormats from "ajv-formats";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -10,6 +12,9 @@ import {
   MCP_TOOLS_REVISION,
   MCP_TOOL_NAMES,
   TOOL_DEFINITIONS,
+  INTERNAL_TOOL_DEFINITIONS,
+  PUBLIC_TOOL_SCHEMAS,
+  resolvePublicTool,
   computeContractRevision,
   computeToolContractRevision,
   getToolContractProjection,
@@ -20,17 +25,20 @@ import {
   renderToolReference,
   type McpToolName,
 } from "../../../packages/mcp-server/src/tools/tool-definitions.js";
-import { startRequestSchema } from "../../../packages/mcp-server/src/tools/tool-schemas.js";
 import { WORKSPACE_TOOL_SCHEMAS } from "../../../packages/mcp-server/src/tools/workspace-tool-contract.js";
 import { encodeReference } from "@mcp-moira/shared/workspace-references";
 import {
   registerTools,
   setToolFailureReporterForTests,
 } from "../../../packages/mcp-server/src/tools/register-tools.js";
-import { TOOL_BINDINGS } from "../../../packages/mcp-server/src/tools/tool-bindings.js";
+import {
+  TOOL_BINDINGS,
+  invokeToolDefinition,
+} from "../../../packages/mcp-server/src/tools/tool-bindings.js";
 import { ServiceLogger } from "../../../packages/shared/src/logging/logger.js";
 import { NotFoundError } from "../../../packages/shared/src/errors/app-error.js";
 import { WorkflowNotFoundError } from "../../../packages/shared/src/errors/domain-errors.js";
+import { publicToolLogContext } from "../../../packages/mcp-server/src/tools/public-tool-contract.js";
 
 /**
  * Observes the records the production reporters emit: the logger call itself, with its level, so a
@@ -135,6 +143,204 @@ async function inspectPublishedContract(instructions: string, context?: { agent?
 }
 
 describe("MCP tool definitions", () => {
+  it("retains the complete authored graph through the actual grouped binding", async () => {
+    const workflow = {
+      metadata: {
+        name: "Flow",
+        version: "1.0.0",
+        description: "Flow",
+        schemaVersion: 2,
+        authorExtension: { value: false },
+      },
+      nodes: [
+        { id: "start", type: "start", connections: { default: "end" } },
+        { id: "end", type: "end" },
+      ],
+      authorExtension: { value: 0 },
+      variableRegistry: { flag: { type: "boolean", description: "Flag", default: false } },
+    };
+    let received: unknown;
+    const restore = replaceToolBinding("manage", async (params: unknown) => {
+      received = params;
+      return { success: true, data: "retained" };
+    });
+    try {
+      const definition = TOOL_DEFINITIONS.find((tool) => tool.name === "workflow")!;
+      await invokeToolDefinition(definition, { action: "validate", workflow });
+      expect(received).toEqual({ action: "validate", workflow });
+    } finally {
+      restore();
+    }
+  });
+  it("rejects missing values and cross-action fields while retaining actual false, null and empty text", () => {
+    for (const value of [null, false, 0, ""]) {
+      expect(
+        PUBLIC_TOOL_SCHEMAS.workflow.safeParse({
+          action: "set-variable",
+          workflowId: "flow",
+          variableName: "value",
+          variableValue: value,
+        }).success,
+      ).toBe(true);
+      expect(
+        PUBLIC_TOOL_SCHEMAS.execution.safeParse({
+          action: "set-variable",
+          executionId: "run",
+          variableName: "value",
+          variableValue: value,
+          expectedRevision: 0,
+          expectedContextRevision: "a".repeat(64),
+        }).success,
+      ).toBe(true);
+      expect(
+        PUBLIC_TOOL_SCHEMAS.settings.safeParse({ action: "set", key: "key", value }).success,
+      ).toBe(true);
+    }
+    const invalid: Array<[McpToolName, unknown]> = [
+      ["workflow", { action: "set-variable", workflowId: "flow", variableName: "value" }],
+      [
+        "execution",
+        {
+          action: "set-variable",
+          executionId: "run",
+          variableName: "value",
+          expectedRevision: 0,
+          expectedContextRevision: "a".repeat(64),
+        },
+      ],
+      ["settings", { action: "set", key: "key" }],
+      ["settings", { action: "get", key: "key", category: "notifications" }],
+      ["settings", { action: "list", value: false }],
+      ["workflow", { action: "get", workflowId: "flow", overwrite: true }],
+      ["workflow", { action: "validate", workflowId: "flow" }],
+      ["workflow", { action: "edit", workflowId: "flow", changes: {} }],
+      [
+        "workflow",
+        {
+          action: "move-node",
+          workflowId: "flow",
+          nodeId: "node",
+          targetIndex: 0,
+          afterNodeId: "other",
+        },
+      ],
+      [
+        "execution",
+        { action: "step", processId: "run", attemptId: "attempt", input: {}, teleportTo: "target" },
+      ],
+      [
+        "execution",
+        {
+          action: "prepare",
+          workflowId: "flow",
+          parentExecutionId: "none",
+          skipNotificationCheck: true,
+          skipTelegramCheck: false,
+        },
+      ],
+      [
+        "execution",
+        { action: "await-user", executionId: "run", question: "Question?", resolve: true },
+      ],
+      ["execution", { action: "unlock", executionId: "run", reason: "reason" }],
+      ["notes", { action: "delete", key: "key", value: "ignored" }],
+      ["playbooks", { action: "restore", name: "name", revision: 1, owner: "other" }],
+      ["artifacts", { action: "upload", name: "report", content: "" }],
+      ["artifacts", { action: "update", uuid: "id", content: "html", executionId: "ignored" }],
+    ];
+    for (const [name, input] of invalid)
+      expect(PUBLIC_TOOL_SCHEMAS[name].safeParse(input).success).toBe(false);
+    expect(
+      PUBLIC_TOOL_SCHEMAS.notes.safeParse({ action: "save", key: "key", value: "" }).success,
+    ).toBe(true);
+    expect(
+      PUBLIC_TOOL_SCHEMAS.playbooks.safeParse({ action: "save", name: "name", content: "" })
+        .success,
+    ).toBe(true);
+    expect(
+      PUBLIC_TOOL_SCHEMAS.workflow.safeParse({
+        action: "clone-node",
+        workflowId: "flow",
+        nodeId: "node",
+      }).success,
+    ).toBe(true);
+    expect(
+      PUBLIC_TOOL_SCHEMAS.workflow.safeParse({ action: "revoke-invite", inviteId: "invite" })
+        .success,
+    ).toBe(true);
+  });
+
+  it("keeps conditional native schema valid before and after root-only client path masking", () => {
+    const workspace = encodeReference("workspace", {
+      resourceId: "00000000-0000-4000-8000-000000000001",
+      provider: "github-codespaces",
+      generation: 1,
+    });
+    const file = {
+      file_id: "file_Example",
+      download_url: "https://files.oaiusercontent.com/private-signature",
+    };
+    const definition = TOOL_DEFINITIONS.find((tool) => tool.name === "codespace_terminal")!;
+    const schema = getToolJsonSchema(definition);
+    const ajv = new Ajv({ strict: false });
+    (addFormats as unknown as (instance: Ajv) => void)(ajv);
+    const validate = ajv.compile(schema);
+    const run = { action: "run", workspace, command: { argv: ["cat"] } };
+    const native = { ...run, action: "run_native", stdin_file: file };
+    expect(validate(run)).toBe(true);
+    expect(validate(native)).toBe(true);
+    expect(validate({ ...run, stdin_file: file })).toBe(false);
+    expect(validate({ ...native, stdin_file: undefined })).toBe(false);
+    expect(validate({ ...native, stdin_file: "/tmp/input" })).toBe(false);
+    const masked = structuredClone(schema) as unknown as Record<string, unknown> & {
+      properties: Record<string, unknown>;
+    };
+    masked.properties.stdin_file = { type: "string" };
+    const validateMasked = ajv.compile(masked);
+    expect(validateMasked({ ...native, stdin_file: "/tmp/input" })).toBe(true);
+    expect(validateMasked({ ...run, stdin_file: "/tmp/input" })).toBe(false);
+    expect(validateMasked(native)).toBe(false);
+    expect(
+      PUBLIC_TOOL_SCHEMAS.codespace_terminal.safeParse({ ...native, stdin_file: "/tmp/input" })
+        .success,
+    ).toBe(false);
+  });
+
+  it("routes lifecycle and grouped actions without forwarding selectors or private data to generic logs", () => {
+    const workspace = encodeReference("workspace", {
+      resourceId: "00000000-0000-4000-8000-000000000001",
+      provider: "github-codespaces",
+      generation: 1,
+    });
+    expect(
+      resolvePublicTool("codespace", { action: "lifecycle", workspace, operation: "resume_setup" }),
+    ).toEqual({
+      purpose: "workspace_lifecycle",
+      params: { workspace, action: "resume_setup" },
+      privateInput: true,
+    });
+    expect(resolvePublicTool("execution", { action: "lock_status", executionId: "run" })).toEqual({
+      purpose: "lock",
+      params: { executionId: "run", action: "status" },
+      privateInput: false,
+    });
+    const input = {
+      action: "run_native",
+      workspace,
+      command: { script: "secret command" },
+      stdin_file: {
+        file_id: "file_Example",
+        download_url: "https://files.oaiusercontent.com/signed-secret",
+      },
+    };
+    expect(publicToolLogContext("codespace_terminal", input)).toEqual({
+      inputData: { workspace_tool: "command_run_native" },
+      resourceIds: {},
+    });
+    expect(JSON.stringify(publicToolLogContext("codespace_terminal", input))).not.toMatch(
+      /secret|file_Example|https/,
+    );
+  });
   it("keeps the fileless-agent codespace instruction in the canonical default prompt", () => {
     const canonical = readFileSync(resolve("config/prompts/systemPrompt.md"), "utf8");
     expect(canonical).toContain(
@@ -146,40 +352,58 @@ describe("MCP tool definitions", () => {
     );
   });
 
-  it("publishes purpose tools instead of the three removed flat dispatchers", () => {
-    expect(MCP_TOOL_NAMES.slice(0, 13)).toEqual([
+  it("publishes the agreed groups without old public purpose aliases", () => {
+    expect([...MCP_TOOL_NAMES].sort()).toEqual(
+      [
+        "codespace",
+        "codespace_terminal",
+        "codespace_read",
+        "codespace_search",
+        "codespace_edit",
+        "codespace_upload",
+        "codespace_download",
+        "codespace_git",
+        "workflow",
+        "execution",
+        "communication",
+        "notes",
+        "playbooks",
+        "artifacts",
+        "settings",
+        "help",
+      ].sort(),
+    );
+    for (const old of [
       "list",
-      "reconciliation",
       "start",
       "step",
       "manage",
-      "help",
-      "settings",
-      "token",
       "session",
-      "notes",
-      "playbooks",
-      "artifacts",
+      "token",
       "lock",
-    ]);
-    expect(MCP_TOOL_NAMES.slice(13)).toEqual(Object.keys(WORKSPACE_TOOL_SCHEMAS));
-    for (const old of ["codespace", "codespace_process", "communication"])
+      "reconciliation",
+      ...Object.keys(WORKSPACE_TOOL_SCHEMAS),
+    ])
       expect(MCP_TOOL_NAMES).not.toContain(old);
   });
 
   it("publishes native files as required only for the matching strict purposes", async () => {
     const published = await inspectPublishedContract("native file handoff");
     for (const [name, field] of [
-      ["file_upload", "file"],
-      ["command_run_native", "stdin_file"],
-      ["communication_deliver", "file"],
+      ["codespace_upload", "file"],
+      ["codespace_terminal", "stdin_file"],
+      ["communication", "file"],
     ]) {
       const tool = published.tools.find((candidate) => candidate.name === name)!;
       const schema = dereferenceLocalJsonSchema(tool.inputSchema) as {
         required: string[];
         properties: Record<string, { required: string[] }>;
       };
-      expect(schema.required).toContain(field);
+      expect(schema.required ?? []).toEqual(
+        name === "codespace_upload"
+          ? expect.arrayContaining([field])
+          : expect.not.arrayContaining([field]),
+      );
       expect(schema.properties[field].required.slice().sort()).toEqual(["download_url", "file_id"]);
       expect(tool._meta).toEqual({ "openai/fileParams": [field] });
     }
@@ -277,8 +501,8 @@ describe("MCP tool definitions", () => {
       expect(
         (
           await client.callTool({
-            name: "file_preview",
-            arguments: { workspace, path: "image.png" },
+            name: "codespace_read",
+            arguments: { action: "preview", workspace, path: "image.png" },
           })
         ).content,
       ).toEqual([native]);
@@ -294,14 +518,13 @@ describe("MCP tool definitions", () => {
       expect(definition.examples.length).toBeGreaterThan(0);
       for (const example of definition.examples) {
         expect(definition.schema.safeParse(example).success).toBe(true);
-        let schema: z.ZodTypeAny = definition.schema;
+        const schema: z.ZodTypeAny = definition.schema;
         const request: Readonly<Record<string, unknown>> = example;
-        if (definition.name === "start") schema = startRequestSchema;
         expect(schema.safeParse(request)).toMatchObject({ success: true });
       }
     }
 
-    const start = TOOL_DEFINITIONS.find((definition) => definition.name === "start")!;
+    const start = TOOL_DEFINITIONS.find((definition) => definition.name === "execution")!;
     expect(start.schema.safeParse({ workflowId: "moira/quick-task" }).success).toBe(false);
     expect(
       start.schema.safeParse({
@@ -335,56 +558,62 @@ describe("MCP tool definitions", () => {
     for (const tool of published.tools) {
       const schema = dereferenceLocalJsonSchema(tool.inputSchema) as Record<string, unknown>;
       expect(schema.type).toBe("object");
-      expect(schema).not.toHaveProperty("anyOf");
-      expect(schema).not.toHaveProperty("oneOf");
+      expect(tool.inputSchema).toEqual(
+        getToolJsonSchema(TOOL_DEFINITIONS.find((definition) => definition.name === tool.name)!),
+      );
     }
   });
 
-  it("publishes a flat Start catalog contract with both action field sets", async () => {
+  it("publishes distinct strict prepare and execute catalog branches", async () => {
     const published = await inspectPublishedContract("start schema");
-    const start = published.tools.find((tool) => tool.name === "start");
+    const start = published.tools.find((tool) => tool.name === "execution");
     expect(start).toBeDefined();
     const schema = dereferenceLocalJsonSchema(start!.inputSchema) as {
       type?: string;
-      additionalProperties?: boolean;
-      properties?: Record<string, { enum?: string[]; description?: string }>;
-      required?: string[];
+      anyOf: Array<{
+        additionalProperties: boolean;
+        properties: Record<string, { const?: string }>;
+        required: string[];
+      }>;
     };
 
-    expect(schema).toMatchObject({
-      type: "object",
+    const prepare = schema.anyOf.find((branch) => branch.properties.action.const === "prepare")!;
+    const execute = schema.anyOf.find((branch) => branch.properties.action.const === "execute")!;
+    expect(prepare).toMatchObject({
       additionalProperties: false,
-      required: ["action"],
+      required: ["action", "workflowId", "parentExecutionId"],
     });
-    expect(schema.properties?.action?.enum).toEqual(["prepare", "execute"]);
-    expect(Object.keys(schema.properties ?? {})).toEqual(
-      expect.arrayContaining([
-        "action",
-        "workflowId",
-        "note",
-        "parentExecutionId",
-        "skipNotificationCheck",
-        "skipTelegramCheck",
-        "startAttemptId",
-      ]),
-    );
-    expect(schema.properties?.workflowId?.description).toContain("prepare");
-    expect(schema.properties?.startAttemptId?.description).toContain("execute");
+    expect(execute).toMatchObject({
+      additionalProperties: false,
+      required: ["action", "startAttemptId"],
+    });
+    expect(prepare.properties).not.toHaveProperty("startAttemptId");
+    expect(execute.properties).not.toHaveProperty("workflowId");
   });
 
   it("derives the complete operation inventory from schemas", () => {
-    const manage = TOOL_DEFINITIONS.find((definition) => definition.name === "manage")!;
+    const manage = TOOL_DEFINITIONS.find((definition) => definition.name === "workflow")!;
     for (const action of ["list-nodes", "get-nodes", "analyze-variables", "set-visibility"]) {
       expect(getToolOperations(manage)).toContain(action);
     }
     const manageJsonSchema = getToolJsonSchema(manage) as unknown as {
-      properties?: { workflow?: { type?: string }; changes?: { type?: string } };
+      anyOf: Array<{ properties: { workflow?: { type: string }; changes?: { type: string } } }>;
     };
-    expect(manageJsonSchema.properties?.workflow?.type).toBe("object");
-    expect(manageJsonSchema.properties?.changes?.type).toBe("object");
+    expect(
+      manageJsonSchema.anyOf.some((branch) => branch.properties.workflow?.type === "object"),
+    ).toBe(true);
+    expect(
+      manageJsonSchema.anyOf.some((branch) => branch.properties.changes?.type === "object"),
+    ).toBe(true);
 
-    const session = TOOL_DEFINITIONS.find((definition) => definition.name === "session")!;
-    expect(Object.keys(session.schema.shape)).not.toContain("variables");
+    const session = TOOL_DEFINITIONS.find((definition) => definition.name === "execution")!;
+    expect(
+      session.schema.safeParse({
+        action: "execution_context",
+        executionId: "id",
+        variables: ["secret"],
+      }).success,
+    ).toBe(false);
   });
 
   it("uses the MCP SDK input conversion semantics for reusable tool schemas", () => {
@@ -415,17 +644,19 @@ describe("MCP tool definitions", () => {
     expect(settings.schema.safeParse({ action: "get", category: "   " }).success).toBe(false);
 
     const projected = getToolJsonSchema(settings) as unknown as {
-      properties: {
-        key: { minLength?: number; pattern?: string };
-        category: { minLength?: number; pattern?: string };
-      };
+      anyOf: Array<{
+        properties: {
+          key?: { minLength: number; pattern: string };
+          category?: { minLength: number; pattern: string };
+        };
+      }>;
     };
-    expect(projected.properties.key).toEqual(
+    expect(projected.anyOf.find((branch) => branch.properties.key)?.properties.key).toEqual(
       expect.objectContaining({ minLength: 1, pattern: "\\S" }),
     );
-    expect(projected.properties.category).toEqual(
-      expect.objectContaining({ minLength: 1, pattern: "\\S" }),
-    );
+    expect(
+      projected.anyOf.find((branch) => branch.properties.category)?.properties.category,
+    ).toEqual(expect.objectContaining({ minLength: 1, pattern: "\\S" }));
   });
 
   it("computes the current client cache revision directly from the contract", () => {
@@ -434,7 +665,9 @@ describe("MCP tool definitions", () => {
   });
 
   it("keeps executable bindings exhaustive without duplicating contract order", () => {
-    expect(Object.keys(TOOL_BINDINGS).sort()).toEqual([...MCP_TOOL_NAMES].sort());
+    expect(Object.keys(TOOL_BINDINGS).sort()).toEqual(
+      INTERNAL_TOOL_DEFINITIONS.map((definition) => definition.name).sort(),
+    );
   });
 
   it("projects one contract change into the revision, runtime reference, and public model", () => {
@@ -497,7 +730,7 @@ describe("MCP tool definitions", () => {
         name: string;
         descriptions: { agents?: Record<string, { description?: string }> };
       }>
-    ).find((definition) => definition.name === "step")!;
+    ).find((definition) => definition.name === "execution")!;
     step.descriptions.agents!.cursor.description += " changed";
     expect(computeContractRevision(changedAgentDescription)).not.toBe(
       computeContractRevision(projection),
@@ -526,14 +759,14 @@ describe("MCP tool definitions", () => {
       await client.connect(clientTransport);
 
       const result = (await client.callTool({
-        name: "list",
-        arguments: { search: "private search term" },
+        name: "workflow",
+        arguments: { action: "list", search: "private search term" },
       })) as { isError?: boolean; content: Array<{ text: string }> };
 
       expect(result.isError).toBe(true);
       expect(result.content[0]?.text).toBe("Error: Internal server error");
       expect(JSON.stringify(result)).not.toMatch(/sqlite|private\.db|private search term/);
-      expect(records.reported).toEqual([{ toolName: "list", error: failure }]);
+      expect(records.reported).toEqual([{ toolName: "workflow", error: failure }]);
       expect(JSON.stringify(records.reported.map(({ toolName }) => toolName))).not.toContain(
         "private search term",
       );
@@ -577,13 +810,13 @@ describe("MCP tool definitions", () => {
       await client.connect(clientTransport);
 
       const result = (await client.callTool({
-        name: "list",
-        arguments: { search: "private search term" },
+        name: "workflow",
+        arguments: { action: "list", search: "private search term" },
       })) as { isError?: boolean };
 
       expect(result.isError).toBe(true);
       expect(records.emitted).toEqual([
-        { level, message: "MCP tool failed", error: failure, meta: { tool: "list" } },
+        { level, message: "MCP tool failed", error: failure, meta: { tool: "workflow" } },
       ]);
     } finally {
       restoreBinding();
@@ -609,8 +842,8 @@ describe("MCP tool definitions", () => {
       await client.connect(clientTransport);
 
       const result = (await client.callTool({
-        name: "reconciliation",
-        arguments: { action: "status" },
+        name: "workflow",
+        arguments: { action: "reconciliation_status" },
       })) as { isError?: boolean; content: Array<{ text: string }> };
 
       expect(result.isError).toBe(true);
@@ -685,7 +918,7 @@ describe("MCP tool definitions", () => {
       await server.connect(serverTransport);
       await client.connect(clientTransport);
       const result = await client.callTool({
-        name: "start",
+        name: "execution",
         arguments: {
           action: "execute",
           startAttemptId: "00000000-0000-4000-8000-000000000000",
@@ -696,8 +929,7 @@ describe("MCP tool definitions", () => {
       const [firstBlock] = result.content as Array<{ type: string; text: string }>;
       expect(firstBlock).toMatchObject({ type: "text" });
       const errorText = firstBlock.text;
-      expect(errorText).toContain("Unrecognized key");
-      expect(errorText).toContain("workflowId");
+      expect(errorText).toMatch(/Invalid|Unrecognized/i);
       expect(errorText).not.toContain("must-not-be-read");
     } finally {
       await client.close();
@@ -731,21 +963,26 @@ describe("MCP tool definitions", () => {
         context,
       );
 
-    expect(description("list")).toContain("Results are paginated");
-    expect(description("list")).toContain("nextOffset");
-    expect(description("list")).not.toContain("list all accessible workflows");
-    expect(description("list")).not.toMatch(/stable ordering/i);
+    expect(description("workflow")).toContain("Results are paginated");
+    expect(description("workflow")).toContain("nextOffset");
+    expect(description("workflow")).not.toContain("list all accessible workflows");
+    expect(description("workflow")).not.toMatch(/stable ordering/i);
 
-    expect(description("start")).toContain("no execution or workflow effect is created");
-    expect(description("start")).toContain("completed calls replay the exact stored receipt");
-    expect(description("start")).toContain("ATTEMPT_OUTCOME_UNKNOWN");
+    expect(description("execution")).toContain("no execution or workflow effect is created");
+    expect(description("execution")).toContain(
+      "completed calls reuse the same durable receipt and attempt",
+    );
+    expect(description("execution")).toContain(
+      "current common language guidance without rewriting the saved receipt",
+    );
+    expect(description("execution")).toContain("ATTEMPT_OUTCOME_UNKNOWN");
 
-    const manage = TOOL_DEFINITIONS.find((definition) => definition.name === "manage")!;
-    expect(description("manage")).toContain("input schema's `action` enum");
-    expect(description("manage")).toContain("invitations");
-    expect(description("manage")).toContain("access");
-    expect(description("manage")).toContain("`variableRegistry`");
-    expect(description("manage")).not.toMatch(/Actions \(\d+ total\)/);
+    const manage = TOOL_DEFINITIONS.find((definition) => definition.name === "workflow")!;
+    expect(description("workflow")).toContain("input schema's strict `action` branches");
+    expect(description("workflow")).toContain("invitations");
+    expect(description("workflow")).toContain("access");
+    expect(description("workflow")).toContain("`variableRegistry`");
+    expect(description("workflow")).not.toMatch(/Actions \(\d+ total\)/);
     expect(getToolOperations(manage)).toContain("create-invite");
     expect(getToolOperations(manage)).toContain("revoke-invite");
     expect(getToolOperations(manage)).toContain("list-access");
@@ -770,10 +1007,10 @@ describe("MCP tool definitions", () => {
     expect(description("settings")).toContain('settings({ action: "get" })');
     expect(description("settings")).not.toContain("notifications.telegram");
 
-    expect(description("lock")).toContain("never returns the generated PIN");
-    expect(description("lock")).toContain("user supplies the PIN");
-    expect(description("lock")).not.toMatch(/returns (a )?PIN/i);
-    const lock = TOOL_DEFINITIONS.find((definition) => definition.name === "lock")!;
+    expect(description("execution")).toContain("never returns the generated PIN");
+    expect(description("execution")).toContain("user supplies the PIN");
+    expect(description("execution")).not.toMatch(/returns (a )?PIN/i);
+    const lock = TOOL_DEFINITIONS.find((definition) => definition.name === "execution")!;
     expect(
       lock.schema.safeParse({ action: "unlock", executionId: "execution", pin: "123456" }).success,
     ).toBe(true);
@@ -783,23 +1020,29 @@ describe("MCP tool definitions", () => {
     expect(description("notes")).toContain("`limit` and `offset`");
     expect(description("notes")).not.toContain('notes({ action: "list" }) - all notes');
     expect(description("notes")).not.toMatch(/100KB|1MB total/i);
-    expect(description("artifacts")).toContain("Use `stats` for the current storage");
-    expect(description("artifacts")).toContain("may be administrator-configured");
+    expect(description("artifacts")).toContain(
+      "stats: Effective file-size, storage and artifact-count limits and usage",
+    );
+    expect(description("artifacts")).toContain(
+      "policies are server-configured and may have user overrides",
+    );
     expect(description("artifacts")).not.toMatch(/30 days|5MB|100MB|50 per user/i);
 
     expect(description("help")).toContain("Call without `topic`");
     expect(description("help")).toContain("current topic names and accepted aliases");
     expect(description("help")).not.toContain("without parameters for overview");
     expect(description("help")).not.toContain("Getting Started: introduction");
-    expect(description("reconciliation")).toContain("`current`, `incoming`, or `previous`");
-    expect(description("session")).toContain("active or completed states");
-    expect(description("session")).toContain("Process ID, directive, success criteria");
-    expect(description("session")).toContain("active-child, system-reminder, and teleport context");
-    expect(description("session")).toContain("not a complete step input/output transcript");
-    expect(description("session")).not.toContain("FULL execution history");
-    expect(description("session")).not.toContain("ONLY current directive and inputSchema");
+    expect(description("workflow")).toContain("`current`, `incoming`, or `previous`");
+    expect(description("execution")).toContain("active or completed states");
+    expect(description("execution")).toContain("Process ID, directive, success criteria");
+    expect(description("execution")).toContain(
+      "active-child, system-reminder, and teleport context",
+    );
+    expect(description("execution")).toContain("not a complete step input/output transcript");
+    expect(description("execution")).not.toContain("FULL execution history");
+    expect(description("execution")).not.toContain("ONLY current directive and inputSchema");
 
-    const cursorStep = description("step", { agent: "cursor" });
+    const cursorStep = description("execution", { agent: "cursor" });
     expect(cursorStep).toContain("Cursor input note:");
     expect(cursorStep).toContain("[object Object]");
     expect(cursorStep).not.toContain("VERY IMPORTANT");
@@ -808,12 +1051,12 @@ describe("MCP tool definitions", () => {
   it("changes initialization instructions without changing static Cursor tool descriptions", async () => {
     const first = await inspectPublishedContract("database prompt alpha", { agent: "cursor" });
     const second = await inspectPublishedContract("unrelated prompt beta", { agent: "cursor" });
-    const step = TOOL_DEFINITIONS.find((definition) => definition.name === "step")!;
+    const step = TOOL_DEFINITIONS.find((definition) => definition.name === "execution")!;
     const help = TOOL_DEFINITIONS.find((definition) => definition.name === "help")!;
 
     expect(first.instructions).toBe("database prompt alpha");
     expect(second.instructions).toBe("unrelated prompt beta");
-    expect(first.tools.find((tool) => tool.name === "step")?.description).toBe(
+    expect(first.tools.find((tool) => tool.name === "execution")?.description).toBe(
       resolveToolDescription(step, { agent: "cursor" }),
     );
     expect(resolveToolDescription(step, { agent: "cursor" })).not.toBe(
@@ -859,9 +1102,9 @@ describe("MCP tool definitions", () => {
     const fragment = renderToolReference("en", 2);
 
     expect(standalone).toMatch(/^# MCP tools\n/);
-    expect(standalone).toContain("\n## `list`\n");
+    expect(standalone).toContain("\n## `workflow`\n");
     expect(fragment).toMatch(/^## MCP tools\n/);
-    expect(fragment).toContain("\n### `list`\n");
+    expect(fragment).toContain("\n### `workflow`\n");
     expect(fragment).toContain("\n#### Input schema\n");
     expect(fragment).not.toMatch(/^# /m);
   });

@@ -178,7 +178,7 @@ describe("public workflow selection surfaces", () => {
   it("maps every current workflow in MCP help after dynamic discovery", () => {
     const help = helpTesting.getTopicList();
 
-    expect(help).toContain("complete authorized catalog with `list()`");
+    expect(help).toContain('complete authorized catalog with `workflow({ action: "list" })`');
     for (const slug of expectedPublicSlugs) {
       expect(help).toContain(`\`moira/${slug}\``);
     }
@@ -192,20 +192,21 @@ describe("public workflow selection surfaces", () => {
     const configPrompt = read("config/prompts/systemPrompt.md");
     const russianPrompt = read("packages/docs/src/content/docs/docs/SYSTEM-PROMPT-RU.md");
 
-    expect(configPrompt).toContain("complete current `list()` result");
-    expect(configPrompt).toContain('session({ action: "add-reminder", ... })');
+    expect(configPrompt).toContain("complete current workflow list result");
+    expect(configPrompt).toContain('workflow({ action: "list" })');
+    expect(configPrompt).toContain('execution({ action: "add-reminder", ... })');
     expect(configPrompt).toContain(
-      'call `session({ action: "await-user", executionId, question, options })`',
+      'call `execution({ action: "await-user", executionId, question, options })`',
     );
     expect(russianPrompt).toContain(
-      'вызовите `session({ action: "await-user", executionId, question, options })`',
+      'вызовите `execution({ action: "await-user", executionId, question, options })`',
     );
     expect(configPrompt).toContain("active reminders only when that workflow completes");
     expect(configPrompt).toContain("neither performs nor authorizes it");
     expect(configPrompt).not.toContain(
       "Use one software-development workflow for one complete repository implementation lifecycle",
     );
-    expect(russianPrompt).toContain("полный текущий результат `list()`");
+    expect(russianPrompt).toContain('полный текущий результат `workflow({ action: "list" })`');
     expect(russianPrompt).not.toContain("Доступные публичные Workflow");
     expect(russianPrompt).not.toContain("Кодовое слово для отладки");
     expect(russianPrompt).not.toContain("полного жизненного цикла реализации в репозитории");
@@ -256,7 +257,7 @@ describe("public workflow selection surfaces", () => {
 
     for (const guide of guides) {
       expect(guide).not.toBeNull();
-      expect(guide).toContain("mcp__moira__list");
+      expect(guide).toContain('mcp__moira__workflow({ action: "list",');
       expect(guide).toContain('workflowId: "moira/quick-task"');
       expect(guide).toContain('workflowId: "moira/smart-purchase-assistant"');
       expect(guide).toContain("skipNotificationCheck: true");

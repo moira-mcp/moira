@@ -187,7 +187,7 @@ describe("MCP Messages Module", () => {
       const result = formatError("Workflow not found", undefined, "workflow_not_found");
       expect(result).toContain("Workflow not found");
       expect(result).toContain("AGENT INSTRUCTIONS:");
-      expect(result).toContain("list()");
+      expect(result).toContain("workflow({ action: 'list' })");
     });
 
     it("should append both help and agent instructions", () => {
@@ -199,7 +199,7 @@ describe("MCP Messages Module", () => {
       expect(result).toContain("Workflow not found");
       expect(result).toContain("Troubleshooting:");
       expect(result).toContain("AGENT INSTRUCTIONS:");
-      expect(result).toContain("list()");
+      expect(result).toContain("workflow({ action: 'list' })");
     });
   });
 
@@ -207,7 +207,7 @@ describe("MCP Messages Module", () => {
     it("should detect workflow_not_found errors", () => {
       const result = formatErrorWithAgentInstructions("Workflow 'test-flow' not found");
       expect(result).toContain("AGENT INSTRUCTIONS:");
-      expect(result).toContain("list()");
+      expect(result).toContain("workflow({ action: 'list' })");
       expect(result).toContain("Troubleshooting:");
     });
 
@@ -215,7 +215,7 @@ describe("MCP Messages Module", () => {
       const result = formatErrorWithAgentInstructions(
         "ATTEMPT_STALE: this attempt no longer matches the current workflow step",
       );
-      expect(result).toContain("session({ action: 'current_step'");
+      expect(result).toContain("execution({ action: 'current_step'");
       expect(result).toContain("No user guidance is required");
       expect(result.toLowerCase()).not.toContain("stop");
     });
@@ -224,7 +224,7 @@ describe("MCP Messages Module", () => {
       const result = formatErrorWithAgentInstructions(
         "ATTEMPT_CONFLICT: this attempt was already submitted with different input",
       );
-      expect(result).toContain("session({ action: 'current_step'");
+      expect(result).toContain("execution({ action: 'current_step'");
       expect(result).toContain("Do NOT reuse the conflicting attempt ID");
       expect(result).toContain("returned directive and input schema");
       expect(result.toLowerCase()).not.toContain("stop");
@@ -252,9 +252,9 @@ describe("MCP Messages Module", () => {
 
     it("should refresh current state for an unavailable step attempt when the engine permits it", () => {
       const result = formatErrorWithAgentInstructions(
-        "ATTEMPT_INVALID_OR_EXPIRED: the attempt is unavailable. Read session current_step and use its current attempt.",
+        "ATTEMPT_INVALID_OR_EXPIRED: the attempt is unavailable. Read execution action current_step and use its current attempt.",
       );
-      expect(result).toContain("session({ action: 'current_step'");
+      expect(result).toContain("execution({ action: 'current_step'");
       expect(result).toContain("Do NOT reuse the unavailable attempt ID");
       expect(result).toContain("returned directive and input schema");
       expect(result.toLowerCase()).not.toContain("stop");
@@ -292,13 +292,13 @@ describe("MCP Messages Module", () => {
     it("should detect process_not_found errors", () => {
       const result = formatErrorWithAgentInstructions("Process not found or expired");
       expect(result).toContain("AGENT INSTRUCTIONS:");
-      expect(result).toContain("session({ action: 'executions' })");
+      expect(result).toContain("execution({ action: 'executions' })");
     });
 
     it("should detect execution_not_found errors", () => {
       const result = formatErrorWithAgentInstructions("Execution 'abc-123' not found");
       expect(result).toContain("AGENT INSTRUCTIONS:");
-      expect(result).toContain("session({ action: 'executions' })");
+      expect(result).toContain("execution({ action: 'executions' })");
     });
 
     it("should detect validation errors", () => {

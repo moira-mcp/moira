@@ -40,6 +40,26 @@ describe("GlobalSettingsService", () => {
   });
 
   describe("setValue", () => {
+    it.each(["0", "-1", "NaN", "Infinity", "1mb", "9007199254740991", "0.1"])(
+      "refuses invalid artifact file-size %s without writing value, history or audit",
+      async (value) => {
+        await expect(
+          service.setValue("artifacts.max_file_size_mb", value, adminUserId),
+        ).rejects.toThrow("Artifact max file size");
+        expect(mockGlobalSettingsRepo.setValue).not.toHaveBeenCalled();
+        expect(mockRevisionRepo.append).not.toHaveBeenCalled();
+        expect(mockAuditRepo.log).not.toHaveBeenCalled();
+      },
+    );
+
+    it("accepts a fractional whole-byte file limit and allows reset", async () => {
+      await service.setValue("artifacts.max_file_size_mb", "1.5", adminUserId);
+      await service.setValue("artifacts.max_file_size_mb", null, adminUserId);
+      expect(mockGlobalSettingsRepo.setValue.mock.calls).toEqual([
+        ["artifacts.max_file_size_mb", "1.5", adminUserId],
+        ["artifacts.max_file_size_mb", null, adminUserId],
+      ]);
+    });
     it("logs audit event with REAL old and new values", async () => {
       // Setup: existing value
       mockGlobalSettingsRepo.get.mockResolvedValue({

@@ -44,6 +44,17 @@ records and resources owned by the case. A cookie value is not a complete Cookie
 
 ## Prerequisite versus observed action
 
+The [browser publication owner](../fixtures/browser-publication-owner.ts) prepares the file owner
+used by [SDF progress](../e2e/sdf-progress-ui.spec.ts) and
+[materialize degradation](../e2e/run-degradation-display.spec.ts). It requires an explicitly selected
+HTTP loopback contributor backend and refuses a remote target before setup. It creates its own
+user and confirmed paired controller, then exercises the real publication, renderer and remote
+transport primitives. Its child process has private temporary state and certificate trust;
+native VM runtime, storage and guard access are refused. It does not use the installed Local owner.
+Cleanup removes only the fixture's resources and preserves both the test failure and cleanup
+failures. These cases establish owner-held PNG/materialize delivery and browser presentation,
+not physical VM behavior, vendor delivery or a native ChatGPT attachment.
+
 If the case proves blocking a user through the UI, perform that action in the browser and assert
 its visible result. If it proves the login error for an already blocked user, create/block that
 user through the existing HTTP helpers, then exercise the browser login form. This keeps setup
@@ -113,10 +124,23 @@ E2E_CPU_THROTTLE=8 npm run test:e2e -- --file tests/e2e/flow-page.spec.ts -- --r
 
 Installation-wide settings specs run before Chromium readers even for a selected reader file.
 Inspector and other external-service specs require their actual supporting services and
-`PLAYWRIGHT_INCLUDE_EXTERNAL=true`; that opt-in does not prepare the services. For Inspector,
-use the repository's [Compose definition](../../docker-compose.inspector.yml) and the selected
-environment, then run the desired existing spec. Do not create a listener before checking the
-local port inventory.
+`PLAYWRIGHT_INCLUDE_EXTERNAL=true`; that opt-in does not prepare the services. Do not create a
+listener before checking the local port inventory. Inspector service preparation has a
+[Compose definition](../../docker-compose.inspector.yml); inspect the actual selected version
+and target rather than assuming the `latest` tag fixes its UI contract.
+
+[Inspector tools](../e2e/inspector-mcp-tools.spec.ts) exercises the maintained Inspector 2.12 UI:
+it adds a server, discovers the grouped catalog, edits strict action arguments as JSON and inspects
+the real `workflow` list result. `INSPECTOR_URL` selects the browser UI; `INSPECTOR_MCP_URL`
+selects the Moira MCP URL reachable from the Inspector service and defaults to the test base URL
+with `/mcp`. Browser, Node and Inspector may need different reachable hosts. The test uses an
+SDK-prepared bearer credential in a disposable browser context; it does not test Inspector OAuth
+registration or prove that ChatGPT supplied a native attachment.
+
+[Inspector OAuth registration](../e2e/inspector-oauth-registration.spec.ts) and its OAuth helper
+target the Inspector v1 interface, including Direct connection and Quick OAuth Flow controls.
+That separate suite is not acceptance for Inspector 2.12. Run it only with its matching client
+interface; an unavailable prerequisite or unexecuted case is not a passing OAuth check.
 
 Assert observable behavior with ordinary actionable clicks, keyboard focus and persisted reads
 where relevant. Wait for the state the action produces rather than a delay or forced click.

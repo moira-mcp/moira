@@ -32,50 +32,51 @@ describe("Semantic workspace MCP HTTP boundary without configured GitHub or pair
   afterAll(async () => {
     await cleanup?.();
   });
-  test("publishes distinct strict purposes, required native fields and no flat legacy tool", async () => {
+  test("publishes grouped purposes with one root native schema and no old aliases", async () => {
     const catalog = (await client.listTools()).tools;
     for (const name of [
-      "workspace_list",
-      "workspace_targets",
-      "workspace_observe",
-      "workspace_adopt",
-      "file_create",
-      "file_replace",
-      "file_patch",
-      "command_run",
-      "command_run_native",
-      "operation_get",
-      "operation_find",
-      "communication_send",
-      "communication_deliver",
-      "communication_deliver_publication",
+      "codespace",
+      "codespace_terminal",
+      "codespace_read",
+      "codespace_search",
+      "codespace_edit",
+      "codespace_upload",
+      "codespace_download",
+      "codespace_git",
+      "communication",
     ])
       expect(catalog.find((tool) => tool.name === name)).toBeDefined();
-    for (const name of ["codespace", "codespace_process", "communication"])
+    for (const name of [
+      "workspace_list",
+      "command_run",
+      "file_upload",
+      "operation_get",
+      "communication_send",
+    ])
       expect(catalog.find((tool) => tool.name === name)).toBeUndefined();
     for (const [name, field] of [
-      ["file_upload", "file"],
-      ["command_run_native", "stdin_file"],
-      ["communication_deliver", "file"],
+      ["codespace_upload", "file"],
+      ["codespace_terminal", "stdin_file"],
+      ["communication", "file"],
     ]) {
       const tool = catalog.find((tool) => tool.name === name)!;
-      expect(tool.inputSchema.required).toContain(field);
+      expect(tool.inputSchema.properties).toHaveProperty(field);
+      if (name === "codespace_upload") expect(tool.inputSchema.required).toContain(field);
+      else expect(tool.inputSchema.required ?? []).not.toContain(field);
       expect(tool._meta).toEqual({ "openai/fileParams": [field] });
     }
     for (const tool of catalog) {
       expect(tool.inputSchema.type).toBe("object");
-      expect(tool.inputSchema).not.toHaveProperty("oneOf");
-      expect(tool.inputSchema).not.toHaveProperty("anyOf");
     }
     expect(
-      catalog.find((tool) => tool.name === "command_run")!.inputSchema.properties,
+      catalog.find((tool) => tool.name === "codespace_terminal")!.inputSchema.properties,
     ).not.toHaveProperty("request_id");
   });
   test("lists compact available and unavailable identities without billing or credentials", async () => {
     const result = CallToolResultSchema.parse(
       await client.callTool({
-        name: "workspace_list",
-        arguments: { provider: "github-codespaces" },
+        name: "codespace",
+        arguments: { action: "list", provider: "github-codespaces" },
       }),
     );
     expect(result.isError).not.toBe(true);
@@ -92,8 +93,8 @@ describe("Semantic workspace MCP HTTP boundary without configured GitHub or pair
   test("discovers returned targets/controllers and setup guidance without provisioning", async () => {
     const targets = CallToolResultSchema.parse(
       await client.callTool({
-        name: "workspace_targets",
-        arguments: { provider: "github-codespaces" },
+        name: "codespace",
+        arguments: { action: "targets", provider: "github-codespaces" },
       }),
     );
     expect(targets.structuredContent).toMatchObject({
@@ -102,38 +103,48 @@ describe("Semantic workspace MCP HTTP boundary without configured GitHub or pair
       installations: [],
     });
     const help = CallToolResultSchema.parse(
-      await client.callTool({ name: "workspace_setup_help", arguments: {} }),
+      await client.callTool({ name: "codespace", arguments: { action: "setup_help" } }),
     );
     expect(help.isError).not.toBe(true);
     expect(help.structuredContent).toHaveProperty("result");
     expect(JSON.stringify(help)).not.toMatch(/accessToken|refreshToken|clientSecret|vaultKey/);
   });
   test.each([
-    ["workspace_observe", { workspace }],
-    ["workspace_lifecycle", { workspace, action: "start" }],
-    ["workspace_delete", { workspace, confirm_delete: true }],
-    ["file_stat", { workspace, path: "file" }],
-    ["file_read", { workspace, path: "file" }],
-    ["code_search", { workspace, path: ".", query: "TODO" }],
-    ["file_create", { workspace, path: "file", text: "x" }],
-    ["file_replace", { workspace, path: "file", text: "new", expected: { text: "old" } }],
+    ["codespace", { action: "observe", workspace }],
+    ["codespace", { action: "lifecycle", workspace, operation: "start" }],
+    ["codespace", { action: "delete", workspace, confirm_delete: true }],
+    ["codespace_read", { action: "stat", workspace, path: "file" }],
+    ["codespace_read", { action: "read", workspace, path: "file" }],
+    ["codespace_search", { workspace, path: ".", query: "TODO" }],
+    ["codespace_edit", { action: "create", workspace, path: "file", text: "x" }],
     [
-      "file_patch",
+      "codespace_edit",
+      { action: "replace", workspace, path: "file", text: "new", expected: { text: "old" } },
+    ],
+    [
+      "codespace_edit",
       {
+        action: "patch",
         workspace,
         files: [{ path: "file", replacements: [{ old_text: "old", new_text: "new" }] }],
       },
     ],
-    ["file_upload", { workspace, target: { create: { path: "input.bin" } }, file: native }],
-    ["file_download", { workspace, path: "result.bin" }],
-    ["file_preview", { workspace, path: "screen.png" }],
-    ["command_run", { workspace, command: { argv: ["pwd"] } }],
-    ["command_run_native", { workspace, command: { argv: ["cat"] }, stdin_file: native }],
-    ["process_output", { process: processRef, stream: "stdout" }],
-    ["process_stop", { process: processRef }],
-    ["operation_get", { reference: processRef }],
-    ["pull_request_create", { workspace, head: "feature/change", base: "main", title: "Change" }],
-    ["pull_request_read", { workspace, query: { number: 7 } }],
+    ["codespace_upload", { workspace, target: { create: { path: "input.bin" } }, file: native }],
+    ["codespace_download", { workspace, path: "result.bin" }],
+    ["codespace_read", { action: "preview", workspace, path: "screen.png" }],
+    ["codespace_terminal", { action: "run", workspace, command: { argv: ["pwd"] } }],
+    [
+      "codespace_terminal",
+      { action: "run_native", workspace, command: { argv: ["cat"] }, stdin_file: native },
+    ],
+    ["codespace_terminal", { action: "output", process: processRef, stream: "stdout" }],
+    ["codespace_terminal", { action: "stop", process: processRef }],
+    ["codespace", { action: "collect", reference: processRef }],
+    [
+      "codespace_git",
+      { action: "create", workspace, head: "feature/change", base: "main", title: "Change" },
+    ],
+    ["codespace_git", { action: "read", workspace, query: { number: 7 } }],
   ])(
     "refuses purpose %s for a resource outside the authenticated ownership without setup fallback",
     async (name, args) => {
@@ -168,8 +179,13 @@ describe("Semantic workspace MCP HTTP boundary without configured GitHub or pair
           id: 1,
           method: "tools/call",
           params: {
-            name: "command_run",
-            arguments: { workspace, command: { argv: ["pwd"] }, [field]: "private-rejected-value" },
+            name: "codespace_terminal",
+            arguments: {
+              action: "run",
+              workspace,
+              command: { argv: ["pwd"] },
+              [field]: "private-rejected-value",
+            },
           },
         }),
       });
@@ -192,8 +208,9 @@ describe("Semantic workspace MCP HTTP boundary without configured GitHub or pair
         id: 2,
         method: "tools/call",
         params: {
-          name: "command_run_native",
+          name: "codespace_terminal",
           arguments: {
+            action: "run_native",
             workspace,
             command: { argv: ["cat"] },
             stdin_file: native,

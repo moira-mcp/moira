@@ -131,7 +131,7 @@ When workflow is interrupted, agent can:
 
 1. Read the owned workspace handoff and `process-id.txt`.
 2. Confirm that execution belongs to this task and has not been cancelled or replaced.
-3. Inspect its current status and step with `session`; continue from the engine's current state under the caller's recovery authority.
+3. Inspect its current status and step with `execution`; continue from the engine's current state under the caller's recovery authority.
 
 ```json
 {

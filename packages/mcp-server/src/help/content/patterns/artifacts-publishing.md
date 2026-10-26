@@ -34,9 +34,28 @@ files, frequently changing content, or authenticated content.
 
 The simple examples below show the success path only: advance only after confirmed acceptance and an actual returned URL. On refusal or an uncertain outcome, remain paused or use the explicit route in Handle Errors. Missing authority does not permit a publication attempt.
 
-### Direct Upload Pattern
+### Local File and Token Upload
 
-When agent generates HTML in memory:
+Prefer publishing a saved HTML file: obtain an upload URL with `artifacts({ action: "token" })`,
+then POST multipart field `file` using the actual local path. Do not read the file into an MCP
+argument. If linking an execution, send `executionId` in the HTTP body, not the token request.
+
+```bash
+curl -X POST "$UPLOAD_URL" \
+  -F 'file=@/absolute/path/report.html;type=text/html'
+```
+
+Set `UPLOAD_URL` to the exact returned `uploadUrl`; treat it as a credential. To associate an
+execution, add `-F "executionId=$EXECUTION_ID"`, where `EXECUTION_ID` is the actual existing owned
+execution ID returned by `start`. Omit the field when no association is needed.
+Confirm HTTP 201 and save the response's `url`, not `uploadUrl`.
+Token creation alone is not publication. A refused content upload leaves a valid token usable;
+successful creation consumes it. This sequential contract does not guarantee atomic exactly-once
+creation for concurrent requests. Reconcile an uncertain result before retrying.
+
+### Inline Fallback
+
+Use inline MCP upload when the agent cannot send the saved file over HTTP:
 
 ```json
 {
@@ -57,7 +76,7 @@ When agent generates HTML in memory:
 
 ### Token-based Upload Pattern
 
-When agent creates files locally first:
+Use this node in the containing workflow when a previous node has saved the file:
 
 ```json
 {
@@ -65,7 +84,7 @@ When agent creates files locally first:
   "connections": { "success": "notify-token-user" },
   "type": "agent-directive",
   "completionCondition": "Actual HTML upload accepted and returned URL captured",
-  "directive": "Upload the report file.\n\n1. Get token: artifacts({ action: \"token\", ttlMinutes: 30 })\n2. Read file from {{create-html.file_path}}\n3. POST to uploadUrl as multipart/form-data with field file or JSON with name and content\n4. Save response url",
+  "directive": "Publish the saved HTML file within existing authority.\n\n1. Get token: artifacts({ action: \"token\", ttlMinutes: 30 })\n2. POST to the returned uploadUrl as multipart/form-data with file=@{{create-html.file_path}}; do not copy file content into MCP arguments. If needed, add executionId as an HTTP form field.\n3. Inspect the actual HTTP response; only a confirmed successful upload and returned artifact url permit success. Reconcile uncertain outcomes before retrying.\n4. Save the returned url as report_url.",
   "inputSchema": {
     "properties": {
       "report_url": { "type": "string" }
@@ -77,7 +96,8 @@ When agent creates files locally first:
 
 ### Conditional Based on Capabilities
 
-Route based on agent's file access:
+Route based on the agent's ability to create a local file and upload it over HTTP; the capability
+producer must set `can_upload_file_http` from both requirements:
 
 ```json
 {
@@ -87,7 +107,7 @@ Route based on agent's file access:
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "collect-capabilities.can_create_files" },
+        "left": { "contextPath": "collect-capabilities.can_upload_file_http" },
         "right": true
       },
       "output": "can-create-files"
@@ -101,6 +121,9 @@ Route based on agent's file access:
 ```
 
 ## MCP Tool Usage
+
+The inline upload examples in this section are the fallback; use the file/token route above for
+saved HTML. Update replaces an existing artifact through MCP.
 
 ### Upload Artifact
 
@@ -125,16 +148,16 @@ Response:
 
 ```json
 {
-  "success": true,
-  "data": {
-    "uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-    "url": "https://{MOIRA_HOST}/a/a1b2c3d4...",
-    "name": "purchase-report.html",
-    "size": 1234,
-    "expiresAt": "2025-02-28T10:00:00.000Z"
-  }
+  "uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "url": "https://a1b2c3d4-e5f6-7890-abcd-ef1234567890.{STATIC_DOMAIN}/",
+  "name": "purchase-report.html",
+  "size": 1234,
+  "expiresAt": "2025-02-28T10:00:00.000Z"
 }
 ```
+
+The MCP result is flat metadata. The URL above illustrates configured subdomain hosting; use the
+actual returned `url` rather than constructing it. HTTP upload has its separate `data` envelope.
 
 ### Update Artifact
 
@@ -154,7 +177,7 @@ artifacts({
   action: "stats",
 });
 // Returns: totalArtifacts, totalSize, storageLimit, countLimit,
-// storageUsedPercent, countUsedPercent
+// maxFileSizeBytes, storageUsedPercent, countUsedPercent
 ```
 
 ### List Artifacts
@@ -168,9 +191,11 @@ artifacts({
 
 ## Quotas and Limits
 
-Storage, file-count, per-file-size, and default-expiration policies are configured by the server
-and can include per-user quota overrides. Use `stats` for the effective storage and count quotas,
-handle the boundary reported by upload errors, and treat each returned `expiresAt` as authoritative.
+Use `stats` for effective storage/count quotas and `maxFileSizeBytes`, measured as decoded HTML
+UTF-8 bytes. A user-specific file-size override takes precedence over global
+`artifacts.max_file_size_mb`, then the 5 MiB default; clearing it restores inheritance.
+Storage and count remain separate quotas. Treat each returned `expiresAt` as authoritative;
+the missing-artifact page does not establish a fixed lifetime.
 The `ttlMinutes` input schema states the accepted upload-token lifetime range.
 
 :::tip
@@ -270,7 +295,7 @@ From a purchase analysis workflow:
   "connections": { "success": "notify-report-user" },
   "completionCondition": "Report reflects the actual analysis and publication is authorized and accepted",
   "type": "agent-directive",
-  "directive": "Create HTML report with product recommendations.\n\n**Analysis data:**\n{{note:purchase-{{executionId}}-03-analysis}}\n\nGenerate responsive HTML:\n- Product cards with images, prices, links\n- Comparison table\n- Recommendation summary\n\nUpload: artifacts({ action: \"upload\", name: \"purchase-{{executionId}}.html\", content: html, executionId: \"{{executionId}}\" })",
+  "directive": "Create and save a local HTML report with product recommendations.\n\n**Analysis data:**\n{{note:purchase-{{executionId}}-03-analysis}}\n\nGenerate responsive HTML:\n- Product cards with images, prices, links\n- Comparison table\n- Recommendation summary\n\nWithin publication authority, obtain artifacts({ action: \"token\" }) and POST the local file to the returned uploadUrl as multipart field file, with executionId=\"{{executionId}}\" in the HTTP body. Save the confirmed response url as report_url. If HTTP upload is unavailable, use inline artifacts upload with name, content and executionId. On refusal or uncertain outcome follow the explicit error-handling pattern; never invent a URL.",
   "inputSchema": {
     "properties": {
       "report_url": { "type": "string" }
@@ -293,6 +318,8 @@ artifacts({ action: "upload", name: "report.html", content: htmlContent });
 ```
 
 ### Link to Execution
+
+For token uploads, add `executionId` to the HTTP form or JSON body. The equivalent inline fallback is:
 
 ```typescript
 artifacts({

@@ -111,6 +111,17 @@ export const controllerWorkspaceResolveSchema = z.union([
 ]);
 
 const generation = z.number().int().positive();
+export const controllerWorkspaceResolutionSchema = z
+  .object({
+    resourceId: z.string().uuid(),
+    resourceGeneration: generation.safe(),
+    routeGeneration: generation.safe(),
+    repositoryId: z.string().uuid(),
+    localSpaceId: z.string().uuid(),
+    localGeneration: generation.safe(),
+    operationMarker: z.string().regex(/^moira-[a-f0-9]{24}$/),
+  })
+  .strict();
 export const controllerLifecycleSchema = z.discriminatedUnion("action", [
   z
     .object({

@@ -7,7 +7,12 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
-import { callMCPTool, callMCPToolRaw, createAuthenticatedMCPClient } from "../utils/mcp-auth.js";
+import {
+  deleteOwnedTestWorkflow,
+  callMCPTool,
+  callMCPToolRaw,
+  createAuthenticatedMCPClient,
+} from "../utils/mcp-auth.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 describe("MCP Playbook References E2E", () => {
@@ -24,11 +29,7 @@ describe("MCP Playbook References E2E", () => {
 
   afterAll(async () => {
     if (workflowId) {
-      try {
-        await callMCPTool(client, "manage", { action: "delete", workflowId });
-      } catch {
-        // Cleanup failures are not the subject of this test.
-      }
+      await deleteOwnedTestWorkflow(client, workflowId);
     }
     try {
       await callMCPTool(client, "playbooks", { action: "delete", name: playbookName });
@@ -39,7 +40,7 @@ describe("MCP Playbook References E2E", () => {
   });
 
   test("a definition naming an unknown playbook is refused while editing", async () => {
-    const response = await callMCPToolRaw(client, "manage", {
+    const response = await callMCPToolRaw(client, "workflow", {
       action: "create",
       workflow: {
         metadata: {
@@ -73,7 +74,7 @@ describe("MCP Playbook References E2E", () => {
       content: "This will be removed.",
     });
 
-    const created = (await callMCPTool(client, "manage", {
+    const created = (await callMCPTool(client, "workflow", {
       action: "create",
       workflow: {
         metadata: {
@@ -95,7 +96,7 @@ describe("MCP Playbook References E2E", () => {
       },
     })) as { workflowId: string };
 
-    const prepared = await callMCPToolRaw(client, "start", {
+    const prepared = await callMCPToolRaw(client, "execution", {
       action: "prepare",
       workflowId: created.workflowId,
       parentExecutionId: "none",
@@ -105,7 +106,7 @@ describe("MCP Playbook References E2E", () => {
     // The definition was accepted while the playbook existed; the run is attempted after it is gone.
     await callMCPTool(client, "playbooks", { action: "delete", name: vanishing });
 
-    const refused = await callMCPToolRaw(client, "start", {
+    const refused = await callMCPToolRaw(client, "execution", {
       action: "execute",
       startAttemptId,
     });
@@ -113,7 +114,7 @@ describe("MCP Playbook References E2E", () => {
     expect(refused).toContain("START_PRECONDITION_CHANGED");
     expect(refused).toContain(vanishing);
 
-    await callMCPTool(client, "manage", { action: "delete", workflowId: created.workflowId });
+    await deleteOwnedTestWorkflow(client, created.workflowId);
   });
 
   test("the same definition is accepted once the playbook exists, and its text reaches the step", async () => {
@@ -123,7 +124,7 @@ describe("MCP Playbook References E2E", () => {
       content: "State the observable consequence.",
     });
 
-    const created = (await callMCPTool(client, "manage", {
+    const created = (await callMCPTool(client, "workflow", {
       action: "create",
       workflow: {
         metadata: {
@@ -146,7 +147,7 @@ describe("MCP Playbook References E2E", () => {
     })) as { workflowId: string };
     workflowId = created.workflowId;
 
-    const prepared = await callMCPToolRaw(client, "start", {
+    const prepared = await callMCPToolRaw(client, "execution", {
       action: "prepare",
       workflowId,
       parentExecutionId: "none",
@@ -154,7 +155,7 @@ describe("MCP Playbook References E2E", () => {
     const startAttemptId = prepared.match(/Start attempt ID:\s*([a-f0-9-]+)/i)?.[1];
     expect(startAttemptId).toBeTruthy();
 
-    const started = await callMCPToolRaw(client, "start", {
+    const started = await callMCPToolRaw(client, "execution", {
       action: "execute",
       startAttemptId,
     });

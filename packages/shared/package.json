@@ -11,6 +11,7 @@
     "./urls": "./src/config/urls.ts",
     "./mcp-clients": "./src/mcp-clients/index.ts",
     "./canonical-json": "./src/utils/canonical-json.ts",
+    "./artifact-size-policy": "./src/services/artifact-size-policy.ts",
     "./settings-encryption": "./src/utils/settings-encryption.ts",
     "./metadata-revision": "./src/utils/metadata-revision.ts",
     "./communication-owner-protocol": "./src/communication-owner-protocol.ts",

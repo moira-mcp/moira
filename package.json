@@ -133,6 +133,7 @@
     "postcss-loader": "^8.2.1",
     "prettier": "^3.9.9",
     "prettier-plugin-astro": "^0.14.1",
+    "smol-toml": "^1.9.1",
     "style-loader": "^3.3.0",
     "supertest": "^7.3.1",
     "testfold": "^0.4.5",
@@ -141,7 +142,8 @@
     "typescript": "^5.6.0",
     "typescript-eslint": "^8.71.1",
     "webpack": "^5.111.1",
-    "webpack-cli": "^5.1.4"
+    "webpack-cli": "^5.1.4",
+    "yaml": "^2.9.1"
   },
   "overrides": {
     "ua-parser-js": "^1.0.41",

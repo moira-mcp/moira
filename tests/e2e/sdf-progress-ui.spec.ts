@@ -13,7 +13,8 @@ import {
   createAuthenticatedMCPClient,
   startWorkflowExecutionState,
 } from "../utils/mcp-auth.js";
-import { loginAsAdmin } from "./helpers/auth-helper.js";
+import { login } from "./helpers/auth-helper.js";
+import { browserPublicationOwner } from "../fixtures/browser-publication-owner.js";
 import { systemCatalogGraph } from "../helpers/catalog-graphs.js";
 
 const BASE_URL = getTestBaseUrl();
@@ -22,9 +23,15 @@ const BASE_URL = getTestBaseUrl();
 const DURATION = /^\d+\s(s|min|h|с|мин|ч)\b/;
 
 test("renders live SDF progress in the image endpoint and on the run page", async ({ page }) => {
-  const authenticated = await createAuthenticatedMCPClient();
+  const owner = await browserPublicationOwner(3304);
+  let authenticated: Awaited<ReturnType<typeof createAuthenticatedMCPClient>> | undefined;
+  const errors: unknown[] = [];
 
   try {
+    authenticated = await createAuthenticatedMCPClient({
+      email: owner.email,
+      password: owner.password,
+    });
     const workflow = systemCatalogGraph("software-development-flow", "public");
     const run = await startWorkflowExecutionState(
       authenticated.client,
@@ -37,7 +44,7 @@ test("renders live SDF progress in the image endpoint and on the run page", asyn
       downloadUrl: string;
       mimeType: string;
       workflowVersion: string;
-    }>(authenticated.client, "session", {
+    }>(authenticated.client, "execution", {
       action: "progress-image-token",
       executionId,
       theme: "light",
@@ -65,7 +72,7 @@ test("renders live SDF progress in the image endpoint and on the run page", asyn
       progress_intake_outcome: "Task and repository context captured",
     });
 
-    await loginAsAdmin(page);
+    await login(page, owner.email, owner.password);
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${BASE_URL}/executions/${executionId}`);
 
@@ -102,7 +109,17 @@ test("renders live SDF progress in the image endpoint and on the run page", asyn
     // The variables tab offers the answer form for the step the run now waits on.
     await page.getByRole("tab", { name: /Variables|Переменные/ }).click();
     await expect(page.getByTestId("answer-form")).toBeVisible();
+  } catch (error) {
+    errors.push(error);
   } finally {
-    await authenticated.cleanup();
+    for (const dispose of [async () => authenticated?.cleanup(), async () => owner.close()]) {
+      try {
+        await dispose();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
   }
+  if (errors.length)
+    throw new AggregateError(errors, "SDF progress test or fixture cleanup failed");
 });

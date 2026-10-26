@@ -1,15 +1,19 @@
-/* eslint-disable no-console */
 /**
  * Version history for anything the shared revision store versions.
  *
- * Notes, playbooks and global settings keep their content in one store on the server, so they get
- * one history interface here rather than three that drift apart. What differs between them is only
+ * Notes, playbooks, workflows and global settings keep their content in one store on the server, so they get
+ * one history interface here. What differs between them is only
  * where the revisions come from and what restoring means, which the caller supplies as a source.
- *
- * Note: console.error is used for browser debugging of API errors, as elsewhere in this app.
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+  useSyncExternalStore,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { RotateCcw, Eye, GitCompareArrows, FileText, Clock, Columns2 } from "lucide-react";
 import { diffLines, type Change } from "diff";
@@ -19,6 +23,13 @@ import { ScrollArea } from "../ui/scroll-area";
 import { Badge } from "../ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "../ui/tabs";
 import { formatRelativeTime } from "../cards/format-utils";
+import { useLatestRequest } from "../../hooks/useLatestRequest";
+import {
+  getReadOwner,
+  getReadScopeVersion,
+  isPrivateReadSuspended,
+  subscribeReadScope,
+} from "../../services/read-scope";
 
 /** One revision as the list on the left shows it. */
 export interface RevisionEntry {
@@ -43,6 +54,8 @@ export interface RevisionHistorySource {
   /** Content in force right now. */
   readCurrent(): Promise<string | null>;
   restore(revision: number): Promise<void>;
+  /** A caller can allow inspection while protecting an unsaved draft from replacement. */
+  restoreDisabledReason?: string;
 }
 
 function formatSize(bytes: number): string {
@@ -71,7 +84,10 @@ export function DiffView({
   const changes = useMemo(() => diffLines(oldText, newText), [oldText, newText]);
 
   return (
-    <div className={className} data-testid={testId}>
+    <div
+      className={`${className} whitespace-pre-wrap [overflow-wrap:anywhere]`}
+      data-testid={testId}
+    >
       {changes.map((change: Change, i: number) => {
         const lines = change.value.split("\n");
         // Remove trailing empty line from split
@@ -114,6 +130,22 @@ export const RevisionHistoryDialog: React.FC<RevisionHistoryDialogProps> = ({
   source,
 }) => {
   const { t } = useTranslation();
+  const scope = useSyncExternalStore(subscribeReadScope, getReadScopeVersion, getReadScopeVersion);
+  const owner = getReadOwner();
+  // A retained source belongs to the account that supplied it. A new account must supply its
+  // own source rather than reopening the former account's closures during session transition.
+  const sourceOwner = useRef({ source, owner });
+  if (sourceOwner.current.source !== source) sourceOwner.current = { source, owner };
+  const readable = sourceOwner.current.owner === owner && !isPrivateReadSuspended();
+  const current = useRef({ source, open, scope });
+  current.current = { source, open, scope };
+  const beginHistory = useLatestRequest();
+  const beginContent = useLatestRequest();
+  const beginRestore = useLatestRequest();
+  const [loadedFor, setLoadedFor] = useState<{
+    source: RevisionHistorySource;
+    scope: number;
+  } | null>(null);
 
   const [history, setHistory] = useState<RevisionEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -126,11 +158,21 @@ export const RevisionHistoryDialog: React.FC<RevisionHistoryDialogProps> = ({
   const [confirmingRestore, setConfirmingRestore] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("content");
+  const [contentError, setContentError] = useState<string | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
 
   const isCurrentRevision = selectedRevision === history[0]?.revision;
 
   const loadHistory = useCallback(async () => {
-    if (!source) return;
+    if (!source || !open || !readable) return;
+    const isLatest = beginHistory();
+    const isCurrent = () =>
+      isLatest() &&
+      current.current.source === source &&
+      current.current.open &&
+      current.current.scope === scope &&
+      getReadScopeVersion() === scope &&
+      !isPrivateReadSuspended();
     try {
       setLoading(true);
       setError(null);
@@ -138,31 +180,47 @@ export const RevisionHistoryDialog: React.FC<RevisionHistoryDialogProps> = ({
         source.listRevisions(),
         source.readCurrent(),
       ]);
+      if (!isCurrent()) return;
       setHistory(revisions);
       setCurrentContent(current);
+      setLoadedFor({ source, scope });
     } catch (err) {
+      if (!isCurrent()) return;
       setError(err instanceof Error ? err.message : t("common.errors.failedToLoad"));
+      setLoadedFor({ source, scope });
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [source, t]);
+  }, [source, open, scope, readable, t, beginHistory]);
 
   const loadRevisionContent = useCallback(
     async (revision: number) => {
-      if (!source) return;
+      if (!source || !open || !readable) return;
+      const isLatest = beginContent();
+      const isCurrent = () =>
+        isLatest() &&
+        current.current.source === source &&
+        current.current.open &&
+        current.current.scope === scope &&
+        getReadScopeVersion() === scope &&
+        !isPrivateReadSuspended();
       try {
         setLoadingContent(true);
         setSelectedRevision(revision);
         setConfirmingRestore(false);
-        setRevisionContent(await source.readRevision(revision));
-      } catch (err) {
-        console.error("Failed to load revision content:", err);
+        setContentError(null);
+        setRestoreError(null);
         setRevisionContent(null);
+        const content = await source.readRevision(revision);
+        if (isCurrent()) setRevisionContent(content);
+      } catch (err) {
+        if (isCurrent())
+          setContentError(err instanceof Error ? err.message : t("common.errors.failedToLoad"));
       } finally {
-        setLoadingContent(false);
+        if (isCurrent()) setLoadingContent(false);
       }
     },
-    [source],
+    [source, open, scope, readable, beginContent, t],
   );
 
   useEffect(() => {
@@ -171,64 +229,94 @@ export const RevisionHistoryDialog: React.FC<RevisionHistoryDialogProps> = ({
       setSelectedRevision(null);
       setRevisionContent(null);
       setCurrentContent(null);
+      setLoadingContent(false);
       setViewMode("content");
       setConfirmingRestore(false);
+      setRestoring(false);
+      setContentError(null);
+      setRestoreError(null);
     }
-  }, [open, source, loadHistory]);
+    return () => {
+      beginHistory();
+      beginContent();
+      beginRestore();
+    };
+  }, [open, source, loadHistory, beginHistory, beginContent, beginRestore]);
 
   const handleRestore = async () => {
-    if (!source || selectedRevision === null) return;
+    if (!source || selectedRevision === null || source.restoreDisabledReason || !readable) return;
+    const isLatest = beginRestore();
+    const isCurrent = () =>
+      isLatest() &&
+      current.current.source === source &&
+      current.current.open &&
+      current.current.scope === scope &&
+      getReadScopeVersion() === scope &&
+      !isPrivateReadSuspended();
     try {
       setRestoring(true);
+      setRestoreError(null);
       await source.restore(selectedRevision);
+      if (!isCurrent()) return;
       setConfirmingRestore(false);
       onClose(true);
     } catch (err) {
-      console.error("Failed to restore revision:", err);
+      if (isCurrent())
+        setRestoreError(err instanceof Error ? err.message : t("common.errors.failedToUpdate"));
     } finally {
-      setRestoring(false);
+      if (isCurrent()) setRestoring(false);
     }
   };
 
   return (
     <>
       <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose(false)}>
-        <DialogContent className="sm:max-w-5xl max-h-[85vh] flex flex-col">
+        <DialogContent className="sm:max-w-5xl max-h-[85vh] min-w-0 flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Clock className="h-5 w-5" />
               {t("history.title")}
             </DialogTitle>
-            <DialogDescription>
-              {source && t("history.description", { subject: source.label })}
+            <DialogDescription className="[overflow-wrap:anywhere]">
+              {source && readable && t("history.description", { subject: source.label })}
             </DialogDescription>
           </DialogHeader>
 
-          {loading ? (
+          {loading || loadedFor?.source !== source || loadedFor?.scope !== scope || !readable ? (
             <div className="py-12 text-center text-muted-foreground">{t("common.loading")}</div>
           ) : error ? (
-            <div className="py-12 text-center text-destructive">{error}</div>
+            <div className="py-12 text-center space-y-3">
+              <p role="alert" className="text-destructive">
+                {error}
+              </p>
+              <Button variant="outline" onClick={loadHistory}>
+                {t("common.retry")}
+              </Button>
+            </div>
           ) : history.length === 0 ? (
             <div className="py-12 text-center text-muted-foreground">{t("history.noVersions")}</div>
           ) : (
-            <div className="flex flex-col md:flex-row gap-4 flex-1 min-h-0">
+            <div className="flex flex-col md:flex-row gap-4 flex-1 min-h-0 min-w-0">
               {/* Revision list — left panel */}
-              <div className="md:w-64 shrink-0 border rounded-lg overflow-hidden flex flex-col">
+              <div className="md:w-64 min-w-0 shrink-0 border rounded-lg overflow-hidden flex flex-col">
                 <div className="bg-muted px-3 py-2 border-b text-sm font-medium text-muted-foreground">
                   {t("history.versions")} ({history.length})
                 </div>
                 <ScrollArea className="flex-1 max-h-[30vh] md:max-h-[60vh]">
                   <div className="divide-y divide-border">
                     {history.map((entry, index) => (
-                      <div
+                      <button
+                        type="button"
                         key={entry.revision}
-                        className={`px-3 py-2.5 cursor-pointer transition-colors ${
+                        className={`block w-full text-left px-3 py-2.5 cursor-pointer transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring ${
                           selectedRevision === entry.revision
                             ? "bg-primary/10 border-l-2 border-l-primary"
                             : "hover:bg-accent border-l-2 border-l-transparent"
                         }`}
                         onClick={() => loadRevisionContent(entry.revision)}
                         data-testid={`version-${entry.revision}`}
+                        aria-pressed={selectedRevision === entry.revision}
+                        disabled={restoring}
                       >
                         <div className="flex items-center justify-between mb-0.5">
                           <span className="font-medium text-sm text-foreground">
@@ -254,25 +342,29 @@ export const RevisionHistoryDialog: React.FC<RevisionHistoryDialogProps> = ({
                             {entry.preview}
                           </div>
                         )}
-                      </div>
+                      </button>
                     ))}
                   </div>
                 </ScrollArea>
               </div>
 
               {/* Content view — right panel */}
-              <div className="flex-1 border rounded-lg overflow-hidden flex flex-col min-w-0">
-                <div className="bg-muted px-3 py-2 border-b flex flex-wrap items-center justify-between gap-2">
+              <div className="flex-1 border rounded-lg overflow-hidden flex flex-col min-w-0 min-h-0">
+                <div className="bg-muted px-3 py-2 border-b flex shrink-0 min-w-0 flex-wrap items-center justify-between gap-2">
                   {selectedRevision !== null ? (
-                    <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)}>
-                      <TabsList className="h-7">
-                        <TabsTrigger value="content" className="text-xs px-2 h-6">
+                    <Tabs
+                      className="min-w-0 w-full sm:w-auto"
+                      value={viewMode}
+                      onValueChange={(v) => setViewMode(v as ViewMode)}
+                    >
+                      <TabsList className="w-full flex-wrap h-auto justify-start group-data-[orientation=horizontal]/tabs:h-auto">
+                        <TabsTrigger value="content" className="flex-none text-xs px-2 h-7">
                           <FileText className="h-3 w-3 mr-1" />
                           {t("history.content")}
                         </TabsTrigger>
                         <TabsTrigger
                           value="side"
-                          className="text-xs px-2 h-6"
+                          className="flex-none text-xs px-2 h-7"
                           disabled={isCurrentRevision}
                           data-testid="side-by-side-tab"
                         >
@@ -281,7 +373,7 @@ export const RevisionHistoryDialog: React.FC<RevisionHistoryDialogProps> = ({
                         </TabsTrigger>
                         <TabsTrigger
                           value="diff"
-                          className="text-xs px-2 h-6"
+                          className="flex-none text-xs px-2 h-7"
                           disabled={isCurrentRevision}
                         >
                           <GitCompareArrows className="h-3 w-3 mr-1" />
@@ -302,10 +394,10 @@ export const RevisionHistoryDialog: React.FC<RevisionHistoryDialogProps> = ({
                     !isCurrentRevision &&
                     (confirmingRestore ? (
                       <div
-                        className="flex items-center gap-2 text-xs"
+                        className="flex min-w-0 flex-wrap items-center gap-2 text-xs"
                         data-testid="restore-confirmation"
                       >
-                        <span className="text-muted-foreground">
+                        <span className="min-w-0 basis-full sm:basis-auto sm:flex-1 text-muted-foreground [overflow-wrap:anywhere]">
                           {t("history.restoreDescription", { version: selectedRevision })}
                         </span>
                         <Button
@@ -321,7 +413,7 @@ export const RevisionHistoryDialog: React.FC<RevisionHistoryDialogProps> = ({
                           size="sm"
                           className="h-7 text-xs"
                           onClick={handleRestore}
-                          disabled={restoring}
+                          disabled={restoring || !!source?.restoreDisabledReason}
                           data-testid="confirm-restore-button"
                         >
                           <RotateCcw className="h-3 w-3 mr-1" />
@@ -334,7 +426,12 @@ export const RevisionHistoryDialog: React.FC<RevisionHistoryDialogProps> = ({
                         variant="outline"
                         className="h-7 text-xs"
                         onClick={() => setConfirmingRestore(true)}
-                        disabled={revisionContent === null}
+                        disabled={
+                          revisionContent === null ||
+                          loadingContent ||
+                          !!contentError ||
+                          !!source?.restoreDisabledReason
+                        }
                         data-testid="restore-version-button"
                       >
                         <RotateCcw className="h-3 w-3 mr-1" />
@@ -343,10 +440,35 @@ export const RevisionHistoryDialog: React.FC<RevisionHistoryDialogProps> = ({
                     ))}
                 </div>
 
-                <ScrollArea className="flex-1 max-h-[60vh]">
+                {source?.restoreDisabledReason && (
+                  <p role="status" className="px-3 py-2 text-sm text-muted-foreground">
+                    {source.restoreDisabledReason}
+                  </p>
+                )}
+                {restoreError && (
+                  <p role="alert" className="px-3 py-2 text-sm text-destructive">
+                    {restoreError}
+                  </p>
+                )}
+
+                <ScrollArea className="flex-1 min-h-0 min-w-0 max-h-[60vh]">
                   {loadingContent ? (
                     <div className="p-8 text-center text-muted-foreground">
                       {t("common.loading")}
+                    </div>
+                  ) : contentError ? (
+                    <div className="p-8 text-center space-y-3">
+                      <p role="alert" className="text-destructive">
+                        {contentError}
+                      </p>
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          selectedRevision !== null && loadRevisionContent(selectedRevision)
+                        }
+                      >
+                        {t("common.retry")}
+                      </Button>
                     </div>
                   ) : selectedRevision === null ? (
                     <div className="p-8 text-center text-muted-foreground flex flex-col items-center gap-3">
@@ -371,7 +493,7 @@ export const RevisionHistoryDialog: React.FC<RevisionHistoryDialogProps> = ({
                             {t("history.selectedVersion", { version: selectedRevision })}
                           </div>
                           <pre
-                            className="p-4 pt-2 text-sm font-mono whitespace-pre-wrap break-words text-foreground"
+                            className="p-4 pt-2 text-sm font-mono whitespace-pre-wrap [overflow-wrap:anywhere] text-foreground"
                             data-testid="version-content"
                           >
                             {revisionContent}
@@ -382,7 +504,7 @@ export const RevisionHistoryDialog: React.FC<RevisionHistoryDialogProps> = ({
                             {t("history.currentVersion", { version: history[0]?.revision })}
                           </div>
                           <pre
-                            className="p-4 pt-2 text-sm font-mono whitespace-pre-wrap break-words text-foreground"
+                            className="p-4 pt-2 text-sm font-mono whitespace-pre-wrap [overflow-wrap:anywhere] text-foreground"
                             data-testid="current-content"
                           >
                             {currentContent ?? ""}
@@ -391,7 +513,7 @@ export const RevisionHistoryDialog: React.FC<RevisionHistoryDialogProps> = ({
                       </div>
                     ) : (
                       <pre
-                        className="p-4 text-sm font-mono whitespace-pre-wrap break-words text-foreground"
+                        className="p-4 text-sm font-mono whitespace-pre-wrap [overflow-wrap:anywhere] text-foreground"
                         data-testid="version-content"
                       >
                         {revisionContent}

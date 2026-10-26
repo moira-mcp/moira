@@ -91,13 +91,13 @@ email, временем регистрации и ссылкой на карто
 При использовании Moira через MCP-клиент (Claude Code, Claude Desktop) можно запустить пошаговый workflow настройки:
 
 ```
-start({
+execution({
   action: "prepare",
   workflowId: "moira/telegram-setup",
   parentExecutionId: "none",
   skipNotificationCheck: true
 })
-start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
+execution({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ```
 
 Укажите `skipNotificationCheck: true` при подготовке этого bootstrap workflow, когда Telegram ещё не настроен; иначе execute вернёт стабильный ответ `START_PRECONDITION_CHANGED` из-за его legacy test node `telegram-notification`. Флаг обходит только preflight опциональных обычных уведомлений. `skipTelegramCheck` остаётся устаревшим alias с тем же поведением. Ни один флаг не обходит доверенную доставку PIN для ноды `lock`.

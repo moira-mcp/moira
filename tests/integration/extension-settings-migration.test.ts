@@ -105,6 +105,11 @@ describe("Migrating a database created before the extension value store", () => 
       expect(schemaBefore.session).not.toContain("`refreshedAt`");
       expect(schemaAfter.session).toContain(", `refreshedAt` text");
       schemaAfter.session = schemaAfter.session.replace(", `refreshedAt` text", "");
+      // The later per-file artifact override is nullable and inherits existing policy.
+      // Account for this addition only; every previous user column and constraint stays exact.
+      expect(schemaBefore.user).not.toContain("artifactMaxFileSizeMb");
+      expect(schemaAfter.user).toContain(", artifactMaxFileSizeMb REAL");
+      schemaAfter.user = schemaAfter.user.replace(", artifactMaxFileSizeMb REAL", "");
       delete schemaBefore.workflowExecution;
       delete schemaAfter.workflowExecution;
       delete schemaBefore.workflow;

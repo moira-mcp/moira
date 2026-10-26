@@ -218,10 +218,10 @@ reset expressions и limit-ветки. Это дублирует платфор�
 **Обнаружение:** Возвращаемые значения `inputSchema`, содержащие синтаксис шаблона `{{...}}` по голому имени.
 
 ```
-❌ step() returns: { summary: "Report for {{project_name}}" }
+❌ execution({ action: "step", processId, attemptId, input }) returns: { summary: "Report for {{project_name}}" }
    Next directive: "Publish {{step-id.summary}}"  // {{project_name}} остаётся литеральным
 
-✅ step() returns: { summary: "Report for acme-api" }
+✅ execution({ action: "step", processId, attemptId, input }) returns: { summary: "Report for acme-api" }
    // Подставленные значения данных считаются литеральным текстом, не парсятся как шаблоны
 ```
 
@@ -253,13 +253,13 @@ reset expressions и limit-ветки. Это дублирует платфор�
 
 Передача всего JSON workflow через параметры MCP-инструмента для больших workflow. Упирается в лимиты размера.
 
-**Обнаружение:** `manage({ action: "create", workflow: <large JSON> })` когда файловая загрузка позволяет избежать копирования большого тела.
+**Обнаружение:** `workflow({ action: "create", workflow: <large JSON> })` когда файловая загрузка позволяет избежать копирования большого тела.
 
 ```
-❌ manage({ action: "create", workflow: <large JSON> })
+❌ workflow({ action: "create", workflow: <large JSON> })
    // Может упереться в лимиты размера параметров
 
-✅ token({ action: "upload" }) → follow the returned upload instructions
+✅ workflow({ action: "upload" }) → follow the returned upload instructions
    // Соблюдайте действующие лимиты и проверяйте ответ; не предполагайте метод и неограниченный размер
 ```
 

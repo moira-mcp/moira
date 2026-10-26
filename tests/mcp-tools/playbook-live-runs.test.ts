@@ -11,6 +11,7 @@
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import {
+  deleteOwnedTestWorkflow,
   callMCPTool,
   callMCPToolRaw,
   createAuthenticatedMCPClient,
@@ -46,7 +47,7 @@ async function createFlow(
   name: string,
   directive: string,
 ): Promise<{ workflowId: string }> {
-  return (await callMCPTool(client, "manage", {
+  return (await callMCPTool(client, "workflow", {
     action: "create",
     workflow: {
       metadata: { name, version: "1.0.0", description: "Live-run counting" },
@@ -66,14 +67,14 @@ async function createFlow(
 }
 
 async function startRun(client: Client, workflowId: string): Promise<string> {
-  const prepared = await callMCPToolRaw(client, "start", {
+  const prepared = await callMCPToolRaw(client, "execution", {
     action: "prepare",
     workflowId,
     parentExecutionId: "none",
   });
   const startAttemptId = prepared.match(/Start attempt ID:\s*([a-f0-9-]+)/i)?.[1];
   expect(startAttemptId).toBeDefined();
-  const started = await callMCPToolRaw(client, "start", { action: "execute", startAttemptId });
+  const started = await callMCPToolRaw(client, "execution", { action: "execute", startAttemptId });
   const processId = started.match(/Process ID:\s*([a-f0-9-]+)/i)?.[1];
   expect(processId).toBeDefined();
   return processId!;
@@ -102,22 +103,18 @@ describe("playbook live-run count", () => {
 
   afterAll(async () => {
     for (const processId of runs) {
-      try {
-        await callMCPTool(client, "session", {
-          action: "cancel-execution",
-          executionId: processId,
-          reason: "test cleanup",
-        });
-      } catch {
-        // Cleanup failures are not the subject of this test.
-      }
+      const current = await callMCPTool<{ revision: number }>(client, "execution", {
+        action: "execution_context",
+        executionId: processId,
+      });
+      await callMCPTool(client, "execution", {
+        action: "cancel-execution",
+        executionId: processId,
+        expectedRevision: current.revision,
+      });
     }
     for (const workflowId of created) {
-      try {
-        await callMCPTool(client, "manage", { action: "delete", workflowId });
-      } catch {
-        // Same.
-      }
+      await deleteOwnedTestWorkflow(client, workflowId);
     }
     try {
       await callMCPTool(client, "playbooks", { action: "delete", name: playbookName });

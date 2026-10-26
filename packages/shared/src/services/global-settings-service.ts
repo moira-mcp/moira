@@ -17,6 +17,8 @@ import {
   type RevisionSummary,
 } from "../database/repositories/revision-repository.js";
 import type { RevisionDiffPart } from "./revision-diff.js";
+import { artifactFileSizeMbToBytes } from "./artifact-size-policy.js";
+import { ValidationError } from "../errors/app-error.js";
 
 /**
  * How many past values of one global setting are kept.
@@ -71,6 +73,7 @@ export class GlobalSettingsService {
    * Logs actual old/new values for rollback capability
    */
   async setValue(key: string, value: string | null, adminUserId: string): Promise<void> {
+    this.validateArtifactFileSize(key, value);
     // Get old value for audit
     const existing = await this.globalSettingsRepo.get(key);
     const oldValue = existing?.value ?? null;
@@ -178,6 +181,7 @@ export class GlobalSettingsService {
     },
     adminUserId: string,
   ): Promise<void> {
+    this.validateArtifactFileSize(setting.key, setting.value ?? null);
     await this.globalSettingsRepo.create(setting, adminUserId);
 
     // A created setting starts its history at its initial value.
@@ -201,5 +205,17 @@ export class GlobalSettingsService {
         },
       ],
     });
+  }
+
+  private validateArtifactFileSize(key: string, value: string | null): void {
+    if (
+      key === "artifacts.max_file_size_mb" &&
+      value !== null &&
+      artifactFileSizeMbToBytes(value) === null
+    ) {
+      throw new ValidationError(
+        "Artifact max file size must be positive MiB with a safe whole-byte content and JSON limit",
+      );
+    }
   }
 }

@@ -225,12 +225,11 @@ describe("MCP Notes Tool E2E", () => {
     });
 
     test("get requires key parameter", async () => {
-      const result = await callMCPTool(client, "notes", {
-        action: "get",
-      });
-
-      expect(typeof result).toBe("string");
-      expect(result).toContain("key");
+      await expect(
+        callMCPTool(client, "notes", {
+          action: "get",
+        }),
+      ).rejects.toMatchObject({ code: 400 });
     });
   });
 
@@ -291,23 +290,21 @@ describe("MCP Notes Tool E2E", () => {
     });
 
     test("save requires key parameter", async () => {
-      const result = await callMCPTool(client, "notes", {
-        action: "save",
-        value: "Content without key",
-      });
-
-      expect(typeof result).toBe("string");
-      expect(result).toContain("key");
+      await expect(
+        callMCPTool(client, "notes", {
+          action: "save",
+          value: "Content without key",
+        }),
+      ).rejects.toMatchObject({ code: 400 });
     });
 
     test("save requires value parameter", async () => {
-      const result = await callMCPTool(client, "notes", {
-        action: "save",
-        key: "key-without-value",
-      });
-
-      expect(typeof result).toBe("string");
-      expect(result).toContain("value");
+      await expect(
+        callMCPTool(client, "notes", {
+          action: "save",
+          key: "key-without-value",
+        }),
+      ).rejects.toMatchObject({ code: 400 });
     });
 
     test("save with multiple tags", async () => {
@@ -377,12 +374,11 @@ describe("MCP Notes Tool E2E", () => {
     });
 
     test("delete requires key parameter", async () => {
-      const result = await callMCPTool(client, "notes", {
-        action: "delete",
-      });
-
-      expect(typeof result).toBe("string");
-      expect(result).toContain("key");
+      await expect(
+        callMCPTool(client, "notes", {
+          action: "delete",
+        }),
+      ).rejects.toMatchObject({ code: 400 });
     });
   });
 
@@ -445,12 +441,11 @@ describe("MCP Notes Tool E2E", () => {
     });
 
     test("history requires key parameter", async () => {
-      const result = await callMCPTool(client, "notes", {
-        action: "history",
-      });
-
-      expect(typeof result).toBe("string");
-      expect(result).toContain("key");
+      await expect(
+        callMCPTool(client, "notes", {
+          action: "history",
+        }),
+      ).rejects.toMatchObject({ code: 400 });
     });
   });
 
@@ -531,13 +526,11 @@ describe("MCP Notes Tool E2E", () => {
 
   describe("error handling", () => {
     test("invalid action returns error", async () => {
-      const result = await callMCPTool(client, "notes", {
-        action: "invalid-action" as any,
-      });
-
-      expect(typeof result).toBe("string");
-      // Response contains "MCP error" or "error" - case insensitive check
-      expect(result.toLowerCase()).toContain("error");
+      await expect(
+        callMCPTool(client, "notes", {
+          action: "invalid-action" as any,
+        }),
+      ).rejects.toMatchObject({ code: 400 });
     });
   });
 });

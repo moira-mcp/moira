@@ -12,8 +12,10 @@
 
 import { test, expect } from "./fixtures.js";
 import { login } from "./helpers/auth-helper.js";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
+import { browserPublicationOwner } from "../fixtures/browser-publication-owner.js";
 import {
+  deleteOwnedTestWorkflow,
   advanceWorkflowExecution,
   createAuthenticatedMCPClient,
   callMCPTool,
@@ -22,7 +24,6 @@ import {
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 const BASE_URL = getTestBaseUrl();
-const ADMIN_USER = getAdminCredentials();
 
 const stamp = Date.now();
 const playbookName = `degradation-standard-${stamp}`;
@@ -66,15 +67,18 @@ function loopingWorkflow() {
 }
 
 test.describe("Degradation on the run page", () => {
+  test.describe.configure({ mode: "serial" });
   let mcpClient: Client;
   let cleanup: () => Promise<void>;
   let executionId: string;
   let workflowId: string;
+  let owner: Awaited<ReturnType<typeof browserPublicationOwner>>;
 
   test.beforeAll(async () => {
+    owner = await browserPublicationOwner(3303);
     const mcpResult = await createAuthenticatedMCPClient({
-      email: ADMIN_USER.email,
-      password: ADMIN_USER.password,
+      email: owner.email,
+      password: owner.password,
     });
     mcpClient = mcpResult.client;
     cleanup = mcpResult.cleanup;
@@ -85,7 +89,7 @@ test.describe("Degradation on the run page", () => {
       content: "Read the whole diff before judging it.",
     });
 
-    const created = (await callMCPTool(mcpClient, "manage", {
+    const created = (await callMCPTool(mcpClient, "workflow", {
       action: "create",
       workflow: loopingWorkflow(),
     })) as { workflowId: string };
@@ -100,20 +104,27 @@ test.describe("Degradation on the run page", () => {
   });
 
   test.afterAll(async () => {
-    if (workflowId && mcpClient) {
+    const errors: unknown[] = [];
+    for (const dispose of [
+      async () => {
+        if (workflowId && mcpClient) await deleteOwnedTestWorkflow(mcpClient, workflowId);
+      },
+      async () => cleanup?.(),
+      async () => owner?.close(),
+    ]) {
       try {
-        await callMCPTool(mcpClient, "manage", { action: "delete", workflowId });
-      } catch {
-        // Cleanup failures are not the subject of this test.
+        await dispose();
+      } catch (error) {
+        errors.push(error);
       }
     }
-    await cleanup?.();
+    if (errors.length) throw new AggregateError(errors, "Degradation suite cleanup failed");
   });
 
   test("the run page names what the step ran without, and does not call it an error", async ({
     page,
   }) => {
-    await login(page, ADMIN_USER.email, ADMIN_USER.password);
+    await login(page, owner.email, owner.password);
 
     await page.goto(`${BASE_URL}/executions/${executionId}`);
     await page.waitForLoadState("domcontentloaded");
@@ -143,7 +154,7 @@ test.describe("Degradation on the run page", () => {
       content: "Judge the diff, not the intent.",
     });
 
-    const created = (await callMCPTool(mcpClient, "manage", {
+    const created = (await callMCPTool(mcpClient, "workflow", {
       action: "create",
       workflow: {
         metadata: {
@@ -189,7 +200,7 @@ test.describe("Degradation on the run page", () => {
     const delivered = await fetch(url);
     expect(delivered.status).toBe(200);
 
-    await login(page, ADMIN_USER.email, ADMIN_USER.password);
+    await login(page, owner.email, owner.password);
     await page.goto(`${BASE_URL}/executions/${runId}`);
     await page.waitForLoadState("domcontentloaded");
 
@@ -199,10 +210,6 @@ test.describe("Degradation on the run page", () => {
     await expect(degradations).toBeVisible();
     await expect(degradations).toContainText(name);
 
-    try {
-      await callMCPTool(mcpClient, "manage", { action: "delete", workflowId: created.workflowId });
-    } catch {
-      // Cleanup failures are not the subject of this test.
-    }
+    await deleteOwnedTestWorkflow(mcpClient, created.workflowId);
   });
 });

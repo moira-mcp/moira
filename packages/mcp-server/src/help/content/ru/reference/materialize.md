@@ -78,7 +78,7 @@ mkdir -p -- '<basePath>' && curl -sSf -- '<reusable-url>' | tar -x -C '<basePath
 делает URL недействительным, называет описанный ниже fallback-маршрут доставки в контекст при
 условии, что этот хост не может выполнить команду, и объясняет, что доставка не доказывает чтение
 ни на одном из маршрутов. Вызов
-`session({ action: "current_step", executionId })` во время паузы выдаёт новые команду и разрешение, не продвигая
+`execution({ action: "current_step", executionId })` во время паузы выдаёт новые команду и разрешение, не продвигая
 граф. Поздняя директива всё равно должна явно требовать чтения каждого используемого файла.
 
 ## Контракт архива и путей
@@ -148,7 +148,7 @@ mkdir -p -- '<basePath>' && curl -sSf -- '<reusable-url>' | tar -x -C '<basePath
 маршрут:
 
 ```text
-session({ action: "materialize", executionId: "<process-id>" })
+execution({ action: "materialize", executionId: "<process-id>" })
 ```
 
 Он напрямую разрешает текущий авторизованный текст workflow: по одному текстовому блоку на файл,

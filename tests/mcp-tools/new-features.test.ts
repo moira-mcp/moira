@@ -5,6 +5,7 @@
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import {
+  deleteOwnedTestWorkflow,
   advanceWorkflowExecution,
   createAuthenticatedMCPClient,
   callMCPTool,
@@ -27,15 +28,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
   afterAll(async () => {
     // Cleanup all created workflows
     for (const workflowId of createdWorkflows) {
-      try {
-        await callMCPTool(client, "manage", {
-          action: "edit",
-          workflowId,
-          changes: { removeNodes: [] }, // Just to trigger cleanup
-        });
-      } catch (e) {
-        // Ignore cleanup errors
-      }
+      await deleteOwnedTestWorkflow(client, workflowId);
     }
     await cleanup();
   });
@@ -45,7 +38,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
 
     beforeAll(async () => {
       // Create test workflow with initialData
-      const result = await callMCPTool(client, "manage", {
+      const result = await callMCPTool(client, "workflow", {
         action: "create",
         workflow: {
           metadata: {
@@ -78,7 +71,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
     });
 
     test("list-variables returns all workflow variables", async () => {
-      const result = await callMCPTool(client, "manage", {
+      const result = await callMCPTool(client, "workflow", {
         action: "list-variables",
         workflowId: testWorkflowId,
       });
@@ -94,7 +87,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
     });
 
     test("get-variable returns specific variable value", async () => {
-      const result = await callMCPTool(client, "manage", {
+      const result = await callMCPTool(client, "workflow", {
         action: "get-variable",
         workflowId: testWorkflowId,
         variableName: "existing_var",
@@ -104,7 +97,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
     });
 
     test("get-variable returns number correctly", async () => {
-      const result = await callMCPTool(client, "manage", {
+      const result = await callMCPTool(client, "workflow", {
         action: "get-variable",
         workflowId: testWorkflowId,
         variableName: "number_var",
@@ -114,7 +107,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
     });
 
     test("get-variable returns nested object", async () => {
-      const result = await callMCPTool(client, "manage", {
+      const result = await callMCPTool(client, "workflow", {
         action: "get-variable",
         workflowId: testWorkflowId,
         variableName: "nested",
@@ -125,7 +118,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
     });
 
     test("set-variable creates new variable", async () => {
-      const result = await callMCPTool(client, "manage", {
+      const result = await callMCPTool(client, "workflow", {
         action: "set-variable",
         workflowId: testWorkflowId,
         variableName: "new_var",
@@ -135,7 +128,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
       expect(result).toHaveProperty("success", true);
 
       // Verify it was set
-      const getResult = await callMCPTool(client, "manage", {
+      const getResult = await callMCPTool(client, "workflow", {
         action: "get-variable",
         workflowId: testWorkflowId,
         variableName: "new_var",
@@ -144,14 +137,14 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
     });
 
     test("set-variable updates existing variable", async () => {
-      await callMCPTool(client, "manage", {
+      await callMCPTool(client, "workflow", {
         action: "set-variable",
         workflowId: testWorkflowId,
         variableName: "existing_var",
         variableValue: "updated_value",
       });
 
-      const result = await callMCPTool(client, "manage", {
+      const result = await callMCPTool(client, "workflow", {
         action: "get-variable",
         workflowId: testWorkflowId,
         variableName: "existing_var",
@@ -162,7 +155,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
 
     test("delete-variable removes variable", async () => {
       // First create a variable to delete
-      await callMCPTool(client, "manage", {
+      await callMCPTool(client, "workflow", {
         action: "set-variable",
         workflowId: testWorkflowId,
         variableName: "to_delete",
@@ -170,7 +163,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
       });
 
       // Delete it
-      const deleteResult = await callMCPTool(client, "manage", {
+      const deleteResult = await callMCPTool(client, "workflow", {
         action: "delete-variable",
         workflowId: testWorkflowId,
         variableName: "to_delete",
@@ -179,7 +172,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
       expect(deleteResult).toHaveProperty("success", true);
 
       // Verify it's gone
-      const listResult = await callMCPTool(client, "manage", {
+      const listResult = await callMCPTool(client, "workflow", {
         action: "list-variables",
         workflowId: testWorkflowId,
       });
@@ -195,7 +188,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
 
     beforeAll(async () => {
       // Create two workflows for comparison
-      const result1 = await callMCPTool(client, "manage", {
+      const result1 = await callMCPTool(client, "workflow", {
         action: "create",
         workflow: {
           metadata: {
@@ -219,7 +212,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
       workflow1Id = result1.workflowId;
       createdWorkflows.push(workflow1Id);
 
-      const result2 = await callMCPTool(client, "manage", {
+      const result2 = await callMCPTool(client, "workflow", {
         action: "create",
         workflow: {
           metadata: {
@@ -252,7 +245,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
     });
 
     test("diff action returns comparison results", async () => {
-      const result = await callMCPTool(client, "manage", {
+      const result = await callMCPTool(client, "workflow", {
         action: "diff",
         workflowId: workflow1Id,
         compareWorkflowId: workflow2Id,
@@ -263,7 +256,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
     });
 
     test("diff detects metadata changes", async () => {
-      const result = await callMCPTool(client, "manage", {
+      const result = await callMCPTool(client, "workflow", {
         action: "diff",
         workflowId: workflow1Id,
         compareWorkflowId: workflow2Id,
@@ -275,7 +268,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
     });
 
     test("diff detects added nodes", async () => {
-      const result = await callMCPTool(client, "manage", {
+      const result = await callMCPTool(client, "workflow", {
         action: "diff",
         workflowId: workflow1Id,
         compareWorkflowId: workflow2Id,
@@ -286,7 +279,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
     });
 
     test("diff detects modified nodes", async () => {
-      const result = await callMCPTool(client, "manage", {
+      const result = await callMCPTool(client, "workflow", {
         action: "diff",
         workflowId: workflow1Id,
         compareWorkflowId: workflow2Id,
@@ -298,7 +291,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
     });
 
     test("diff with same workflow returns no changes", async () => {
-      const result = await callMCPTool(client, "manage", {
+      const result = await callMCPTool(client, "workflow", {
         action: "diff",
         workflowId: workflow1Id,
         compareWorkflowId: workflow1Id,
@@ -313,7 +306,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
     let workflowId: string;
 
     beforeAll(async () => {
-      const result = await callMCPTool(client, "manage", {
+      const result = await callMCPTool(client, "workflow", {
         action: "create",
         workflow: {
           metadata: {
@@ -360,7 +353,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
 
       // Check execution context to verify note was updated
       // Use execution_context action which works for any execution state
-      const contextResult = await callMCPTool(client, "session", {
+      const contextResult = await callMCPTool(client, "execution", {
         action: "execution_context",
         executionId: processId,
       });
@@ -372,7 +365,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
   describe("Session Update Note", () => {
     test("session update-note updates execution note", async () => {
       // Create and start a workflow
-      const createResult = await callMCPTool(client, "manage", {
+      const createResult = await callMCPTool(client, "workflow", {
         action: "create",
         workflow: {
           metadata: {
@@ -407,7 +400,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
       const processId = startResult.match(/Process ID: ([a-f0-9-]+)/)![1];
 
       // Update note via session tool
-      const updateResult = await callMCPTool(client, "session", {
+      const updateResult = await callMCPTool(client, "execution", {
         action: "update-note",
         executionId: processId,
         note: "Updated via session tool",
@@ -418,7 +411,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
       expect(updateResult.message).toBe("Note updated successfully");
 
       // Verify note was updated via execution_context
-      const contextResult = await callMCPTool(client, "session", {
+      const contextResult = await callMCPTool(client, "execution", {
         action: "execution_context",
         executionId: processId,
       });
@@ -429,7 +422,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
 
   describe("Conditional Templates", () => {
     test("conditional template in directive works correctly", async () => {
-      const createResult = await callMCPTool(client, "manage", {
+      const createResult = await callMCPTool(client, "workflow", {
         action: "create",
         workflow: {
           metadata: {
@@ -491,7 +484,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
       await advanceWorkflowExecution(client, execution, { has_feature: true });
 
       // Get current step - directive should show "Feature enabled"
-      const currentStep = await callMCPTool<string>(client, "session", {
+      const currentStep = await callMCPTool<string>(client, "execution", {
         action: "current_step",
         executionId: processId,
       });
@@ -502,7 +495,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
     });
 
     test("conditional template with false condition", async () => {
-      const createResult = await callMCPTool(client, "manage", {
+      const createResult = await callMCPTool(client, "workflow", {
         action: "create",
         workflow: {
           metadata: {
@@ -561,7 +554,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
       // Set test_mode = false
       await advanceWorkflowExecution(client, execution, { test_mode: false });
 
-      const currentStep = await callMCPTool<string>(client, "session", {
+      const currentStep = await callMCPTool<string>(client, "execution", {
         action: "current_step",
         executionId: processId,
       });
@@ -573,7 +566,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
 
   describe("Array Index Access", () => {
     test("array[index].field template works in directive", async () => {
-      const createResult = await callMCPTool(client, "manage", {
+      const createResult = await callMCPTool(client, "workflow", {
         action: "create",
         workflow: {
           metadata: {
@@ -627,7 +620,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
     });
 
     test("array[index] without field works", async () => {
-      const createResult = await callMCPTool(client, "manage", {
+      const createResult = await callMCPTool(client, "workflow", {
         action: "create",
         workflow: {
           metadata: {
@@ -679,7 +672,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
   describe("Parent Execution Continuation", () => {
     test("start with parentExecutionId links executions", async () => {
       // Create parent workflow
-      const parentCreateResult = await callMCPTool(client, "manage", {
+      const parentCreateResult = await callMCPTool(client, "workflow", {
         action: "create",
         workflow: {
           metadata: {
@@ -710,7 +703,7 @@ describe("MCP Variables, Templates and Execution Notes E2E", () => {
       createdWorkflows.push(parentWorkflowId);
 
       // Create child workflow
-      const childCreateResult = await callMCPTool(client, "manage", {
+      const childCreateResult = await callMCPTool(client, "workflow", {
         action: "create",
         workflow: {
           metadata: {

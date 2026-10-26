@@ -152,7 +152,7 @@ and is recorded on it as a runtime adjustment with your name, as is a variable e
 row of the variables panel.
 
 An agent that was holding the step you answered receives `ATTEMPT_STALE` on its next `step` and
-reads `session current_step` for the step the run is now on. An answer is refused while an agent is
+reads `execution` (`current_step`) for the step the run is now on. An answer is refused while an agent is
 executing the current step, on a locked or finished execution, and when the page's copy of the run
 is behind the server's (reload, inspect the current step, and decide whether the answer still applies).
 

@@ -38,9 +38,8 @@ static long long milliseconds(void) {
   return (long long)t.tv_sec * 1000 + t.tv_nsec / 1000000;
 }
 
-static int capture(owner *out, const char *root, const char *exe, const char *path, int vm) {
-  out->child = 0;
-  char canonical[PATH_MAX], actual[PATH_MAX];
+static int connect_peer(const char *root, const char *path, int vm, int wait_connect) {
+  char canonical[PATH_MAX];
   struct stat st;
   if (!realpath(path, canonical)) return errno == ENOENT ? -2 : -1;
   if (strncmp(canonical, root, strlen(root)) ||
@@ -56,6 +55,8 @@ static int capture(owner *out, const char *root, const char *exe, const char *pa
   if (fcntl(fd, F_SETFL, O_NONBLOCK)) { close(fd); return -1; }
   if (connect(fd, (struct sockaddr *)&addr, sizeof(addr))) {
     if (errno != EINPROGRESS) { int absent = errno == ECONNREFUSED || errno == ENOENT; close(fd); return absent ? -2 : -1; }
+    /* Candidate discovery is not attestation and must not repeat its completion wait. */
+    if (!wait_connect) { close(fd); return -1; }
     struct pollfd connecting = { .fd = fd, .events = POLLOUT };
     int error = 0;
     socklen_t error_size = sizeof(error);
@@ -64,6 +65,14 @@ static int capture(owner *out, const char *root, const char *exe, const char *pa
       close(fd); return -1;
     }
   }
+  return fd;
+}
+
+static int capture(owner *out, const char *root, const char *exe, const char *path, int vm) {
+  out->child = 0;
+  char canonical[PATH_MAX], actual[PATH_MAX];
+  int fd = connect_peer(root, path, vm, 1);
+  if (fd < 0) return fd;
 #ifdef __APPLE__
   socklen_t size = sizeof(out->token);
   if (getsockopt(fd, SOL_LOCAL, LOCAL_PEERTOKEN, &out->token, &size) ||
@@ -301,19 +310,20 @@ int main(int argc, char **argv) {
   if (argc == 3 && !strcmp(argv[1], "--state-lock")) return state_lock(argv[2]);
   int starting = argc == 4 && (!strcmp(argv[1], "--launch") || !strcmp(argv[1], "--initialize"));
   int vm = argc >= 5 && !strcmp(argv[1], "--vm");
+  int absent = argc >= 5 && !strcmp(argv[1], "--vm-absent");
   if (vm && argc != 5) return 2;
 #ifndef __APPLE__
   /* The pinned Linux worker transport has no observed strong peer-pidfd contract. */
-  if (vm) return 2;
+  if (vm || absent) return 2;
 #endif
-  int base = starting || vm ? 2 : 1;
-  if (argc < (vm ? 5 : 4) || argc > (vm ? 36 : 35)) return 2;
+  int base = starting || vm || absent ? 2 : 1;
+  if (argc < (vm || absent ? 5 : 4) || (!absent && argc > (vm ? 36 : 35))) return 2;
   char root[PATH_MAX], exe[PATH_MAX];
   struct stat st;
   if (!realpath(argv[base], root) || strcmp(root, argv[base]) || lstat(root, &st) || !S_ISDIR(st.st_mode) ||
       st.st_uid != geteuid() || (st.st_mode & 077) || !realpath(argv[base + 1], exe) ||
       strcmp(exe, argv[base + 1]) || lstat(exe, &st) || !S_ISREG(st.st_mode) || (st.st_mode & 022)) return 2;
-  if (vm) {
+  if (vm || absent) {
     const char suffix[] = "/Contents/MacOS/sbx";
     size_t length = strlen(exe), suffix_length = sizeof(suffix) - 1;
     if (length <= suffix_length || strcmp(exe + length - suffix_length, suffix) || (st.st_uid != geteuid() && st.st_uid != 0)) return 2;
@@ -329,10 +339,21 @@ int main(int argc, char **argv) {
   }
   owner owners[32];
   memset(owners, 0, sizeof(owners));
-  int count = starting ? 1 : argc - (vm ? 4 : 3);
-  for (int i = 0; vm && i < count; i++) {
+  int count = starting ? 1 : argc - (vm || absent ? 4 : 3);
+  for (int i = 0; (vm || absent) && i < count; i++) {
     const char *name = strrchr(argv[i + 4], '/');
     if (!name || strlen(++name) != 20 || strspn(name, "0123456789abcdef") != 12 || strcmp(name + 12, "-vm.sock")) return 2;
+  }
+  if (absent) {
+    /* One bitmap for this scan only: 0 proves absence, 1 requires full capture.
+       No peer identity, readiness or signalling authority is returned here. */
+    for (int i = 0; i < count; i++) {
+      int fd = connect_peer(root, argv[i + 4], 1, 0);
+      putchar(fd == -2 ? '0' : '1');
+      if (fd >= 0) close(fd);
+    }
+    putchar('\n');
+    return ferror(stdout) ? 2 : 0;
   }
   if (starting && launch(&owners[0], exe, !strcmp(argv[1], "--initialize"))) {
     if (refuse_child(&owners[0])) return 3;

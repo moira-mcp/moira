@@ -6,12 +6,12 @@ description: Evidence-backed анализ одного запуска Moira с �
 Execution Retrospective анализирует один завершённый, прерванный или неуспешный запуск Moira по разрешённому execution context, agent-session evidence, артефактам, review, retry, пользовательским исправлениям и terminal behavior. Результат — приоритизированные предложения по улучшению результата, workflow definition или system prompt без изменения анализируемого запуска.
 
 ```bash
-mcp__moira__start({
+mcp__moira__execution({
   action: "prepare",
   workflowId: "moira/execution-retrospective",
   parentExecutionId: "none"
 })
-mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
+mcp__moira__execution({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ```
 
 Назовите анализируемый запуск на первом шаге. Его ID и родитель запуска — разные вещи:

@@ -9,6 +9,8 @@ import { LocalRelay } from "../../../packages/local/src/relay.js";
 import { LocalRecords } from "../../../packages/local/src/space-record.js";
 import { LocalManager } from "../../../packages/local/src/manager.js";
 import { localFixture } from "../../integration/local/fixtures.js";
+import type { LocalSetupAttempt } from "../../../packages/shared/src/codespaces/local-protocol.js";
+import { findCredentialRequests } from "../../../packages/workspace-service/src/credential-request.mjs";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -49,6 +51,198 @@ async function fixture() {
   await new ControllerState(local.records).putBinding(binding);
   return { ...local, state, identity, binding };
 }
+
+test("setup custody is linked before issuance and exact-parent recovery excludes older and ordinary requests", async () => {
+  const f = await fixture();
+  const context = {
+    spaceId: f.space.id,
+    generation: f.space.generation,
+    runtimeId: f.space.runtimeId!,
+    repositoryId: f.space.repositoryId,
+    operationMarker: f.space.operationMarker,
+  };
+  const attempt: LocalSetupAttempt = {
+    ...context,
+    requestId: `ws1-${randomUUID()}`,
+    state: "preparing",
+  };
+  const older = `ws1-${randomUUID()}`,
+    ordinary = `ws1-${randomUUID()}`;
+  for (const [requestId, parentRequestId] of [
+    [older, `ws1-${randomUUID()}`],
+    [ordinary, undefined],
+  ])
+    await f.state.write(`credential-request-${requestId}.json`, {
+      requestId,
+      resourceId: f.binding.resourceId,
+      resourceGeneration: 3,
+      action: "fetch",
+      state: parentRequestId ? "foreign-historical-state" : "unconfirmed",
+      ...(parentRequestId ? { parentRequestId, localSetup: context } : {}),
+    });
+  await f.records.put({ ...f.space, setupAttempt: attempt });
+  let issued = 0;
+  let originalId = "";
+  const relay = new LocalRelay(f.records, async (url, options) => {
+    if (String(url).endsWith("/acquire")) {
+      issued++;
+      const input = JSON.parse(String(options?.body));
+      originalId = input.requestId;
+      expect(
+        await f.state.read(`credential-request-${originalId}.json`, (value) => value),
+      ).toMatchObject({
+        requestId: originalId,
+        parentRequestId: attempt.requestId,
+        localSetup: context,
+        state: "prepared",
+      });
+      throw new Error("Original acquire reply lost");
+    }
+    return Response.json({ success: true, data: { ...f.identity, status: "active" } });
+  });
+  await expect(
+    relay.acquireGitCredential(f.space.id, f.space.repositoryId, "fetch", undefined, {
+      requestId: attempt.requestId,
+      generation: attempt.generation,
+    }),
+  ).rejects.toMatchObject({
+    code: "WORKSPACE_OUTCOME_UNCONFIRMED",
+  });
+  const reopened = new LocalRelay(
+    new LocalRecords(await PrivateState.open(f.state.root)),
+    async (url) => {
+      expect(String(url)).toContain(`/requests/${originalId}`);
+      return Response.json({ state: "absent" });
+    },
+  );
+  expect(
+    (await reopened.setupCredentialRequests(attempt)).map((record) => record.requestId),
+  ).toEqual([originalId]);
+  await expect(reopened.requireSetupCredentialsSettled(attempt)).rejects.toMatchObject({
+    code: "LOCAL_SETUP_INCOMPLETE",
+  });
+  await reopened.collectGitCredentialRequest(originalId);
+  await expect(reopened.requireSetupCredentialsSettled(attempt)).resolves.toBeUndefined();
+  expect(await f.state.read(`credential-request-${older}.json`, (value) => value)).toMatchObject({
+    state: "foreign-historical-state",
+  });
+  expect(await f.state.read(`credential-request-${ordinary}.json`, (value) => value)).toMatchObject(
+    { state: "unconfirmed" },
+  );
+  expect(issued).toBe(1);
+});
+
+test("a stale setup marker is refused before external authority or credential issuance", async () => {
+  const f = await fixture();
+  let requests = 0;
+  const relay = new LocalRelay(f.records, async () => {
+    requests++;
+    throw new Error("Stale setup contacted authority");
+  });
+  await expect(
+    relay.acquireGitCredential(f.space.id, f.space.repositoryId, "fetch", undefined, {
+      requestId: `ws1-${randomUUID()}`,
+      generation: f.space.generation,
+    }),
+  ).rejects.toMatchObject({ code: "LOCAL_IDENTITY_CHANGED" });
+  expect(requests).toBe(0);
+  expect(await f.state.keys("credential-request-")).toEqual([]);
+});
+
+test.each(["state", "requestId", "context"] as const)(
+  "exact setup lookup refuses corrupted selected %s rather than dropping its custody",
+  async (change) => {
+    const f = await fixture();
+    const attempt: LocalSetupAttempt = {
+      requestId: `ws1-${randomUUID()}`,
+      spaceId: f.space.id,
+      generation: f.space.generation,
+      runtimeId: f.space.runtimeId!,
+      repositoryId: f.space.repositoryId,
+      operationMarker: f.space.operationMarker,
+      state: "completed",
+    };
+    const requestId = `ws1-${randomUUID()}`;
+    await f.state.write(`credential-request-${requestId}.json`, {
+      requestId: change === "requestId" ? `ws1-${randomUUID()}` : requestId,
+      parentRequestId: attempt.requestId,
+      localSetup: {
+        spaceId: f.space.id,
+        generation: attempt.generation,
+        runtimeId: change === "context" ? "foreign-vm" : attempt.runtimeId,
+        repositoryId: attempt.repositoryId,
+        operationMarker: attempt.operationMarker,
+      },
+      resourceId: f.binding.resourceId,
+      resourceGeneration: 3,
+      action: "fetch",
+      state: change === "state" ? "unrecognized-selected-state" : "unconfirmed",
+    });
+    let network = 0;
+    const relay = new LocalRelay(f.records, async () => {
+      network++;
+      throw new Error("Query contacted issuer");
+    });
+    await expect(relay.requireSetupCredentialsSettled(attempt)).rejects.toThrow();
+    expect(network).toBe(0);
+    expect(await f.state.keys("credential-request-")).toEqual([
+      `credential-request-${requestId}.json`,
+    ]);
+  },
+);
+
+test("a setup child journal write failure prevents external issuance", async () => {
+  const f = await fixture();
+  const attempt: LocalSetupAttempt = {
+    requestId: `ws1-${randomUUID()}`,
+    spaceId: f.space.id,
+    generation: f.space.generation,
+    runtimeId: f.space.runtimeId!,
+    repositoryId: f.space.repositoryId,
+    operationMarker: f.space.operationMarker,
+    state: "preparing",
+  };
+  await f.records.put({ ...f.space, setupAttempt: attempt });
+  const write = f.state.write.bind(f.state);
+  f.state.write = async (key, value) => {
+    if (key.startsWith("credential-request-")) throw new Error("Controlled durable write refusal");
+    return write(key, value);
+  };
+  let issued = 0;
+  const relay = new LocalRelay(f.records, async (url) => {
+    if (String(url).endsWith("/acquire")) {
+      issued++;
+      throw new Error("Unjournaled issuance");
+    }
+    return Response.json({ success: true, data: { ...f.identity, status: "active" } });
+  });
+  await expect(
+    relay.acquireGitCredential(f.space.id, f.space.repositoryId, "fetch", undefined, {
+      requestId: attempt.requestId,
+      generation: attempt.generation,
+    }),
+  ).rejects.toThrow("Controlled durable write refusal");
+  expect(issued).toBe(0);
+  expect(await f.state.keys("credential-request-")).toEqual([]);
+});
+
+test("a selected child disappearing during exact lookup is not proof of settled custody", async () => {
+  const requestId = `ws1-${randomUUID()}`,
+    parentRequestId = `ws1-${randomUUID()}`;
+  let reads = 0;
+  await expect(
+    findCredentialRequests(
+      {
+        requestIds: async () => [requestId],
+        read: async () => (++reads === 1 ? { parentRequestId } : null),
+        write: async () => {
+          throw new Error("Lookup must not write");
+        },
+      },
+      parentRequestId,
+    ),
+  ).rejects.toThrow("Security parent changed");
+});
 
 test("known scoped acquisition rechecks the same original security ID and stable route, then disposes after local work stops", async () => {
   const f = await fixture();

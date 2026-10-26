@@ -414,7 +414,7 @@ Before saving, verify:
 ### Create New
 
 ```typescript
-mcp__moira__manage({
+mcp__moira__workflow({
   action: "create",
   workflow: {
     id: "my-workflow",
@@ -427,7 +427,7 @@ mcp__moira__manage({
 ### Edit Existing
 
 ```typescript
-mcp__moira__manage({
+mcp__moira__workflow({
   action: "edit",
   workflowId: "my-workflow",
   changes: {
@@ -441,7 +441,7 @@ mcp__moira__manage({
 
 ```typescript
 // For agents with file system access
-const { uploadUrl } = await mcp__moira__token({ action: "upload" });
+const { uploadUrl } = await mcp__moira__workflow({ action: "upload" });
 // Upload JSON file to uploadUrl
 ```
 

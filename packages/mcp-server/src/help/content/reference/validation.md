@@ -27,7 +27,7 @@ Graph structure is analyzed for correctness:
 - **Node connectivity** - All connections point to valid nodes
 - **Required nodes** - Start node must exist
 - **Circular dependencies** - Loops are detected and flagged
-- **Unreachable nodes** - Nodes no entry point leads to. Entry points are the start node and every `teleport`: a teleport has no ordinary incoming connections, so whatever it routes to is reachable through `step({ teleportTo })` and is not reported
+- **Unreachable nodes** - Nodes no entry point leads to. Entry points are the start node and every `teleport`: a teleport has no ordinary incoming connections, so whatever it routes to is reachable through `execution({ action: "step", teleportTo })` and is not reported
 - **Registry entries** - Each `variableRegistry` entry must be a valid JSON Schema (a malformed `items`/`pattern`/etc. is a blocking error) with a non-empty description
 - **Materialize declarations** - Every entry has exactly one source (`from` or empty `content`),
   registry sources are string defaults, declared paths are safe and unique, and all connection
@@ -343,12 +343,12 @@ error — naming the gate: keep the workflow's message and set `humanGate.notify
 
 A definition that names a playbook with `{{playbook:name}}` is accepted only when the author can
 read that playbook: their own, or another account's published one. An unreadable reference is a
-blocking error wherever a definition is written — the `manage` tool refuses to create or edit, and a
+blocking error wherever a definition is written — the `workflow` tool refuses to create or edit, and a
 definition saved through the API is stored as invalid — and the message names the playbook and the
 three ways out: create it, publish it, or remove the reference.
 
 The same rule runs once more when a run is started, because a playbook can disappear between the
-last edit and the start. `start` refuses before the execution exists rather than presenting a step
+last edit and the start. `execution` (`execute`) refuses before the execution exists rather than presenting a step
 whose behaviour text is missing.
 
 A reference written with a leading backslash (`\{{playbook:name}}`) is literal text and is not
@@ -393,5 +393,5 @@ further bound: a set over 256 KiB in total is refused rather than truncated.
 
 1. **Declare needed inputs** - Use inputSchema for values the next responsibility actually consumes; omit it when empty completion is sufficient
 2. **Keep responsibilities clear** - Use subgraphs for a real reusable responsibility, not a node-count target
-3. **Test validation** - Use `manage` with `includeValidation: true`
+3. **Test validation** - Use `workflow` with `includeValidation: true`
 4. **Handle errors by contract** - Invalid agent input waits for correction; a node's supported error connection handles only its documented failures

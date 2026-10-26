@@ -7,10 +7,12 @@ import {
   sqliteTable,
   text,
   integer,
+  real,
   primaryKey,
   uniqueIndex,
   index,
   check,
+  blob,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import { storedTimestampMs } from "./timestamp-sql.js";
@@ -47,6 +49,7 @@ export const user = sqliteTable(
     // Per-user artifact quota overrides (null = use global setting)
     artifactQuotaMb: integer("artifactQuotaMb"), // Max total storage in MB (overrides artifacts.default_quota_mb)
     artifactMaxFiles: integer("artifactMaxFiles"), // Max artifact count (overrides artifacts.default_max_files)
+    artifactMaxFileSizeMb: real("artifactMaxFileSizeMb"), // Per-file MiB override; null inherits global
     createdAt: text("createdAt").notNull(),
     updatedAt: text("updatedAt").notNull(),
   },
@@ -978,6 +981,28 @@ export const managedPlaybookBaseline = sqliteTable(
 // serves entities that live in different tables, and a per-entity constraint would reintroduce the
 // coupling this table removes. Owners delete their own history when the entity is removed.
 
+/** Immutable complete payloads shared only by revisions of the same entity. */
+export const revisionPayload = sqliteTable(
+  "revisionPayload",
+  {
+    id: text("id").primaryKey(),
+    entityType: text("entityType").notNull(),
+    entityId: text("entityId").notNull(),
+    digest: text("digest").notNull(),
+    codec: text("codec").notNull(),
+    data: blob("data", { mode: "buffer" }).notNull(),
+    decodedSize: integer("decodedSize").notNull(),
+    preview: blob("preview", { mode: "buffer" }).notNull(),
+  },
+  (table) => ({
+    contentIdx: uniqueIndex("revision_payload_content_idx").on(
+      table.entityType,
+      table.entityId,
+      table.digest,
+    ),
+  }),
+);
+
 export const entityRevision = sqliteTable(
   "entityRevision",
   {
@@ -992,6 +1017,7 @@ export const entityRevision = sqliteTable(
     // an empty string: a global setting with no value falls back to its default, an empty one
     // does not.
     content: text("content"),
+    payloadId: text("payloadId").references(() => revisionPayload.id),
     size: integer("size").notNull(), // Content size in bytes
     // Who wrote the revision; null when the writer is the system or the account is gone.
     authorId: text("authorId").references(() => user.id, { onDelete: "set null" }),
@@ -1004,6 +1030,7 @@ export const entityRevision = sqliteTable(
       table.entityId,
       table.revision,
     ),
+    payloadIdx: index("entity_revision_payload_idx").on(table.payloadId),
   }),
 );
 

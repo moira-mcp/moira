@@ -32,6 +32,7 @@ import {
   Boxes,
   Copy,
   Globe,
+  History,
   Loader2,
   Lock,
   MoreHorizontal,
@@ -57,6 +58,8 @@ import {
 import WorkflowBreadcrumbComponent from "../components/workflow/WorkflowBreadcrumb";
 import { ShareDialog } from "../components/workflow/ShareDialog";
 import { ConfirmDialog } from "../components/confirm-dialog";
+import { RevisionHistoryDialog } from "../components/history/LazyRevisionHistoryDialog";
+import type { RevisionHistorySource } from "../components/history/RevisionHistoryDialog";
 import { PageLoader } from "../components/page-loader";
 import { PageHeader } from "../components/diagram/PageHeader";
 import {
@@ -161,6 +164,7 @@ export const FlowPage: React.FC = () => {
   const [copying, setCopying] = useState(false);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [focusRequest, requestFocus] = useRequest<{ nodeId: string }>();
@@ -269,6 +273,9 @@ export const FlowPage: React.FC = () => {
     resetEdits();
     setSaveError(null);
   }, [workflowId, resetEdits]);
+  useEffect(() => {
+    setHistoryOpen(false);
+  }, [workflowId, isOwner]);
   const edited = editLog.draft;
   // The count shown is the number of flow-file entries that actually change; an edit typed back
   // to the stored value is not a change.
@@ -277,6 +284,25 @@ export const FlowPage: React.FC = () => {
     [savedWorkflow, editLog.ops],
   );
   const hasEdits = editLog.ops.length > 0;
+  const historySource = useMemo<RevisionHistorySource | null>(() => {
+    if (!isOwner || !workflowId || revision === undefined || !savedWorkflow) return null;
+    return {
+      label: t("pages.flowPage.history.subject", { name: savedWorkflow.metadata.name }),
+      listRevisions: () => apiClient.getWorkflowHistory(workflowId),
+      readRevision: (snapshot) => apiClient.readWorkflowRevision(workflowId, snapshot),
+      readCurrent: async () => {
+        const current = await apiClient.getWorkflow(workflowId);
+        return JSON.stringify(current.workflow, null, 2);
+      },
+      restoreDisabledReason: hasEdits ? t("pages.flowPage.history.dirtyDraft") : undefined,
+      restore: async (snapshot) => {
+        // The write token belongs to the accepted definition, independently of history numbering.
+        // A newer definition on the server must be a visible conflict, never an overwrite.
+        if (hasEdits) throw new Error(t("pages.flowPage.history.dirtyDraft"));
+        await apiClient.rollbackWorkflow(workflowId, snapshot, revision);
+      },
+    };
+  }, [isOwner, workflowId, revision, savedWorkflow, hasEdits, t]);
   const process = useMemo<ProcessProjection | null>(() => {
     if (!edited) return null;
     if (hasEdits || (held !== undefined && !heldIsCurrent)) return deriveProcess(edited);
@@ -659,6 +685,19 @@ export const FlowPage: React.FC = () => {
       )}
       {isOwner && (
         <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setHistoryOpen(true)}
+          className="gap-1.5"
+          data-testid="workflow-history-button"
+          {...guideAnchor("flow.history")}
+        >
+          <History className="w-3.5 h-3.5" />
+          {t("pages.flowPage.history.open")}
+        </Button>
+      )}
+      {isOwner && (
+        <Button
           variant="destructive"
           size="sm"
           onClick={() => setDeleteDialogOpen(true)}
@@ -827,6 +866,12 @@ export const FlowPage: React.FC = () => {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                      {isOwner && (
+                        <DropdownMenuItem onClick={() => setHistoryOpen(true)}>
+                          <History className="mr-2 h-4 w-4" />
+                          {t("pages.flowPage.history.open")}
+                        </DropdownMenuItem>
+                      )}
                       {isOwner && (
                         <DropdownMenuItem
                           onClick={() => update({ [EDIT_PARAM]: editing ? null : "1" })}
@@ -1112,6 +1157,19 @@ export const FlowPage: React.FC = () => {
             </div>
           )}
 
+          {historySource && (
+            <RevisionHistoryDialog
+              open={historyOpen}
+              source={historySource}
+              onClose={(restored) => {
+                setHistoryOpen(false);
+                if (restored) {
+                  toast.success(t("pages.flowPage.history.restored"));
+                  void workflowDetail.refreshWorkflow();
+                }
+              }}
+            />
+          )}
           {workflowIdentifier && (
             <ShareDialog
               open={shareDialogOpen}

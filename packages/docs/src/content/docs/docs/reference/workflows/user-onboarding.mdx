@@ -6,19 +6,19 @@ description: Interactive first-time orientation that reads the complete current 
 Moira User Onboarding teaches directives, completion conditions, input schemas, and verified progression while helping a first-time user choose from the complete current authorized public catalog.
 
 ```bash
-mcp__moira__start({
+mcp__moira__execution({
   action: "prepare",
   workflowId: "moira/user-onboarding",
   parentExecutionId: "none"
 })
-mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
+mcp__moira__execution({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
-The onboarding flow paginates `list()` until every reported workflow has been observed. It treats catalog names and descriptions as data, presents every observed identity exactly once, and explains each purpose, deliverable, cost or durability profile, authority boundary, and closest alternatives. It never relies on a frozen catalog.
+The onboarding flow paginates `workflow({ action: "list" })` until every reported workflow has been observed. It treats catalog names and descriptions as data, presents every observed identity exactly once, and explains each purpose, deliverable, cost or durability profile, authority boundary, and closest alternatives. It never relies on a frozen catalog.
 
-The user selects an exact qualified `owner/slug` or the create/edit path through `moira/workflow-management-flow`, then explicitly chooses start or defer. Start creates exactly that workflow as a child of onboarding and accepts only the actual Process ID from a successful MCP response. It uses `skipNotificationCheck: true` only to bypass optional ordinary-notification preflight; the flag does not authorize notification, change the child's authority, or bypass trusted PIN delivery for lock nodes.
+The user selects an exact qualified `owner/slug` or the create/edit path through `moira/workflow-management-flow`, then explicitly chooses start or defer. Start prepares exactly that workflow as a child of onboarding, copies the returned Start attempt ID unchanged into execute, and accepts only a confirmed created execution and its actual Process ID from successful execute. The reserved Process ID from prepare is not a child execution. It uses `skipNotificationCheck: true` only to bypass optional ordinary-notification preflight; the flag does not authorize notification, change the child's authority, or bypass trusted PIN delivery for lock nodes.
 
-When the selected workflow contains a lock node, execute requires a valid Telegram bot token and chat ID for the current user before it creates the child execution. Its stable setup receipt has no Process ID and leaves the handoff incomplete. Onboarding does not configure settings or start a substitute workflow; it prepares the exact selection again only after the relevant external state changes. Defer performs no external mutation.
+When the selected workflow contains a lock node, execute requires a valid Telegram bot token and chat ID for the current user before it creates the child execution. Its stable `START_PRECONDITION_CHANGED` setup refusal has no Process ID and leaves the handoff incomplete. Onboarding does not configure settings or start a substitute workflow; it prepares the exact selection again only after the relevant external state changes. A lost reply instead retains the original start attempt for collection. An explicit `ATTEMPT_OUTCOME_UNKNOWN` requires inspection through `execution` with `action: "current_step"` or `action: "execution_context"`, not an automatic execute or a fresh preparation. Defer performs no external mutation.
 
 Onboarding creates no durable artifacts and does not configure settings, publish, deploy, mutate production, or continue the child's substantive work. Users who already know their goal should start the matching workflow directly.
 

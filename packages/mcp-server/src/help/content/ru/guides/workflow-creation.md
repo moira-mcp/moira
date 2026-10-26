@@ -417,7 +417,7 @@ Default реестра подходит стабильному тексту са
 ### Создать новый
 
 ```typescript
-mcp__moira__manage({
+mcp__moira__workflow({
   action: "create",
   workflow: {
     id: "my-workflow",
@@ -430,7 +430,7 @@ mcp__moira__manage({
 ### Редактировать
 
 ```typescript
-mcp__moira__manage({
+mcp__moira__workflow({
   action: "edit",
   workflowId: "my-workflow",
   changes: {
@@ -444,7 +444,7 @@ mcp__moira__manage({
 
 ```typescript
 // Для агентов с доступом к файловой системе
-const { uploadUrl } = await mcp__moira__token({ action: "upload" });
+const { uploadUrl } = await mcp__moira__workflow({ action: "upload" });
 // Загрузите JSON файл по uploadUrl
 ```
 

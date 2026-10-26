@@ -13,6 +13,7 @@ import { login, createTestUser } from "./helpers/auth-helper.js";
 import { graphOverview } from "./helpers/diagram.js";
 import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
 import {
+  deleteOwnedTestWorkflow,
   callMCPTool,
   createAuthenticatedMCPClient,
   formatSessionCookie,
@@ -136,7 +137,7 @@ test.describe("Playbooks", () => {
     const created: string[] = [];
 
     const makeFlow = async (flowName: string, directive: string) =>
-      (await callMCPTool(mcp.client, "manage", {
+      (await callMCPTool(mcp.client, "workflow", {
         action: "create",
         workflow: {
           metadata: { name: flowName, version: "1.0.0", description: "Live warning" },
@@ -195,11 +196,7 @@ test.describe("Playbooks", () => {
         .click();
     } finally {
       for (const workflowId of created) {
-        try {
-          await callMCPTool(mcp.client, "manage", { action: "delete", workflowId });
-        } catch {
-          // Cleanup failures are not the subject of this test.
-        }
+        await deleteOwnedTestWorkflow(mcp.client, workflowId);
       }
       await mcp.cleanup?.();
     }
@@ -273,7 +270,7 @@ test.describe("Playbooks", () => {
           content: `Filler ${i}.`,
         });
       }
-      const created = (await callMCPTool(mcp.client, "manage", {
+      const created = (await callMCPTool(mcp.client, "workflow", {
         action: "create",
         workflow: {
           metadata: { name: `Linked flow ${stamp}`, version: "1.0.0", description: "Link" },
@@ -319,11 +316,7 @@ test.describe("Playbooks", () => {
       await expect(page.getByTestId("playbook-name-input")).toHaveValue(other);
     } finally {
       if (workflowId) {
-        try {
-          await callMCPTool(mcp.client, "manage", { action: "delete", workflowId });
-        } catch {
-          // Cleanup failures are not the subject of this test.
-        }
+        await deleteOwnedTestWorkflow(mcp.client, workflowId);
       }
       const fillers = Array.from({ length: 24 }, (_, i) => `${mine}-filler-${i}`);
       for (const name of [shared, mine, ...fillers]) {

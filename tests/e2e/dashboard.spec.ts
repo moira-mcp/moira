@@ -57,7 +57,7 @@ test.describe("Home work area", () => {
     let workflowId: string;
     try {
       workflowId = (
-        await callMCPTool(mcp.client, "manage", {
+        await callMCPTool(mcp.client, "workflow", {
           action: "create",
           workflow: {
             metadata: { name, version: "1.0.0", description: "A flow the home page lists" },
@@ -198,6 +198,29 @@ test.describe("Dashboard Quick Actions", () => {
     expect(clipboardContent).toContain("moira");
 
     console.log("✓ Quick Start copy functionality works");
+  });
+
+  test("Quick Start wrapped clients stay above selected mobile instructions", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${BASE_URL}/?lang=ru`);
+    const card = page.getByTestId("quick-start-card");
+    await card.getByRole("tab", { name: "Codex", exact: true }).click();
+    const geometry = await card.evaluate((element) => {
+      const list = element.querySelector('[role="tablist"]')!;
+      const panel = element.querySelector('[role="tabpanel"][data-state="active"]')!;
+      return {
+        listBottom: list.getBoundingClientRect().bottom,
+        lastTabBottom: Math.max(
+          ...Array.from(
+            list.querySelectorAll('[role="tab"]'),
+            (tab) => tab.getBoundingClientRect().bottom,
+          ),
+        ),
+        panelTop: panel.getBoundingClientRect().top,
+      };
+    });
+    expect(geometry.lastTabBottom).toBeLessThanOrEqual(geometry.listBottom + 1);
+    expect(geometry.panelTop).toBeGreaterThanOrEqual(geometry.lastTabBottom);
   });
 });
 

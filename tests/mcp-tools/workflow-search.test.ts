@@ -4,7 +4,11 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
-import { createAuthenticatedMCPClient, callMCPTool } from "../utils/mcp-auth.js";
+import {
+  createAuthenticatedMCPClient,
+  callMCPTool,
+  deleteOwnedTestWorkflow,
+} from "../utils/mcp-auth.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 describe("MCP Workflow Search E2E", () => {
@@ -21,7 +25,7 @@ describe("MCP Workflow Search E2E", () => {
     cleanup = mcpClient.cleanup;
 
     // Create a test workflow with hyphen in name (UUID is auto-generated)
-    const createResult = await callMCPTool(client, "manage", {
+    const createResult = await callMCPTool(client, "workflow", {
       action: "create",
       workflow: {
         metadata: {
@@ -60,22 +64,15 @@ describe("MCP Workflow Search E2E", () => {
   afterAll(async () => {
     // Delete test workflow
     if (testWorkflowId) {
-      try {
-        await callMCPTool(client, "manage", {
-          action: "edit",
-          workflowId: testWorkflowId,
-          changes: {}, // This will fail, but we can use a delete approach
-        });
-      } catch {
-        // Ignore cleanup errors
-      }
+      await deleteOwnedTestWorkflow(client, testWorkflowId);
     }
     await cleanup();
   });
 
   test("search by workflow name with hyphen returns results", async () => {
     // Search using the hyphenated name pattern
-    const result = await callMCPTool(client, "list", {
+    const result = await callMCPTool(client, "workflow", {
+      action: "list",
       search: "Test-Search-Hyphen-Workflow",
     });
 
@@ -99,7 +96,8 @@ describe("MCP Workflow Search E2E", () => {
 
   test("list response includes version field", async () => {
     // Search for our test workflow by name
-    const result = await callMCPTool(client, "list", {
+    const result = await callMCPTool(client, "workflow", {
+      action: "list",
       search: testWorkflowName,
     });
 
@@ -114,7 +112,8 @@ describe("MCP Workflow Search E2E", () => {
   });
 
   test("search by partial name with hyphen returns results", async () => {
-    const result = await callMCPTool(client, "list", {
+    const result = await callMCPTool(client, "workflow", {
+      action: "list",
       search: "Search-Hyphen-Workflow",
     });
 
@@ -127,7 +126,8 @@ describe("MCP Workflow Search E2E", () => {
   });
 
   test("search by partial name works", async () => {
-    const result = await callMCPTool(client, "list", {
+    const result = await callMCPTool(client, "workflow", {
+      action: "list",
       search: "Hyphen-Workflow",
     });
 
@@ -140,7 +140,8 @@ describe("MCP Workflow Search E2E", () => {
   });
 
   test("search is case insensitive for name", async () => {
-    const result = await callMCPTool(client, "list", {
+    const result = await callMCPTool(client, "workflow", {
+      action: "list",
       search: "TEST-SEARCH-HYPHEN-WORKFLOW",
     });
 
@@ -150,7 +151,8 @@ describe("MCP Workflow Search E2E", () => {
   });
 
   test("search returns empty for non-matching query", async () => {
-    const result = await callMCPTool(client, "list", {
+    const result = await callMCPTool(client, "workflow", {
+      action: "list",
       search: "nonexistent-workflow-xyz123",
     });
 
@@ -169,7 +171,7 @@ describe("MCP Workflow Search E2E", () => {
   });
 
   test("registered manage calls expose node discovery, variable analysis, and visibility state", async () => {
-    const listed = await callMCPTool(client, "manage", {
+    const listed = await callMCPTool(client, "workflow", {
       action: "list-nodes",
       workflowId: testWorkflowId,
       typeFilter: "agent-directive",
@@ -190,7 +192,7 @@ describe("MCP Workflow Search E2E", () => {
       }),
     );
 
-    const selected = await callMCPTool(client, "manage", {
+    const selected = await callMCPTool(client, "workflow", {
       action: "get-nodes",
       workflowId: testWorkflowId,
       nodeIds: ["start", "analysis"],
@@ -204,7 +206,7 @@ describe("MCP Workflow Search E2E", () => {
     );
     expect(selected.nodes.map((node: { id: string }) => node.id)).toEqual(["start", "analysis"]);
 
-    const variables = await callMCPTool(client, "manage", {
+    const variables = await callMCPTool(client, "workflow", {
       action: "analyze-variables",
       workflowId: testWorkflowId,
     });
@@ -219,7 +221,7 @@ describe("MCP Workflow Search E2E", () => {
       }),
     );
 
-    const madePublic = await callMCPTool(client, "manage", {
+    const madePublic = await callMCPTool(client, "workflow", {
       action: "set-visibility",
       workflowId: testWorkflowId,
       visibility: "public",
@@ -228,7 +230,7 @@ describe("MCP Workflow Search E2E", () => {
       expect.objectContaining({ previousVisibility: "private", newVisibility: "public" }),
     );
 
-    const publicWorkflow = await callMCPTool(client, "manage", {
+    const publicWorkflow = await callMCPTool(client, "workflow", {
       action: "get",
       workflowId: testWorkflowId,
       includeNodes: false,
@@ -236,7 +238,7 @@ describe("MCP Workflow Search E2E", () => {
     });
     expect(publicWorkflow.visibility).toBe("public");
 
-    const madePrivate = await callMCPTool(client, "manage", {
+    const madePrivate = await callMCPTool(client, "workflow", {
       action: "set-visibility",
       workflowId: testWorkflowId,
       visibility: "private",

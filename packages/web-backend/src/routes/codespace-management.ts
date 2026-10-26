@@ -234,14 +234,10 @@ export function createCodespaceManagementRoutes(
     return false;
   };
 
-  const managementData = async (
-    userId: string,
-    refresh: boolean,
-    input: { provider: string; view?: CodespaceDiscoveryView },
-  ): Promise<Record<string, unknown>> => {
+  const selectProvider = (provider: string) => {
     const selected = services.providers
-      ? services.providers.find((provider) => provider.provider === input.provider)
-      : services.provider === input.provider
+      ? services.providers.find((candidate) => candidate.provider === provider)
+      : services.provider === provider
         ? services
         : undefined;
     if (!selected)
@@ -249,6 +245,14 @@ export function createCodespaceManagementRoutes(
         "CODESPACE_PROVIDER_UNAVAILABLE",
         "The selected provider is unavailable.",
       );
+    return selected;
+  };
+  const targetsData = async (
+    userId: string,
+    refresh: boolean,
+    input: { provider: string },
+  ): Promise<Record<string, unknown>> => {
+    const selected = selectProvider(input.provider);
     const observation =
       input.provider === "local-sandboxes"
         ? services.devices?.createObservation(userId)
@@ -265,10 +269,6 @@ export function createCodespaceManagementRoutes(
         : refresh
           ? await selected.connection.refreshGrants(userId, { force: true })
           : await selected.connection.refreshGrants(userId);
-    const listed = (await selected.resource?.listResources(userId, {
-      view: input.view,
-      ...(observation ? { observation } : {}),
-    })) ?? { codespaces: [], unavailable: [], has_diagnostics: false };
     const repositories =
       selected.resource instanceof LocalCodespaceResourceService && observation
         ? await selected.resource.listRepositories(userId, { observation })
@@ -286,12 +286,12 @@ export function createCodespaceManagementRoutes(
             }))
         : ((await services.controllers?.(userId)) ?? []);
     } catch (error) {
+      if (error instanceof LocalDeviceError && error.code === "LOCAL_UNAUTHORIZED") throw error;
       providerErrors.push({
         provider: input.provider,
         error: { code: codespaceObservationErrorCode(error) },
       });
     }
-    const hasDiagnostics = listed.has_diagnostics ?? listed.unavailable.length > 0;
     return {
       provider: input.provider,
       readiness: await selected.observability.readiness(),
@@ -307,7 +307,31 @@ export function createCodespaceManagementRoutes(
         controllers,
       ),
       repositories_stale: grants.stale || providerErrors.length > 0,
-      resources_stale: grants.stale || hasDiagnostics,
+      controllers: controllers.map((controller) => ({
+        ...controller,
+        controller: encodeReference(
+          "controller",
+          services.semantic.controllerIdentity(userId, controller.device_id),
+        ),
+      })),
+      provider_errors: providerErrors,
+    };
+  };
+
+  const inventoryData = async (
+    userId: string,
+    input: { provider: string; view?: CodespaceDiscoveryView },
+  ) => {
+    const selected = selectProvider(input.provider);
+    const listed = (await selected.resource?.listResources(userId, { view: input.view })) ?? {
+      codespaces: [],
+      unavailable: [],
+      has_diagnostics: false,
+    };
+    const hasDiagnostics = listed.has_diagnostics ?? listed.unavailable.length > 0;
+    return {
+      provider: input.provider,
+      resources_stale: hasDiagnostics,
       has_diagnostics: hasDiagnostics,
       codespaces: listed.codespaces.map((codespace) => ({
         ...services.semantic.project(userId, codespace),
@@ -325,17 +349,34 @@ export function createCodespaceManagementRoutes(
         ...services.semantic.projectUnavailable(userId, resource),
         codespace_id: resource.codespace_id,
       })),
-      controllers: controllers.map((controller) => ({
-        ...controller,
-        controller: encodeReference(
-          "controller",
-          services.semantic.controllerIdentity(userId, controller.device_id),
-        ),
-      })),
-      provider_errors: providerErrors,
+      provider_errors: [],
     };
   };
 
+  router.get(
+    "/targets",
+    asyncHandler(async (req, res) => {
+      const userId = (req as AuthenticatedRequest).userId;
+      try {
+        const input = WORKSPACE_TOOL_SCHEMAS.workspace_targets.parse(req.query);
+        res.json({ success: true, data: await targetsData(userId, false, input) });
+      } catch (error) {
+        if (!handleError(userId, error, res)) throw error;
+      }
+    }),
+  );
+  router.post(
+    "/targets/refresh",
+    asyncHandler(async (req, res) => {
+      const userId = (req as AuthenticatedRequest).userId;
+      try {
+        const input = WORKSPACE_TOOL_SCHEMAS.workspace_targets.parse(req.body);
+        res.json({ success: true, data: await targetsData(userId, true, input) });
+      } catch (error) {
+        if (!handleError(userId, error, res)) throw error;
+      }
+    }),
+  );
   router.get(
     "/billing",
     asyncHandler(async (req, res) => {
@@ -353,7 +394,7 @@ export function createCodespaceManagementRoutes(
       const userId = (req as AuthenticatedRequest).userId;
       try {
         const input = WORKSPACE_TOOL_SCHEMAS.workspace_list.parse(req.query);
-        res.json({ success: true, data: await managementData(userId, false, input) });
+        res.json({ success: true, data: await inventoryData(userId, input) });
       } catch (error) {
         if (!handleError(userId, error, res)) throw error;
       }
@@ -366,7 +407,7 @@ export function createCodespaceManagementRoutes(
       const userId = (req as AuthenticatedRequest).userId;
       try {
         const input = WORKSPACE_TOOL_SCHEMAS.workspace_list.parse(req.body);
-        res.json({ success: true, data: await managementData(userId, true, input) });
+        res.json({ success: true, data: await inventoryData(userId, input) });
       } catch (error) {
         if (!handleError(userId, error, res)) throw error;
       }

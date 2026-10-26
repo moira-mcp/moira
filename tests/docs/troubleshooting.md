@@ -42,8 +42,10 @@ Dedicated credential-mutation accounts must not alter the shared administrator.
 
 For an unknown tool or rejected field, inspect the current typed tool catalog and actual SDK
 response. Refresh/reconnect a stale client when appropriate; do not bypass admission or invent an
-old tool name. A stale Step attempt needs the public current-step/recovery contract, not replay of
-an obsolete input. Preserve unknown external outcomes and collect the original operation instead
+old tool name. Use `execution` with `action: "current_step"` to inspect the current presentation,
+then reconcile the intended answer. A changed continuation surface requires explicit `diagnose`
+and authorized `recover` on that same execution; current-step inspection cannot bypass that guard.
+Do not replay an obsolete input. Preserve unknown external outcomes and collect the original operation instead
 of submitting it again.
 
 ## Timeout or unstable browser state

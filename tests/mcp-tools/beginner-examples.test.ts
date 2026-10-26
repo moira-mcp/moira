@@ -20,12 +20,12 @@ async function run(
   workflowId: string,
   answers: Array<Record<string, string>>,
 ): Promise<{ shown: string[]; last: string }> {
-  const preparation = await callMCPTool<string>(client, "start", {
+  const preparation = await callMCPTool<string>(client, "execution", {
     action: "prepare",
     parentExecutionId: "none",
     workflowId,
   });
-  let response = await callMCPTool<string>(client, "start", {
+  let response = await callMCPTool<string>(client, "execution", {
     action: "execute",
     startAttemptId: requiredId(preparation, "Start attempt"),
   });
@@ -33,7 +33,8 @@ async function run(
   const shown: string[] = [];
   for (const input of answers) {
     shown.push(response);
-    response = await callMCPTool<string>(client, "step", {
+    response = await callMCPTool<string>(client, "execution", {
+      action: "step",
       processId,
       attemptId: requiredId(response, "Step attempt"),
       input,

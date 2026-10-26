@@ -42,6 +42,7 @@ import {
   currentAttemptGuidance,
   ExecutionMutationCoordinator,
   presentedAttemptResponse,
+  withAgentLanguageReminder,
 } from "../services/execution-mutation-coordinator.js";
 import type { ExecutionAttemptLease } from "../services/execution-mutation-coordinator.js";
 
@@ -221,7 +222,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
       );
       if (replay !== null) {
         mutation.onAttemptOutcome?.("safe_replay");
-        return replay;
+        return withAgentLanguageReminder(replay);
       }
     }
 
@@ -332,7 +333,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
         teleportTo,
         execution.userId,
       );
-      if (outcome.kind === "replay") return outcome.response;
+      if (outcome.kind === "replay") return withAgentLanguageReminder(outcome.response);
       claimed = { attemptId: internalAttempt.attemptId, ...outcome, operation: "step" };
     }
     if (mutation?.attemptId && !claimed) {
@@ -346,7 +347,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
       );
       if (outcome.kind === "replay") {
         mutation.onAttemptOutcome?.("safe_replay");
-        return outcome.response;
+        return withAgentLanguageReminder(outcome.response);
       }
       claimed = { attemptId: mutation.attemptId, ...outcome, operation: "step" };
     }
@@ -475,7 +476,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
           }
           // Add parent execution continuation reminder
           if (execution.parentExecutionId) {
-            response += `\n\n---\n**CONTINUATION REMINDER**: This was a child workflow. Parent execution awaits continuation.\nParent execution ID: ${execution.parentExecutionId}\nRead session({ action: "current_step", executionId: "${execution.parentExecutionId}" }) and continue with the returned step attempt.`;
+            response += `\n\n---\n**CONTINUATION REMINDER**: This was a child workflow. Parent execution awaits continuation.\nParent execution ID: ${execution.parentExecutionId}\nRead execution({ action: "current_step", executionId: "${execution.parentExecutionId}" }) and continue with the returned step attempt.`;
           }
           break;
         }
@@ -520,7 +521,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
         activeExecutionsGauge.dec();
         workflowExecutionsTotal.inc({ status: "completed", workflow_id: execution.workflowId });
       }
-      return response;
+      return withAgentLanguageReminder(response);
     } catch (error) {
       if (claimed) {
         const markedUnknown = await this.repository.markExecutionAttemptOutcomeUnknown(
@@ -595,7 +596,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
     );
     if (!stepAttemptBindingMatches(currentAttempt, expectedAttempt)) {
       throw new ConflictError(
-        "CURRENT_PRESENTATION_STALE: the persisted step attempt belongs to a different node, workflow, or continuation surface. Do not use or retry that attempt. Call session({ action: 'diagnose', executionId }) to see exactly which facts of the paused step changed before continuing.",
+        "CURRENT_PRESENTATION_STALE: the persisted step attempt belongs to a different node, workflow, or continuation surface. Do not use or retry that attempt. Call execution({ action: 'diagnose', executionId }) to see exactly which facts of the paused step changed before continuing.",
         {
           executionId,
           attemptId: currentAttempt.attemptId,
@@ -632,7 +633,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
       rendered,
       Date.now(),
     );
-    if (refreshed) return rendered;
+    if (refreshed) return withAgentLanguageReminder(rendered);
 
     const authoritativeCurrent = await this.repository.getCurrentExecutionAttempt(
       executionId,
@@ -802,7 +803,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
 
     const hints = teleportNodes.map((node) => `  - **${node.id}**: ${node.hint}`).join("\n");
 
-    return `**Available Teleport Jumps** (use teleportTo parameter in step() to jump):\n${hints}`;
+    return `**Available Teleport Jumps** (use teleportTo with execution action "step" to jump):\n${hints}`;
   }
 
   async getExecutionState(executionId: string): Promise<WorkflowExecution | null> {

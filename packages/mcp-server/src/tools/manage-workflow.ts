@@ -84,6 +84,61 @@ export async function manageWorkflow(
     const repository = MCPEngine.getInstance().repository;
 
     switch (action) {
+      case "history":
+      case "get-revision":
+      case "compare-revisions":
+      case "rollback": {
+        if (!params.workflowId)
+          return { success: false, error: ERRORS.workflow_id_required_for_action(action) };
+        const resolved = await resolveWorkflowIdentifier(repository, params.workflowId, userId);
+        const service = getWorkflowService();
+        if (action === "history")
+          return {
+            success: true,
+            data: {
+              workflowId: resolved.workflowId,
+              revisions: await service.history(resolved.workflowId, userId),
+            },
+          };
+        if (action === "compare-revisions") {
+          if (params.fromRevision === undefined || params.toRevision === undefined)
+            return {
+              success: false,
+              error: "fromRevision and toRevision are required for compare-revisions",
+            };
+          const comparison = await service.compareRevisions(
+            resolved.workflowId,
+            userId,
+            params.fromRevision,
+            params.toRevision,
+          );
+          return comparison
+            ? { success: true, data: { workflowId: resolved.workflowId, ...comparison } }
+            : { success: false, error: "Workflow revisions not found" };
+        }
+        if (params.revision === undefined)
+          return { success: false, error: "revision is required for this history action" };
+        if (action === "get-revision") {
+          const stored = await service.getRevision(resolved.workflowId, userId, params.revision);
+          return stored
+            ? { success: true, data: { workflowId: resolved.workflowId, ...stored } }
+            : { success: false, error: "Workflow revision not found" };
+        }
+        if (params.expectedRevision === undefined)
+          return {
+            success: false,
+            error: "expectedRevision from manage get is required for rollback",
+          };
+        return {
+          success: true,
+          data: await service.rollback(
+            resolved.workflowId,
+            userId,
+            params.revision,
+            params.expectedRevision,
+          ),
+        };
+      }
       case "create": {
         const { workflow, overwrite = false } = params;
 

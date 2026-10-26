@@ -4,6 +4,11 @@ import { ValidationError } from "../errors/index.js";
 export const DEFAULT_REVISION_PREVIEW_CHARS = 100;
 const MAX_PREVIEW_CHARS = 1000;
 
+/** Retain only enough UTF-8 bytes for every supported listing preview. */
+export function revisionPreviewBytes(content: string): Buffer {
+  return Buffer.from(content, "utf8").subarray(0, 4 * (MAX_PREVIEW_CHARS + 1));
+}
+
 function previewLength(chars: number): number {
   if (!Number.isSafeInteger(chars) || chars < 0 || chars > MAX_PREVIEW_CHARS) {
     throw new ValidationError(

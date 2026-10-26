@@ -60,7 +60,7 @@ describe("Admin Lock Management API", () => {
 
     const mcp = await createAuthenticatedMCPClient();
     cleanupMcp = mcp.cleanup;
-    const created = await callMCPTool(mcp.client, "manage", {
+    const created = await callMCPTool(mcp.client, "workflow", {
       action: "create",
       workflow: buildLockTestWorkflow(),
     });

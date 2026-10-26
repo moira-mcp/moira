@@ -142,7 +142,11 @@ describe("MCP Persistent Token Authentication", () => {
 
     try {
       // Call a simple MCP tool - list workflows
-      const result = await callMCPTool<{ workflows: unknown[]; total: number }>(client, "list", {});
+      const result = await callMCPTool<{ workflows: unknown[]; total: number }>(
+        client,
+        "workflow",
+        { action: "list" },
+      );
       expect(result).toHaveProperty("workflows");
       expect(result).toHaveProperty("total");
     } finally {
@@ -156,7 +160,7 @@ describe("MCP Persistent Token Authentication", () => {
 
     try {
       // Call session tool to verify user context propagation
-      const result = await callMCPTool<{ email: string }>(client, "session", {
+      const result = await callMCPTool<{ email: string }>(client, "execution", {
         action: "user",
       });
       expect(result.email).toBe(TEST_USER.email);
@@ -228,7 +232,9 @@ describe("MCP Persistent Token Authentication", () => {
     const { client, cleanup } = await createAuthenticatedMCPClient();
 
     try {
-      const result = await callMCPTool<{ workflows: unknown[] }>(client, "list", {});
+      const result = await callMCPTool<{ workflows: unknown[] }>(client, "workflow", {
+        action: "list",
+      });
       expect(result).toHaveProperty("workflows");
     } finally {
       await cleanup();

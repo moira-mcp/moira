@@ -81,7 +81,7 @@ describe("GET /api/stats/summary", () => {
 
       const create = async (name: string): Promise<string> =>
         (
-          await callMCPTool(client, "manage", {
+          await callMCPTool(client, "workflow", {
             action: "create",
             workflow: {
               metadata: { name, version: "1.0.0", description: `${name} for the work area` },
@@ -114,7 +114,7 @@ describe("GET /api/stats/summary", () => {
 
       // A step without a display name is named by its progress block, as the run page names it
       blocks = (
-        await callMCPTool(client, "manage", {
+        await callMCPTool(client, "workflow", {
           action: "create",
           workflow: {
             metadata: { name: `Blocks ${Date.now()}`, version: "1.0.0", description: "Blocks" },
@@ -147,7 +147,7 @@ describe("GET /api/stats/summary", () => {
       // A node with both an active progress label and a display name is named by the label, as
       // the run page names it
       both = (
-        await callMCPTool(client, "manage", {
+        await callMCPTool(client, "workflow", {
           action: "create",
           workflow: {
             metadata: { name: `Both ${Date.now()}`, version: "1.0.0", description: "Both" },

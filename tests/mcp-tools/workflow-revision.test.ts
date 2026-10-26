@@ -34,7 +34,7 @@ describe("workflow definition revision", () => {
     });
     return { status: response.status, json: (await response.json()) as any };
   };
-  const get = () => callMCPTool<any>(client, "manage", { action: "get", workflowId });
+  const get = () => callMCPTool<any>(client, "workflow", { action: "get", workflowId });
 
   beforeAll(async () => {
     const credentials = getAdminCredentials();
@@ -64,7 +64,7 @@ describe("workflow definition revision", () => {
     }
     foreignCookie = await signInUser(getTestFetchUrl(), foreignEmail, foreignPassword);
 
-    const created = await callMCPTool<any>(client, "manage", {
+    const created = await callMCPTool<any>(client, "workflow", {
       action: "create",
       workflow: {
         metadata: { name: "Revision Test", version: "1.0.0", description: "revision guard" },
@@ -87,14 +87,20 @@ describe("workflow definition revision", () => {
   });
 
   afterAll(async () => {
-    if (workflowId) await callMCPTool(client, "manage", { action: "delete", workflowId });
+    if (workflowId) {
+      const deleted = await fetch(`${BASE_URL}/api/workflows/${workflowId}`, {
+        method: "DELETE",
+        headers: { Cookie: `better-auth.session_token=${cookie}` },
+      });
+      expect(deleted.status).toBe(200);
+    }
     await cleanup();
   });
 
   test("get carries the revision; edit refuses a stale expectedRevision and saves without one", async () => {
     expect((await get()).revision).toBe(0);
 
-    const stale = await callMCPToolRaw(client, "manage", {
+    const stale = await callMCPToolRaw(client, "workflow", {
       action: "edit",
       workflowId,
       expectedRevision: 5,
@@ -104,7 +110,7 @@ describe("workflow definition revision", () => {
     expect(stale).toContain("stored 0");
     expect((await get()).metadata.description).toBe("revision guard");
 
-    const guarded = await callMCPTool<any>(client, "manage", {
+    const guarded = await callMCPTool<any>(client, "workflow", {
       action: "edit",
       workflowId,
       expectedRevision: 0,
@@ -113,7 +119,7 @@ describe("workflow definition revision", () => {
     expect(guarded.success).toBe(true);
     expect(guarded.revision).toBe(1);
 
-    const unguarded = await callMCPTool<any>(client, "manage", {
+    const unguarded = await callMCPTool<any>(client, "workflow", {
       action: "edit",
       workflowId,
       changes: { metadata: { description: "unguarded edit" } },
@@ -126,7 +132,7 @@ describe("workflow definition revision", () => {
   test("a file upload over an existing workflow is a graph write: the revision advances", async () => {
     const before = await get();
     const minted = parseTokenResponse(
-      await callMCPTool<string>(client, "token", { action: "upload", ttlMinutes: 10 }),
+      await callMCPTool<string>(client, "workflow", { action: "upload", ttlMinutes: 10 }),
     );
     const form = new FormData();
     form.append(
@@ -160,7 +166,7 @@ describe("workflow definition revision", () => {
       nodes: before.nodes,
     };
 
-    const mutated = await callMCPTool<any>(client, "manage", {
+    const mutated = await callMCPTool<any>(client, "workflow", {
       action: "set-variable",
       workflowId,
       variableName: "tone",
@@ -180,7 +186,7 @@ describe("workflow definition revision", () => {
       expectedRevision: after.revision,
     });
     expect(hidden.status).toBe(404);
-    const published = await callMCPTool<any>(client, "manage", {
+    const published = await callMCPTool<any>(client, "workflow", {
       action: "set-visibility",
       workflowId,
       visibility: "public",
@@ -205,7 +211,7 @@ describe("workflow definition revision", () => {
   test("edits and page saves racing on the same revision: exactly one lands, the rest conflict", async () => {
     const before = await get();
     const edit = (description: string) =>
-      callMCPToolRaw(client, "manage", {
+      callMCPToolRaw(client, "workflow", {
         action: "edit",
         workflowId,
         expectedRevision: before.revision,

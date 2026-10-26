@@ -5,6 +5,7 @@
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import {
+  deleteOwnedTestWorkflow,
   advanceWorkflowExecution,
   createAuthenticatedMCPClient,
   callMCPTool,
@@ -91,7 +92,7 @@ describe("MCP Expression Loop E2E", () => {
     cleanup = mcpClient.cleanup;
 
     // Create test workflow
-    await callMCPTool(client, "manage", {
+    await callMCPTool(client, "workflow", {
       action: "create",
       workflow: LOOP_WORKFLOW.workflow,
       overwrite: true,
@@ -99,11 +100,7 @@ describe("MCP Expression Loop E2E", () => {
   });
 
   afterAll(async () => {
-    try {
-      await callMCPTool(client, "manage", { workflowId: LOOP_WORKFLOW.id });
-    } catch (e) {
-      // Ignore cleanup errors
-    }
+    await deleteOwnedTestWorkflow(client, LOOP_WORKFLOW.id);
     await cleanup();
   });
 
@@ -124,7 +121,7 @@ describe("MCP Expression Loop E2E", () => {
       // Check current context
       const context = await callMCPTool<{ context: { variables: { iteration: number } } }>(
         client,
-        "session",
+        "execution",
         {
           action: "execution_context",
           executionId: processId,
@@ -149,7 +146,7 @@ describe("MCP Expression Loop E2E", () => {
     const finalContext = await callMCPTool<{
       status: string;
       context: { variables: { iteration: number } };
-    }>(client, "session", {
+    }>(client, "execution", {
       action: "execution_context",
       executionId: processId,
     });

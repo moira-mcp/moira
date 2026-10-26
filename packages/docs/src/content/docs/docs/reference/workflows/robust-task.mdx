@@ -12,8 +12,8 @@ The workflow requires an agent with filesystem access. For smaller bounded tasks
 ## Start
 
 ```bash
-mcp__moira__start({ action: "prepare", workflowId: "moira/robust-task", parentExecutionId: "none" })
-mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
+mcp__moira__execution({ action: "prepare", workflowId: "moira/robust-task", parentExecutionId: "none" })
+mcp__moira__execution({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 ## Process
@@ -22,7 +22,7 @@ Plan → independent plan review → approval (interactive) → step execution a
 
 ## Durable workspace
 
-The first directive creates or resumes `./moira-ws/<task-name>-<YYYYMMDD>-<HHMM>/`. `process-id.txt` identifies the execution for `session({ action: "current_step", executionId })` recovery. Frozen requirements and the workflow guide, immutable plan versions and their reviews/decisions, plan-qualified attempts and their evidence/verdicts, repair reassessments, and final reviews/delivery remain on disk.
+The first directive creates or resumes `./moira-ws/<task-name>-<YYYYMMDD>-<HHMM>/`. `process-id.txt` identifies the execution for `execution({ action: "current_step", executionId })` recovery. Frozen requirements and the workflow guide, immutable plan versions and their reviews/decisions, plan-qualified attempts and their evidence/verdicts, repair reassessments, and final reviews/delivery remain on disk.
 
 Workflow context carries paths and small routing values, not copies of file bodies. An authoritative path remains the source after recovery; a just-written file need not be reread while its content is still known.
 
@@ -40,7 +40,7 @@ The automatic plan-review cycle is bounded by `max_review_rounds` (default `5`).
 
 ## Operating mode
 
-The first step resolves `operating_mode` as `autonomous` or `interactive`. The agent reuses a mode you already stated, infers an unambiguous one — including a run started by an already autonomous parent process — and asks once only when the mode is neither stated nor derivable. Before completing intake it actually persists the [task name](/docs/concepts/workflows/#execution-task-name) through guarded Progress/session metadata; the following node delivers `workflow-guide.md` for subsequent consumers. Optional `execution_note` is arbitrary nonempty text of at most 120 characters, separate from headings. It also returns `goal_summary`, the outcome the task must achieve in one sentence, which the plan messages show. An existing revision/replan owner updates the name only for an authorized actual scope change; ordinary repair and reordering retain it, along with completed positions and evidence.
+The first step resolves `operating_mode` as `autonomous` or `interactive`. The agent reuses a mode you already stated, infers an unambiguous one — including a run started by an already autonomous parent process — and asks once only when the mode is neither stated nor derivable. Before completing intake it actually persists the [task name](/docs/concepts/workflows/#execution-task-name) through guarded Progress/execution metadata; the following node delivers `workflow-guide.md` for subsequent consumers. Optional `execution_note` is arbitrary nonempty text of at most 120 characters, separate from headings. It also returns `goal_summary`, the outcome the task must achieve in one sentence, which the plan messages show. An existing revision/replan owner updates the name only for an authorized actual scope change; ordinary repair and reordering retain it, along with completed positions and evidence.
 
 In `interactive` mode everything above is unchanged. In `autonomous` mode the plan-approval gate is bypassed and every bounded decision is made by the agent on evidence: another repair pass only for findings that are reproducible and repairable now, a retry only when something material changed, a replan when the failure invalidates the plan rather than the attempt, and otherwise recorded incompleteness. The independent reviews, the retry and review bounds, the replan routes and the durable records are identical in both modes, and accepted gaps stay visible in the delivery — autonomy removes the waiting, not the honesty.
 

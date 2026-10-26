@@ -26,7 +26,7 @@ export function renderPortableHelpTokens(
         : undefined;
       return generator ? generator(mcpUrl) : token;
     })
-    .replace(/\{MCP_URL\}/g, mcpUrl)
-    .replace(/\{MOIRA_URL\}/g, options.moiraUrl ?? getBaseUrl())
-    .replace(/\{STATIC_DOMAIN\}/g, options.staticDomain ?? getStaticArtifactsDomain());
+    .replace(/\{MCP_URL\}/g, () => mcpUrl)
+    .replace(/\{MOIRA_URL\}/g, () => options.moiraUrl ?? getBaseUrl())
+    .replace(/\{STATIC_DOMAIN\}/g, () => options.staticDomain ?? getStaticArtifactsDomain());
 }

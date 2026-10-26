@@ -7,6 +7,7 @@
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import {
+  deleteOwnedTestWorkflow,
   createAuthenticatedMCPClient,
   callMCPTool,
   createTestUserViaApi,
@@ -69,7 +70,7 @@ describe("MCP Workflow Sharing Tools E2E", () => {
       },
     };
 
-    const result = await callMCPTool(ownerClient, "manage", {
+    const result = await callMCPTool(ownerClient, "workflow", {
       action: "create",
       workflow,
     });
@@ -82,11 +83,7 @@ describe("MCP Workflow Sharing Tools E2E", () => {
   afterAll(async () => {
     // Cleanup workflows
     for (const workflowId of createdWorkflows) {
-      try {
-        // Delete workflow (no delete action in manage, would need to check if supported)
-      } catch {
-        // Ignore cleanup errors
-      }
+      await deleteOwnedTestWorkflow(ownerClient, workflowId);
     }
 
     await ownerCleanup?.();
@@ -95,7 +92,7 @@ describe("MCP Workflow Sharing Tools E2E", () => {
 
   describe("create-invite", () => {
     test("owner can create invite for owned workflow", async () => {
-      const result = await callMCPTool(ownerClient, "manage", {
+      const result = await callMCPTool(ownerClient, "workflow", {
         action: "create-invite",
         workflowId: testWorkflowId,
       });
@@ -115,7 +112,7 @@ describe("MCP Workflow Sharing Tools E2E", () => {
     test("owner can create invite with custom TTL", async () => {
       const customTtlMs = 1000 * 60 * 60 * 24; // 1 day
 
-      const result = await callMCPTool(ownerClient, "manage", {
+      const result = await callMCPTool(ownerClient, "workflow", {
         action: "create-invite",
         workflowId: testWorkflowId,
         ttlMs: customTtlMs,
@@ -127,7 +124,7 @@ describe("MCP Workflow Sharing Tools E2E", () => {
     });
 
     test("non-owner cannot create invite", async () => {
-      const result = await callMCPTool(recipientClient, "manage", {
+      const result = await callMCPTool(recipientClient, "workflow", {
         action: "create-invite",
         workflowId: testWorkflowId,
       });
@@ -138,13 +135,11 @@ describe("MCP Workflow Sharing Tools E2E", () => {
     });
 
     test("create-invite requires workflowId", async () => {
-      const result = await callMCPTool(ownerClient, "manage", {
-        action: "create-invite",
-      });
-
-      // Errors render as "Error: ..." text
-      expect(typeof result).toBe("string");
-      expect(result).toMatch(/workflow.*id|required/i);
+      await expect(
+        callMCPTool(ownerClient, "workflow", {
+          action: "create-invite",
+        }),
+      ).rejects.toMatchObject({ code: 400 });
     });
   });
 
@@ -153,7 +148,7 @@ describe("MCP Workflow Sharing Tools E2E", () => {
 
     beforeAll(async () => {
       // Create an invite to list
-      const createResult = await callMCPTool(ownerClient, "manage", {
+      const createResult = await callMCPTool(ownerClient, "workflow", {
         action: "create-invite",
         workflowId: testWorkflowId,
       });
@@ -161,7 +156,7 @@ describe("MCP Workflow Sharing Tools E2E", () => {
     });
 
     test("owner can list invites for workflow", async () => {
-      const result = await callMCPTool(ownerClient, "manage", {
+      const result = await callMCPTool(ownerClient, "workflow", {
         action: "list-invites",
         workflowId: testWorkflowId,
       });
@@ -178,7 +173,7 @@ describe("MCP Workflow Sharing Tools E2E", () => {
     });
 
     test("list-invites filters active only by default", async () => {
-      const result = await callMCPTool(ownerClient, "manage", {
+      const result = await callMCPTool(ownerClient, "workflow", {
         action: "list-invites",
         workflowId: testWorkflowId,
       });
@@ -193,7 +188,7 @@ describe("MCP Workflow Sharing Tools E2E", () => {
     });
 
     test("non-owner cannot list invites", async () => {
-      const result = await callMCPTool(recipientClient, "manage", {
+      const result = await callMCPTool(recipientClient, "workflow", {
         action: "list-invites",
         workflowId: testWorkflowId,
       });
@@ -209,7 +204,7 @@ describe("MCP Workflow Sharing Tools E2E", () => {
 
     beforeAll(async () => {
       // Create an invite to revoke
-      const createResult = await callMCPTool(ownerClient, "manage", {
+      const createResult = await callMCPTool(ownerClient, "workflow", {
         action: "create-invite",
         workflowId: testWorkflowId,
       });
@@ -217,7 +212,7 @@ describe("MCP Workflow Sharing Tools E2E", () => {
     });
 
     test("owner can revoke invite", async () => {
-      const result = await callMCPTool(ownerClient, "manage", {
+      const result = await callMCPTool(ownerClient, "workflow", {
         action: "revoke-invite",
         inviteId: inviteToRevoke,
       });
@@ -226,7 +221,7 @@ describe("MCP Workflow Sharing Tools E2E", () => {
       expect(result).toHaveProperty("inviteId", inviteToRevoke);
 
       // Verify invite no longer listed
-      const listResult = await callMCPTool(ownerClient, "manage", {
+      const listResult = await callMCPTool(ownerClient, "workflow", {
         action: "list-invites",
         workflowId: testWorkflowId,
       });
@@ -236,23 +231,21 @@ describe("MCP Workflow Sharing Tools E2E", () => {
     });
 
     test("revoke-invite requires inviteId", async () => {
-      const result = await callMCPTool(ownerClient, "manage", {
-        action: "revoke-invite",
-      });
-
-      // Errors render as "Error: ..." text
-      expect(typeof result).toBe("string");
-      expect(result).toMatch(/inviteId|required/i);
+      await expect(
+        callMCPTool(ownerClient, "workflow", {
+          action: "revoke-invite",
+        }),
+      ).rejects.toMatchObject({ code: 400 });
     });
 
     test("non-owner cannot revoke invite", async () => {
       // Create a new invite
-      const createResult = await callMCPTool(ownerClient, "manage", {
+      const createResult = await callMCPTool(ownerClient, "workflow", {
         action: "create-invite",
         workflowId: testWorkflowId,
       });
 
-      const result = await callMCPTool(recipientClient, "manage", {
+      const result = await callMCPTool(recipientClient, "workflow", {
         action: "revoke-invite",
         inviteId: createResult.invite.id,
       });
@@ -278,13 +271,13 @@ describe("MCP Workflow Sharing Tools E2E", () => {
         },
       };
 
-      const createResult = await callMCPTool(ownerClient, "manage", {
+      const createResult = await callMCPTool(ownerClient, "workflow", {
         action: "create",
         workflow,
       });
       createdWorkflows.push(createResult.workflowId);
 
-      const result = await callMCPTool(ownerClient, "manage", {
+      const result = await callMCPTool(ownerClient, "workflow", {
         action: "list-access",
         workflowId: createResult.workflowId,
       });
@@ -296,7 +289,7 @@ describe("MCP Workflow Sharing Tools E2E", () => {
     });
 
     test("non-owner cannot list access", async () => {
-      const result = await callMCPTool(recipientClient, "manage", {
+      const result = await callMCPTool(recipientClient, "workflow", {
         action: "list-access",
         workflowId: testWorkflowId,
       });
@@ -307,18 +300,16 @@ describe("MCP Workflow Sharing Tools E2E", () => {
     });
 
     test("revoke-access requires targetUserId", async () => {
-      const result = await callMCPTool(ownerClient, "manage", {
-        action: "revoke-access",
-        workflowId: testWorkflowId,
-      });
-
-      // Errors render as "Error: ..." text
-      expect(typeof result).toBe("string");
-      expect(result).toMatch(/targetUserId|required/i);
+      await expect(
+        callMCPTool(ownerClient, "workflow", {
+          action: "revoke-access",
+          workflowId: testWorkflowId,
+        }),
+      ).rejects.toMatchObject({ code: 400 });
     });
 
     test("revoke-access fails for non-existent access", async () => {
-      const result = await callMCPTool(ownerClient, "manage", {
+      const result = await callMCPTool(ownerClient, "workflow", {
         action: "revoke-access",
         workflowId: testWorkflowId,
         targetUserId: "non-existent-user-id",
@@ -332,7 +323,7 @@ describe("MCP Workflow Sharing Tools E2E", () => {
 
   describe("workflow identifier resolution", () => {
     test("create-invite works with slug", async () => {
-      const result = await callMCPTool(ownerClient, "manage", {
+      const result = await callMCPTool(ownerClient, "workflow", {
         action: "create-invite",
         workflowId: testWorkflowSlug,
       });
@@ -343,7 +334,7 @@ describe("MCP Workflow Sharing Tools E2E", () => {
     });
 
     test("list-access works with slug", async () => {
-      const result = await callMCPTool(ownerClient, "manage", {
+      const result = await callMCPTool(ownerClient, "workflow", {
         action: "list-access",
         workflowId: testWorkflowSlug,
       });
@@ -352,7 +343,7 @@ describe("MCP Workflow Sharing Tools E2E", () => {
     });
 
     test("list-invites works with slug", async () => {
-      const result = await callMCPTool(ownerClient, "manage", {
+      const result = await callMCPTool(ownerClient, "workflow", {
         action: "list-invites",
         workflowId: testWorkflowSlug,
       });

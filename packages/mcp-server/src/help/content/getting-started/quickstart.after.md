@@ -1,13 +1,16 @@
 3.  **Authenticate the MCP server**
 
-    After adding the server configuration, complete OAuth authentication.
-    Most clients will prompt you automatically or have an "Authenticate" button.
+    Check the selected client's connection status using its instructions above. If Moira already
+    works, keep that connection. Otherwise complete the client's supported authentication path:
+    browser OAuth when offered, or its native API-token configuration. Saving a configuration
+    alone does not establish authentication.
 
     :::tip[No OAuth support?]
     If your client cannot open a browser for OAuth, create an API token instead:
     1. Log in to Moira web UI → **Settings → Apps & tokens → API tokens**
     2. Create a token and copy it (starts with `moira_`)
-    3. Add it as `Authorization: Bearer moira_...` header in your client config
+    3. Use the selected client's token example above; header placement differs between clients,
+       and Codex references an environment variable. Keep the token out of Git and logs.
 
     See [MCP Clients → API Tokens](/docs/integration/mcp-clients/#api-tokens) for details.
     :::
@@ -50,13 +53,13 @@
 
 The core execution lifecycle uses these Moira tools:
 
-| Tool      | Description                                              |
-| --------- | -------------------------------------------------------- |
-| `list`    | List authorized workflows with pagination                |
-| `start`   | Prepare or execute a standalone or parent-linked start   |
-| `step`    | Submit a verified step result and get the next directive |
-| `session` | Inspect and resume workflow executions                   |
-| `help`    | Get Moira documentation and help                         |
+| Tool                               | Description                                              |
+| ---------------------------------- | -------------------------------------------------------- |
+| `workflow` (`list`)                | List authorized workflows with pagination                |
+| `execution` (`prepare`, `execute`) | Prepare or execute a standalone or parent-linked start   |
+| `execution` (`step`)               | Submit a verified step result and get the next directive |
+| `execution`                        | Inspect and resume workflow executions                   |
+| `help`                             | Get Moira documentation and help                         |
 
 Moira also exposes workflow management, settings, notes, artifacts, locks, reconciliation, and
 large-file token operations. See the [MCP tools reference](/docs/reference/tools/) for the
@@ -68,12 +71,12 @@ Here's what a typical workflow session looks like:
 
 ```
 Agent: I'll start the full development workflow.
-       [calls start with action: "prepare",
+       [calls execution with action: "prepare",
         workflowId: "moira/software-development-flow", parentExecutionId: "none"]
 
 Moira: Start attempt ID: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
 
-Agent: [calls start with action: "execute" and that exact startAttemptId;
+Agent: [calls execution with action: "execute" and that exact startAttemptId;
         after a lost reply, repeats this execute call instead of preparing again]
 
 Moira: Process ID: 123e4567-e89b-42d3-a456-426614174000
@@ -82,7 +85,7 @@ Moira: Process ID: 123e4567-e89b-42d3-a456-426614174000
        Success criteria: Requirements are documented...
 
 Agent: [analyzes requirements, produces output]
-       [calls step with the exact Process ID, current Step attempt ID,
+       [calls execution with action: "step" with the exact Process ID, current Step attempt ID,
         and schema-valid evidence]
 
 Moira: Process ID: 123e4567-e89b-42d3-a456-426614174000

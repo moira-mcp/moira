@@ -7,10 +7,10 @@ description: Как безопасно изменять существующие
 
 ### Через MCP Tools
 
-Используйте инструмент `manage` с действием edit:
+Используйте инструмент `workflow` с действием edit:
 
 ```typescript
-mcp__moira__manage({
+mcp__moira__workflow({
   action: "edit",
   workflowId: "my-workflow",
   changes: {
@@ -24,12 +24,12 @@ mcp__moira__manage({
 Запустите управляющий workflow:
 
 ```typescript
-mcp__moira__start({
+mcp__moira__execution({
   action: "prepare",
   workflowId: "moira/workflow-management-flow",
   parentExecutionId: "none",
 });
-mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" });
+mcp__moira__execution({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" });
 ```
 
 Выберите "edit" при запросе действия.
@@ -233,7 +233,7 @@ reviewer получает ограниченное описание класса
 ### Обновление метаданных
 
 ```typescript
-mcp__moira__manage({
+mcp__moira__workflow({
   action: "edit",
   workflowId: "my-workflow",
   changes: {
@@ -248,7 +248,7 @@ mcp__moira__manage({
 ### Обновление содержимого узла
 
 ```typescript
-mcp__moira__manage({
+mcp__moira__workflow({
   action: "edit",
   workflowId: "my-workflow",
   changes: {
@@ -268,7 +268,7 @@ mcp__moira__manage({
 ### Добавление узлов
 
 ```typescript
-mcp__moira__manage({
+mcp__moira__workflow({
   action: "edit",
   workflowId: "my-workflow",
   changes: {
@@ -288,7 +288,7 @@ mcp__moira__manage({
 ### Удаление узлов
 
 ```typescript
-mcp__moira__manage({
+mcp__moira__workflow({
   action: "edit",
   workflowId: "my-workflow",
   changes: {
@@ -308,7 +308,7 @@ mcp__moira__manage({
 1. **Загрузите полную исходную версию**
 
    ```typescript
-   mcp__moira__manage({
+   mcp__moira__workflow({
      action: "get",
      workflowId: "my-workflow",
      includeNodes: true,
@@ -325,7 +325,7 @@ mcp__moira__manage({
 2. **Найдите узлы для редактирования**
 
    ```typescript
-   mcp__moira__manage({
+   mcp__moira__workflow({
      action: "search-nodes",
      workflowId: "my-workflow",
      query: "search term",
@@ -335,7 +335,7 @@ mcp__moira__manage({
 3. **Получите детали узла**
 
    ```typescript
-   mcp__moira__manage({
+   mcp__moira__workflow({
      action: "get-node",
      workflowId: "my-workflow",
      nodeId: "node-id",
@@ -348,7 +348,7 @@ mcp__moira__manage({
    текущее определение и согласуйте с ним намеренную правку, не затирая более новый граф вслепую.
 
    ```typescript
-   mcp__moira__manage({
+   mcp__moira__workflow({
      action: "edit",
      workflowId: "my-workflow",
      expectedRevision: baselineRevision,
@@ -356,14 +356,21 @@ mcp__moira__manage({
    });
    ```
 
-5. **Валидация**
+5. **Проверьте сохранённое определение**
 
    ```typescript
-   mcp__moira__manage({
-     action: "validate",
+   mcp__moira__workflow({
+     action: "get",
      workflowId: "my-workflow",
+     includeNodes: true,
+     includeValidation: true,
    });
    ```
+
+   Прочитайте возвращённую `validation` вместе с полным сохранённым определением. Для проверки
+   авторского определения до сохранения вызовите `workflow({ action: "validate", workflow: completeWorkflow })`.
+   Здесь `completeWorkflow` — полный авторский JSON workflow, а не ID, сводка структуры или
+   оболочка ответа `get`. Сохраните весь граф и поля расширений.
 
 ## Редактирование без лишней машинерии
 
@@ -382,7 +389,7 @@ workflow — публичный `owner/slug`, внутренний UUID и ло�
 
 ```bash
 # Получить отдаваемое определение по одноразовому download-токену
-mcp__moira__token({ action: "download", workflowId: "moira/quick-task" })
+mcp__moira__workflow({ action: "download", workflowId: "moira/quick-task" })
 ```
 
 Если они различаются, выберите базу осознанно: какое определение затрагивает запрошенное изменение,
@@ -492,9 +499,78 @@ case:
 
 ## Контроль версий
 
+### Версии определения и история сохранений
+
+Три значения обозначают разные вещи:
+
+- `metadata.version` — семантическая версия автора, например `1.1.0`.
+- `revision` из `workflow` (`get`) — текущий токен записи. Передавайте его как `expectedRevision`
+  при защищённой правке или откате; это не номер исторического снимка.
+- `revision` в `workflow` (`history`) — номер неизменяемого снимка полного сохранённого определения.
+  Разные сохранения оставляют отдельные снимки, даже если их семантические версии совпадают.
+
+История сжимает полные определения и повторно использует одинаковое содержимое в рамках одного
+workflow. У каждого сохранения остаются собственные номер истории, автор и время; совместное
+хранение содержимого не удаляет редакции. Для чтения или восстановления снимка не требуется
+воспроизводить предыдущие изменения, а JSON возвращается в читаемом формате.
+
+Для чтения, сравнения и восстановления истории нужно право редактирования: владение workflow
+или явное разрешение `edit`, выданное напрямую либо через группу. Публичность или разрешение
+`use` сами по себе не открывают прежние приватные определения. История
+учитывает записи определения, включая синхронизацию каталога и обновление сохранённой схемы.
+Если записанной истории нет, фактическое текущее содержимое становится исходным снимком перед
+следующей записью содержимого; более ранние незаписанные сохранения восстановить нельзя.
+Резервные копии файлов CLI существуют отдельно от серверной истории.
+
+Получите список снимков, затем прочитайте выбранный снимок или сравните два возвращённых номера:
+
+```typescript
+mcp__moira__workflow({ action: "history", workflowId: "my-workflow" });
+mcp__moira__workflow({ action: "get-revision", workflowId: "my-workflow", revision: 1 });
+mcp__moira__workflow({
+  action: "compare-revisions",
+  workflowId: "my-workflow",
+  fromRevision: 1,
+  toRevision: 2,
+});
+```
+
+Замените `1` и `2` номерами снимков из истории. Отсутствующий снимок означает ошибку,
+а не пустое сравнение. Снимок содержит весь граф, включая реестр переменных, runtime policy
+и представление процесса, а не только поля, доступные в браузерном редакторе.
+
+Перед восстановлением прочитайте текущее определение через `workflow` (`get`) и сохраните его токен
+записи. После изучения выбранного содержимого передайте этот токен в rollback:
+
+```typescript
+mcp__moira__workflow({
+  action: "rollback",
+  workflowId: "my-workflow",
+  revision: 1,
+  expectedRevision: currentWriteRevision,
+});
+```
+
+Здесь `currentWriteRevision` — `revision` из текущего чтения, а `1` — выбранный номер истории.
+Откат валидирует и мигрирует определение, сохраняет ID, владельца и текущие права доступа
+существующего workflow и добавляет новый снимок. Результат возвращает новую `revision` записи,
+новую `historyRevision` и `restoredFrom`. Устаревший токен даёт
+`WORKFLOW_REVISION_CONFLICT`, не меняя граф и историю: перечитайте определение и заново оцените
+намеренное восстановление перед повтором. Мягкое удаление сохраняет историю, окончательное
+удаление убирает её. Откат содержимого отличается от административного восстановления удалённого workflow.
+
+Восстановление меняет сохранённое определение, а не состояние уже идущего запуска. Запуски читают
+текущее определение; совместимый приостановленный шаг может продолжиться обычным способом,
+а изменившаяся семантика шага требует проверки через `execution` (`diagnose`) и разрешённого решения
+`execution` (`recover`). Не повторяйте старую попытку, не пропускайте незавершённую работу и не
+повторяйте эффект с неизвестным исходом. См.
+[диагностику и восстановление устаревшего предъявления](/ru/docs/integration/troubleshooting/#current_presentation_stale).
+Просмотр и защищённое восстановление в браузере описаны на
+[странице флоу](/ru/docs/guides/flow-page/#история-версий).
+
 ### Инкремент версии
 
-Всегда обновляйте версию при внесении изменений:
+Используйте семантическую версию, чтобы обозначить смысл авторского изменения:
 
 ```typescript
 {
@@ -512,8 +588,10 @@ case:
 
 ### Сравнение версий
 
+Чтобы сравнить определения двух разных workflow, а не снимки одного workflow, используйте `diff`:
+
 ```typescript
-mcp__moira__manage({
+mcp__moira__workflow({
   action: "diff",
   workflowId: "my-workflow",
   compareWorkflowId: "my-workflow-old",

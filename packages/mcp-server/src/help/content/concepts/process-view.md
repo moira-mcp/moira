@@ -98,7 +98,7 @@ flow (a runtime adjustment) is shown as such with who made it. A route cursor sh
 stood at any earlier visit, and the execution's owner can answer the step the run waits for from
 the page; the answer is validated like an agent's and recorded as an adjustment (see the
 _Reading a run_ guide). A run recorded before routes existed shows only its current block and
-says that no route was recorded. The run's progress picture (`session progress-image-token`) is
+says that no route was recorded. The run's progress picture (`execution` (`progress-image-token`)) is
 this map rasterised: the same cards, ports, edges, statuses, facts and typical durations from the
 same projection (see the _Workflows_ concept). A notification attaches a different picture made
 for a phone — the run's steps, one row per block, from the same projection.
@@ -110,7 +110,7 @@ identity and execution state without inventing a process or route. Explicit nami
 create blocks for a graph-only flow.
 
 The PNG is rendered and published by a live paired controller. Select it with `device_id` on
-`session({ action: "progress-image-token", executionId, device_id })`; omission requires exactly
+`execution({ action: "progress-image-token", executionId, device_id })`; omission requires exactly
 one eligible live controller. `COMMUNICATION_OWNER_UNAVAILABLE` is a coded MCP failure and HTTP
 503 on mint/public read. Restore the paired connection rather than recreating a VM.
 Ordinary progress reads and text notifications need no owner; an unavailable optional
@@ -127,4 +127,4 @@ Name blocks for what a person would call the stage, keep descriptions to one sen
 every boundary edge with the decision it represents, and explain every return with its cause and
 exit. Prefer three to fifteen blocks; put routing steps in the block whose decision they route.
 The Workflow Management Flow requires all of this when it creates or edits a workflow, and
-`session({ action: "progress" })` or `GET /api/executions/:id/progress` returns the run view.
+`execution({ action: "progress" })` or `GET /api/executions/:id/progress` returns the run view.

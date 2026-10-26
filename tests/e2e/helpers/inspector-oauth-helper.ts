@@ -7,7 +7,7 @@ import { Page, expect } from "@playwright/test";
 import { getTestBaseUrl, getTestFetchUrl } from "../../utils/test-config.js";
 import { verifyUserEmail } from "../../utils/mcp-auth.js";
 
-const INSPECTOR_URL = "http://localhost:6274";
+export const INSPECTOR_URL = process.env.INSPECTOR_URL ?? "http://localhost:6274";
 
 /**
  * Check if MCP Inspector is available.
@@ -18,7 +18,7 @@ const INSPECTOR_URL = "http://localhost:6274";
 export async function isInspectorAvailable(): Promise<boolean> {
   const checkUrl =
     process.env.PLAYWRIGHT_REMOTE === "true"
-      ? `http://${process.env.REMOTE_HOST || "192.0.2.1"}:6274`
+      ? `http://${process.env.REMOTE_HOST || "192.0.2.1"}:${new URL(INSPECTOR_URL).port || "80"}`
       : INSPECTOR_URL;
   try {
     const response = await fetch(checkUrl, { method: "HEAD" });
@@ -37,7 +37,7 @@ export async function requireInspectorAvailable(): Promise<void> {
   if (!available) {
     throw new Error(
       "MCP Inspector is not running. Start it with: npm run inspector\n" +
-        "Inspector should be available at http://localhost:6274",
+        `Inspector should be available at ${INSPECTOR_URL}`,
     );
   }
 }
@@ -64,7 +64,7 @@ export interface InspectorUser {
  */
 function buildInspectorUrl(): string {
   const serverUrl = `${BASE_URL}/mcp`;
-  return `http://localhost:6274/?transport=streamable-http&serverUrl=${encodeURIComponent(serverUrl)}`;
+  return `${INSPECTOR_URL}/?transport=streamable-http&serverUrl=${encodeURIComponent(serverUrl)}`;
 }
 
 /**
@@ -184,7 +184,9 @@ export async function connectInspectorWithOAuth(
   await backToConnectButton.click();
 
   // Wait for redirect back to Inspector
-  await page.waitForURL(/localhost:6274/, { timeout: OAUTH_REDIRECT_TIMEOUT });
+  await page.waitForURL((url) => url.origin === new URL(INSPECTOR_URL).origin, {
+    timeout: OAUTH_REDIRECT_TIMEOUT,
+  });
   if (verbose) console.log("✓ Redirected back to Inspector");
 
   // Now click Connect button to actually establish the MCP connection
@@ -241,7 +243,9 @@ export async function completeOAuthConsentAndConnect(
   await backToConnectButton.click();
 
   // Wait for redirect back to Inspector
-  await page.waitForURL(/localhost:6274/, { timeout: OAUTH_REDIRECT_TIMEOUT });
+  await page.waitForURL((url) => url.origin === new URL(INSPECTOR_URL).origin, {
+    timeout: OAUTH_REDIRECT_TIMEOUT,
+  });
   if (verbose) console.log("✓ Redirected back to Inspector");
 
   // Click Connect button to establish the MCP connection

@@ -34,6 +34,7 @@ import {
   getExecutionRetentionService,
   applyTrustProxy,
   clientIpHeaderMiddleware,
+  getArtifactService,
 } from "@mcp-moira/shared";
 
 // Set global service for this process (MUST be first thing after imports)
@@ -89,6 +90,7 @@ import { notesRoutes } from "./routes/notes.js";
 import { playbooksRoutes } from "./routes/playbooks.js";
 import { artifactsRoutes } from "./routes/artifacts.js";
 import { artifactTokenRoutes } from "./routes/artifact-tokens.js";
+import { createArtifactSessionAdmission } from "./middleware/artifact-body.js";
 import { staticArtifactsRoutes } from "./routes/static-artifacts.js";
 import { workflowSharingRoutes } from "./routes/workflow-sharing.js";
 import { inviteAcceptRoutes } from "./routes/invite-accept.js";
@@ -254,6 +256,15 @@ class MoiraApiServer {
           error: { code: "ENDPOINT_NOT_FOUND", message: "Unknown local-device endpoint" },
         }),
     );
+    // Artifact principals and their effective body budgets are established before parsing/logging.
+    this.app.use("/api/public/artifacts", apiLimiter, artifactTokenRoutes);
+    this.app.use(
+      "/api/artifacts",
+      apiLimiter,
+      createArtifactSessionAdmission(getArtifactService(), requireAuth),
+      artifactsRoutes,
+    );
+
     // Ordinary web APIs retain their separate bounded body policy.
     this.app.use(
       express.json({
@@ -436,9 +447,6 @@ class MoiraApiServer {
       createExecutionProgressImageRoutes(),
     );
 
-    // Public artifact token routes (token = authorization, no session required)
-    this.app.use("/api/public/artifacts", apiLimiter, artifactTokenRoutes);
-
     // Public static artifact serving (separate domain in production)
     // Serves HTML with branding injection, security headers
     this.app.use("/static", apiLimiter, staticArtifactsRoutes);
@@ -478,7 +486,6 @@ class MoiraApiServer {
     this.app.use("/api/stats", apiLimiter, requireAuth, statsRoutes);
     this.app.use("/api/notes", apiLimiter, requireAuth, notesRoutes);
     this.app.use("/api/playbooks", apiLimiter, requireAuth, playbooksRoutes);
-    this.app.use("/api/artifacts", apiLimiter, requireAuth, artifactsRoutes);
     this.app.use("/api/tokens", apiLimiter, tokenRoutes); // requireVerifiedAuth inside routes
     // Authenticate and authorize the administrator namespace once. Specific
     // routers are mounted before the catch-all admin router so their handlers

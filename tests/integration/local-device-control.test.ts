@@ -38,7 +38,13 @@ beforeEach(async () => {
   deviceId = randomUUID();
   service = new LocalDeviceService(new LocalDeviceRepository(db), Date.now, {
     async json(user, id, input) {
-      if (!owner || (discoveryUnavailable && input.path === "/v1/controller"))
+      if (
+        !owner ||
+        (discoveryUnavailable &&
+          input.path.startsWith("/v1/controller") &&
+          input.method === "GET" &&
+          !input.path.includes("/operations/"))
+      )
         throw Object.assign(new Error("Controlled owner connection absent"), {
           code: "ECONNREFUSED",
         });
@@ -96,6 +102,63 @@ function save(value: ReturnType<typeof app>, body: Record<string, unknown>) {
     .send(body);
 }
 describe("Browser-authorized settings reach one live owner", () => {
+  test("settings CAS and new receipt never need native inventory; known old full receipts collect unchanged", async () => {
+    const native = await owner!.controller.snapshot();
+    let nativeReads = 0;
+    owner!.manager.snapshot = async () => {
+      nativeReads++;
+      throw new Error("Native inventory must not be read");
+    };
+    const requestId = createWorkspaceRequestId();
+    const saved = await service.requestSettings("owner", deviceId, {
+      requestId,
+      expectedGeneration: 1,
+      expectedRevision: 0,
+      settings: { ...controlSettings(await owner!.records.policy()), label: "Metadata only" },
+    });
+    expect(saved.owner.local.policy.label).toBe("Metadata only");
+    expect(nativeReads).toBe(0);
+    const key = "controller-operation-" + requestId + ".json";
+    const receipt = (await owner!.state.read(key, (value) => value)) as {
+      outcome: { result: { local: Record<string, unknown> } };
+    };
+    expect(receipt.outcome.result.local).not.toHaveProperty("resources");
+    expect(native.local.state).toBe("configured");
+    receipt.outcome.result = native as typeof receipt.outcome.result;
+    await owner!.state.write(key, receipt);
+    const bytes = await readFile(join(owner!.state.root, key));
+    discoveryUnavailable = true;
+    expect(await service.collectSettings("owner", deviceId, requestId)).toMatchObject({
+      outcome: receipt.outcome,
+      result: {
+        owner: {
+          local: {
+            policy: { label: native.local.state === "configured" ? native.local.policy.label : "" },
+          },
+        },
+      },
+    });
+    expect(await readFile(join(owner!.state.root, key))).toEqual(bytes);
+  });
+  test("a newly returned unknown settings shape refuses instead of becoming opaque historical success", async () => {
+    const original = owner!.client.json;
+    owner!.client.json = async (...args) => {
+      const result = await original(...args);
+      if (args[2].method === "PUT") {
+        const outcome = result.outcome as { result: Record<string, unknown> };
+        outcome.result = { ...outcome.result, unknownPolicyEdition: true };
+      }
+      return result;
+    };
+    await expect(
+      service.requestSettings("owner", deviceId, {
+        requestId: createWorkspaceRequestId(),
+        expectedGeneration: 1,
+        expectedRevision: 0,
+        settings: controlSettings(await owner!.records.policy()),
+      }),
+    ).rejects.toThrow();
+  });
   test("historical successful settings remain exact original evidence while current policy stays strict and independent", async () => {
     const requestId = createWorkspaceRequestId();
     await service.requestSettings("owner", deviceId, {

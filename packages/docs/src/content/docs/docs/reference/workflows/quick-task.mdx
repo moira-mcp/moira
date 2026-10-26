@@ -14,8 +14,8 @@ Use Quick Task when an agent has filesystem access and bounded non-development w
 ## Start
 
 ```bash
-mcp__moira__start({ action: "prepare", workflowId: "moira/quick-task", parentExecutionId: "none" })
-mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
+mcp__moira__execution({ action: "prepare", workflowId: "moira/quick-task", parentExecutionId: "none" })
+mcp__moira__execution({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 ## Process
@@ -47,7 +47,7 @@ The plan length becomes authoritative for execution only after the current plan 
 The first step resolves `operating_mode` as `autonomous` or `interactive`. The agent reuses a mode you already stated, infers an unambiguous one — including a run started by an already autonomous parent process — and asks once only when the mode is neither stated nor derivable.
 
 Before completing intake, the agent persists the actual [task name](/docs/concepts/workflows/#execution-task-name)
-through guarded Progress/session metadata. The reusable naming contract is included in agent
+through guarded Progress/execution metadata. The reusable naming contract is included in agent
 presentations. Optional `execution_note` is arbitrary nonempty text of at most 120 characters,
 independent of headings. Authorized scope changes at revision, rework or replan update the same
 name; tactics, reordering and ordinary repair retain it without granting new authority.
@@ -69,7 +69,7 @@ Evidence is not returned through workflow context. If work is incomplete or bloc
 When the approved plan itself stops fitting reality — new facts appear, scope was missed, or an executed unit's outcome invalidates the remaining plan — the agent jumps to the replan entry instead of finishing a plan it knows is wrong:
 
 ```js
-mcp__moira__step({ processId, attemptId, teleportTo: "teleport-replan" })
+mcp__moira__execution({ action: "step", processId, attemptId, teleportTo: "teleport-replan" })
 ```
 
 No step leads into that node, so a replan is always a deliberate decision, and it is not a way around the other owners: a blocking plan-review finding belongs to the plan repair loop, a defect in the produced result to the result fix loop, a plan you reject at the approval gate to the ordinary revision route, and a unit that is merely hard or blocked to the rule above.
@@ -110,7 +110,7 @@ run. Autonomous runs go around both steps and never wait for you.
 - Complete plans, reviews, decisions, feedback, changes, and evidence have one durable source on disk instead of duplicated context payloads.
 - Every returned dynamic path has a typed schema and a named downstream consumer.
 - Review and mutation remain separate; every changed plan or result returns through the appropriate independent review.
-- Automatic review loops advance only after a new artifact or result state exists. A non-reproducible or incomplete repair does not call `step()`.
+- Automatic review loops advance only after a new artifact or result state exists. A non-reproducible or incomplete repair does not call `execution` with `action: "step"`.
 - Mechanical checks prove only the properties they directly test; the executing and reviewing agents still judge the actual result.
 - End has an empty terminal projection and does not expose internal file-backed records.
 - Quick Task requires filesystem access. It does not provide Robust Task's stronger failure-recovery policy.

@@ -6,6 +6,7 @@ import type { NetworkBudget } from "../../../packages/local/src/network-budget.j
 import { gitBroker } from "../../../packages/local/src/git-broker.js";
 import { httpBroker } from "../../../packages/local/src/http-broker.js";
 import { LocalRefusal } from "../../../packages/local/src/policy.js";
+import { LOCAL_SETUP_HEADER } from "../../../packages/shared/src/codespaces/local-protocol.js";
 
 function grant(): BrokerGrant {
   return {
@@ -56,6 +57,77 @@ function budget(release = async () => {}) {
 }
 
 describe("Local direct Git owner adapter", () => {
+  it("marked setup keeps host request custody until its late cleanup actually settles", async () => {
+    const requestId = "ws1-00000000-0000-4000-8000-000000000001";
+    let finish!: () => void, observed!: () => void;
+    const cleanup = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const diagnostic = new Promise<void>((resolve) => {
+      observed = resolve;
+    });
+    const acquire = jest.fn(
+      async (_grant: BrokerGrant, _action: string, _signal?: AbortSignal, parent?: string) => {
+        expect(parent).toBe(requestId);
+        throw new LocalRefusal("LOCAL_RELAY_UNAVAILABLE", "No issuer was reached");
+      },
+    );
+    const adapter = gitBroker(
+      budget(() => cleanup),
+      () => {},
+      acquire,
+      undefined,
+      {
+        authorize: async () => {},
+        outcome: async (_grant, parent, value) => {
+          expect(parent).toBe(requestId);
+          expect(value).toEqual({ code: "LOCAL_RELAY_UNAVAILABLE", outcome: "unavailable" });
+          observed();
+        },
+      },
+    );
+    const request = incoming("git-receive-pack");
+    request.headers[LOCAL_SETUP_HEADER] = requestId;
+    const result = output();
+    const work = adapter.git(request, result.response, grant());
+    await diagnostic;
+    let settled = false;
+    const settling = adapter.settleSetupRequests("owned-space", requestId).then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    finish();
+    await work;
+    await settling;
+    expect(settled).toBe(true);
+    expect(JSON.parse(result.text()).error.code).toBe("LOCAL_RELAY_UNAVAILABLE");
+  });
+
+  it("a retired marker refuses before issuance and cannot report a failure to the current attempt", async () => {
+    const acquire = jest.fn(async () => {
+      throw new Error("Retired attempt issued");
+    });
+    const outcome = jest.fn(async () => {});
+    const network = {
+      reserve: async () => {
+        throw new Error("Retired marker waited for network capacity");
+      },
+    } as unknown as NetworkBudget;
+    const adapter = gitBroker(network, () => {}, acquire, undefined, {
+      authorize: async () => {
+        throw new LocalRefusal("LOCAL_IDENTITY_CHANGED", "Old setup");
+      },
+      outcome,
+    });
+    const request = incoming("git-receive-pack"),
+      result = output();
+    request.headers[LOCAL_SETUP_HEADER] = "ws1-00000000-0000-4000-8000-000000000001";
+    await adapter.git(request, result.response, grant());
+    expect(JSON.parse(result.text()).error.code).toBe("LOCAL_IDENTITY_CHANGED");
+    expect(acquire).not.toHaveBeenCalled();
+    expect(outcome).not.toHaveBeenCalled();
+  });
   it.each([false, true])(
     "public fetch uses anonymous authority only when write rights are absent (allowPush=%s)",
     async (allowPush) => {

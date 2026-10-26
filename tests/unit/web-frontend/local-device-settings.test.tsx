@@ -224,6 +224,20 @@ beforeEach(async () => {
     readiness: { state: "ready" },
     connection: { state: "connected" },
   } as never);
+  jest.spyOn(apiClient, "getCodespaceTargets").mockResolvedValue({
+    provider: "local-sandboxes",
+    repositories: [],
+    repositories_stale: false,
+    readiness: { state: "ready" },
+    connection: { state: "connected" },
+    controllers: [],
+  } as never);
+  jest
+    .spyOn(apiClient, "refreshCodespaceTargets")
+    .mockImplementation((provider) => apiClient.getCodespaceTargets(provider));
+  jest
+    .spyOn(apiClient, "observeWorkspace")
+    .mockRejectedValue(new Error("Exact observation fixture is not configured"));
   jest
     .spyOn(apiClient, "refreshCodespaces")
     .mockImplementation((provider, view) => apiClient.getCodespaces(provider, view));
@@ -420,13 +434,13 @@ test("computers with equal labels contain only their codespaces and separate VM 
     updated_at: 9000,
     lifecycle_error: null,
   };
-  const readonlyRefresh = jest
-    .spyOn(apiClient, "refreshCodespaces")
-    .mockResolvedValue({ ...fixture, codespaces: [first, sibling, confirmed, cloud] } as never);
+  const observation = jest.mocked(apiClient.observeWorkspace).mockResolvedValue(confirmed);
+  const readonlyRefresh = jest.mocked(apiClient.refreshCodespaces);
   fireEvent.click(within(pending).getByTestId(`codespace-reconcile-${second.codespace_id}`));
   await within(secondComputer).findByText("Stopped (data kept)");
   expect(stop).toHaveBeenCalledTimes(1);
-  expect(readonlyRefresh).toHaveBeenCalledTimes(1);
+  expect(observation).toHaveBeenCalledWith(second.workspace);
+  expect(readonlyRefresh).not.toHaveBeenCalled();
   const timestamp = within(secondComputer).getByText(/^State confirmed/);
   expect(timestamp).toHaveTextContent(new Date(3000).toLocaleString("en"));
   expect(within(secondComputer).queryByText("State has not been confirmed yet")).toBeNull();
@@ -515,7 +529,7 @@ test.each([
     expect(card).toBeInTheDocument();
     expect(success).not.toHaveBeenCalled();
     expect(within(dialog).getByRole("button", { name: "Delete" })).toBeDisabled();
-    jest.mocked(apiClient.refreshCodespaces).mockResolvedValue(fixture as never);
+    jest.mocked(apiClient.observeWorkspace).mockResolvedValue(row);
     fireEvent.click(within(dialog).getByRole("button", { name: "Check state again" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     remove.mockResolvedValueOnce({
@@ -715,6 +729,9 @@ test.each(["generation", "observation", "outcome"] as const)(
     await waitFor(() => expect(within(card).queryByRole("alert")).toBeNull());
     const original = operationReference();
     const collect = jest.spyOn(apiClient, "getWorkspaceOperation").mockResolvedValue(completed());
+    jest
+      .mocked(apiClient.observeWorkspace)
+      .mockResolvedValue({ ...next, lifecycle_error: null } as ManagedWorkspaceView);
     expect(within(card).getByRole("button", { name: "Check state again" })).toBeEnabled();
     expect(
       within(card).getByRole("button", { name: change === "outcome" ? "Start" : "Stop" }),
@@ -769,6 +786,7 @@ test("failed deletion never substitutes a refreshed workspace into an existing c
   jest
     .mocked(apiClient.refreshCodespaces)
     .mockResolvedValue({ ...fixture, codespaces: [next] } as never);
+  jest.mocked(apiClient.observeWorkspace).mockResolvedValue(next);
   await waitFor(() => expect(apiClient.refreshCodespaces).toHaveBeenCalledTimes(1));
   fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
   await within(dialog).findByRole("alert");
@@ -799,7 +817,7 @@ test("a failed state check renders one concrete error and retry while keeping de
   } as never);
   const stop = jest.spyOn(apiClient, "changeWorkspace");
   jest
-    .spyOn(apiClient, "refreshCodespaces")
+    .mocked(apiClient.observeWorkspace)
     .mockRejectedValue({ code: "CODESPACE_LOCAL_RUNTIME_ERROR" });
   await show({ openSettings: false });
   const card = await screen.findByTestId(`github-codespace-${row.codespace_id}`);
@@ -875,10 +893,7 @@ test.each(["running", "stopped"] as const)(
     jest.mocked(apiClient.getCodespaces).mockResolvedValue(fixture as never);
     const start = jest.spyOn(apiClient, "changeWorkspace").mockResolvedValue(completed(row));
     const stop = jest.spyOn(apiClient, "changeWorkspace").mockResolvedValue(completed(row));
-    jest.spyOn(apiClient, "refreshCodespaces").mockResolvedValue({
-      ...fixture,
-      codespaces: [{ ...row, observed_at: 3000 }],
-    } as never);
+    jest.mocked(apiClient.observeWorkspace).mockResolvedValue({ ...row, observed_at: 3000 });
     await show({ openSettings: false });
     const card = await screen.findByTestId(`github-codespace-${row.codespace_id}`);
     fireEvent.click(within(card).getByRole("button", { name: "Check state again" }));
@@ -940,9 +955,7 @@ test.each(["unavailable", "enrollment_unavailable"] as const)(
       remote: { state: remoteState },
     };
     const collect = jest.spyOn(apiClient, "getWorkspaceOperation").mockResolvedValue(completed());
-    jest
-      .spyOn(apiClient, "refreshCodespaces")
-      .mockResolvedValue({ ...fixture, codespaces: [ready] } as never);
+    jest.mocked(apiClient.observeWorkspace).mockResolvedValue(ready);
     await show({ openSettings: false });
     const card = await screen.findByTestId(`github-codespace-${row.codespace_id}`);
     fireEvent.click(within(card).getByRole("button", { name: "Resume setup" }));
@@ -987,6 +1000,7 @@ test("create requires an explicit repository ref and pending creation is not ann
     codespaces: [],
   };
   jest.mocked(apiClient.getCodespaces).mockResolvedValue(fixture as never);
+  jest.mocked(apiClient.getCodespaceTargets).mockResolvedValue(fixture as never);
   const create = jest
     .spyOn(apiClient, "createWorkspace")
     .mockResolvedValue({ operation: operationReference(), state: "pending", original: row });
@@ -1753,18 +1767,13 @@ test("reload collects every returned owner operation without creating new mutati
   const collect = jest
     .spyOn(apiClient, "getWorkspaceOperation")
     .mockImplementation(async (operation) => ({ ...completed(), operation }));
-  jest.spyOn(apiClient, "refreshCodespaces").mockResolvedValue({
-    ...view,
-    codespaces: [
-      {
-        ...row,
-        pending_operations: [],
-        state: "stopped",
-        desired_state: "stopped",
-        observed_state: "stopped",
-      },
-    ],
-  } as never);
+  jest.mocked(apiClient.observeWorkspace).mockResolvedValue({
+    ...row,
+    pending_operations: [],
+    state: "stopped",
+    desired_state: "stopped",
+    observed_state: "stopped",
+  });
   await show({ openSettings: false });
   const card = await screen.findByTestId(`github-codespace-${row.codespace_id}`);
   expect(within(card).getByRole("button", { name: "Stop" })).toBeDisabled();

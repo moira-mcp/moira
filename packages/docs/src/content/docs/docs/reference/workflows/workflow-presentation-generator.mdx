@@ -6,12 +6,12 @@ description: Source-faithful local HTML presentations for Moira workflows with o
 Workflow Presentation Generator turns one authorized Moira workflow into a self-contained local HTML presentation for business and technical readers. It combines source-grounded purpose, complete topology, progressive disclosure for large graphs, sensitive-data boundaries, deterministic HTML checks, and independent semantic and visual review.
 
 ```bash
-mcp__moira__start({
+mcp__moira__execution({
   action: "prepare",
   workflowId: "moira/workflow-presentation-generator",
   parentExecutionId: "none"
 })
-mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
+mcp__moira__execution({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 ## Sources and durable artifacts

@@ -2,7 +2,7 @@
 
 Execute the current `directive`; it is your instruction, not text to repeat to the user.
 
-Before calling `step()`:
+Before calling `execution` with `action: "step"`:
 
 - treat `completionCondition` as the literal acceptance checklist;
 - verify every criterion against real code, data, artifacts, or command output;

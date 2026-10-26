@@ -22,7 +22,7 @@ The workflow state persists on the MCP server - only the agent's memory is lost.
 1. **Find active executions:**
 
 ```json
-session({ action: "executions" })
+execution({ action: "executions" })
 ```
 
 Returns list of executions with status, workflow ID, and notes:
@@ -42,7 +42,7 @@ Returns list of executions with status, workflow ID, and notes:
 2. **Get current step without advancing:**
 
 ```json
-session({ action: "current_step", executionId: "abc-123" })
+execution({ action: "current_step", executionId: "abc-123" })
 ```
 
 Returns the current directive and context:
@@ -59,7 +59,7 @@ Returns the current directive and context:
 3. **Continue workflow:**
 
 ```json
-step({ processId: "abc-123", attemptId: "attempt-current", input: { ... } })
+execution({ action: "step", processId: "abc-123", attemptId: "attempt-current", input: { ... } })
 ```
 
 ### Process ID Preservation
@@ -83,7 +83,7 @@ Include in session archives:
 
 Returns one page of active workflow executions for the current user. Use limit and offset to read further pages; an empty page or missing row does not prove that an execution expired.
 
-**Call:** `session({ action: "executions" })`
+**Call:** `execution({ action: "executions" })`
 
 **Filters:**
 
@@ -94,7 +94,7 @@ Returns one page of active workflow executions for the current user. Use limit a
 **Example with filters:**
 
 ```json
-session({
+execution({
   action: "executions",
   status: ["waiting", "running"],
   search: "auth"
@@ -105,7 +105,7 @@ session({
 
 Retrieves current step directive without advancing the workflow.
 
-**Call:** `session({ action: "current_step", executionId: "..." })`
+**Call:** `execution({ action: "current_step", executionId: "..." })`
 
 **Parameters:**
 
@@ -122,7 +122,7 @@ Retrieves current step directive without advancing the workflow.
 
 Gets full execution state including context variables.
 
-**Call:** `session({ action: "execution_context", executionId: "..." })`
+**Call:** `execution({ action: "execution_context", executionId: "..." })`
 
 **Parameters:**
 
@@ -152,7 +152,7 @@ Gets full execution state including context variables.
 
 **Solution:**
 
-1. Use `session({ action: "executions" })` to find active executions
+1. Use `execution({ action: "executions" })` to find active executions
 2. Use the correct executionId from the list
 3. Process IDs are UUIDs like `abc123-def456-...`
 
@@ -162,11 +162,11 @@ Gets full execution state including context variables.
 
 **Solution:**
 
-1. Check execution status with `session({ action: "execution_context", executionId: "..." })`
+1. Check execution status with `execution({ action: "execution_context", executionId: "..." })`
 2. Inspect the actual waiting node and current presentation; a persisted `running` execution can be waiting for input. Do not infer readiness from a display status alone.
 3. A terminal execution cannot be advanced. Start another only for a deliberate new task, never to collect or retry an uncertain original effect.
 
-### Validation Errors on step()
+### Step validation errors
 
 **Cause:** Input doesn't match inputSchema
 
@@ -189,7 +189,7 @@ or alter the input.
 **Cause:** The attempt no longer matches the current execution presentation and was rejected before
 handler work.
 
-**Solution:** Read `session({ action: "current_step", executionId: "..." })`, then reconcile its node,
+**Solution:** Read `execution({ action: "current_step", executionId: "..." })`, then reconcile its node,
 directive, schema and current intent before submitting with that attempt. Do not reuse the stale ID,
 carry old input into another step, or overwrite a newer user answer.
 
@@ -198,7 +198,7 @@ carry old input into another step, or overwrite a newer user answer.
 **Cause:** The attempt is already bound to a different input and the new submission was rejected
 before handler work.
 
-**Solution:** Automatically call `session({ action: "current_step", executionId: "..." })`, discard
+**Solution:** Automatically call `execution({ action: "current_step", executionId: "..." })`, discard
 the conflicting attempt, and continue from the returned directive and input schema. Do not replay
 the rejected input against the current presentation.
 
@@ -208,7 +208,7 @@ the rejected input against the current presentation.
 applies only when the error explicitly directs the caller to `current_step`; an unavailable start
 attempt has no current step to recover.
 
-**Solution:** Automatically call `session({ action: "current_step", executionId: "..." })`, discard
+**Solution:** Automatically call `execution({ action: "current_step", executionId: "..." })`, discard
 the unavailable attempt, and continue from the returned directive and input schema.
 
 ### `ATTEMPT_OUTCOME_UNKNOWN`
@@ -216,7 +216,7 @@ the unavailable attempt, and continue from the returned directive and input sche
 **Cause:** Moira could not prove whether a claimed mutation and its possible external effect
 completed.
 
-**Solution:** Inspect the execution with `session({ action: "current_step", executionId: "..." })`
+**Solution:** Inspect the execution with `execution({ action: "current_step", executionId: "..." })`
 and the relevant external system. Do not automatically retry the mutation.
 
 ### `CURRENT_PRESENTATION_STALE`
@@ -229,10 +229,10 @@ version or tag bump, an edit to another node, or a cosmetic change to the paused
 leave the run usable.
 
 **Solution:** Do not retry the old attempt. Call
-`session({ action: 'diagnose', executionId: '...' })`, which names which facts of the paused step
+`execution({ action: 'diagnose', executionId: '...' })`, which names which facts of the paused step
 changed, whether its node still exists, and anything else standing between the run and its next
 step. Then repair the run with
-`session({ action: 'recover', executionId: '...', nodeId: '<node to resume from>', variableValues: { ... } })`,
+`execution({ action: 'recover', executionId: '...', nodeId: '<node to resume from>', variableValues: { ... } })`,
 which re-presents it at the node you name with the values that step needs and returns a fresh Step
 attempt ID to continue from. Name a node a run can wait on — an agent-directive, teleport,
 materialize, lock or subgraph node; any other node is refused, because resuming there would run the
@@ -262,10 +262,10 @@ When the schema does not prove a prohibition, correct an invalid answer through 
 This can happen when the workflow definition changes while an execution is in progress. A recorded
 error by itself is historical; the current missing value is what blocks continuation.
 
-**Solution:** Call `session({ action: "diagnose", executionId: "..." })` and check for the blocking
-`missing_expression_variables` cause. Call `session({ action: "recover", executionId: "...",
+**Solution:** Call `execution({ action: "diagnose", executionId: "..." })` and check for the blocking
+`missing_expression_variables` cause. Call `execution({ action: "recover", executionId: "...",
 nodeId: "<current node>", variableValues: { ... } })` with the named values. Values for declared
-variables must satisfy their registry schemas; `session({ action: "variables", executionId: "..." })`
+variables must satisfy their registry schemas; `execution({ action: "variables", executionId: "..." })`
 shows those declarations. If recovery refuses a missing or invalid value, correct `variableValues`
 and retry; a refusal does not change the execution. On success, use the new Step attempt ID to send
 the ordinary answer to the same node. Do not retry an unchanged answer while the saved state is
@@ -280,7 +280,7 @@ authored error route remains in force.
 **Solution:**
 
 1. Check for process-id.txt in workspace
-2. Use `session({ action: "current_step", executionId })` with the retained identity to get context
+2. Use `execution({ action: "current_step", executionId })` with the retained identity to get context
 3. Remind agent: "Continue workflow \{processId\}"
 
 ### Seeing `[[UNDEFINED_VARIABLE]]` in a directive at runtime
@@ -301,19 +301,19 @@ The engine logs a warning naming the residual placeholder and the `executionId`.
 
 ### Editing files while a command runs
 
-A running command or development server does not itself block `file_create`, `file_replace`,
-`file_patch` or `file_upload`. Supply expected complete text or a returned file reference for
+A running command or development server does not itself block `codespace_edit` (`create`), `codespace_edit` (`replace`),
+`codespace_edit` (`patch`) or `codespace_upload`. Supply expected complete text or a returned file reference for
 replacement. If another writer changes the file, reread and reconcile before a new explicit edit.
 Do not calculate a digest of a selected byte range as a whole-file precondition. Commit and
 recovery use the guest's confined atomic transactions; recovery never overwrites a later edit.
 
 ### Large files and rejected file operations
 
-Use `file_stat` for metadata and `file_read` with line windows or its returned cursor for text.
+Use `codespace_read` (`stat`) for metadata and `codespace_read` (`read`) with line windows or its returned cursor for text.
 Continuation preserves complete UTF-8 characters; Cyrillic or emoji split across an internal
-byte boundary is not a binary file. Use `file_download` for complete binary bytes. Name and MIME
+byte boundary is not a binary file. Use `codespace_download` for complete binary bytes. Name and MIME
 are derived when omitted; no preliminary stat is required. Empty downloads are supported.
-`file_preview` returns complete valid PNG/JPEG content, not SVG or an image prefix. Its structural
+`codespace_read` (`preview`) returns complete valid PNG/JPEG content, not SVG or an image prefix. Its structural
 validation is not proof that a browser ran or that the screenshot is visually correct.
 Optional `max_bytes` is the caller's selected bound, not a shared transfer quota.
 
@@ -322,18 +322,18 @@ expected-content checks. Native descriptors stream to the owner without base64. 
 `~/.local/bin/moira-workspace` CLI uses the same Unix owner without requiring a cloud connection;
 fixed bootstrap updates the service in place without replacing the VM or its disks.
 
-`communication_deliver` accepts a native file at a selected controller;
-`communication_deliver_publication` sends an owned `file.reference_id`. The optional `channel`
+`communication` (`deliver`) accepts a native file at a selected controller;
+`communication` (`deliver_publication`) sends an owned `file.reference_id`. The optional `channel`
 selects a configured channel, never a recipient. Publication does not send a message, delivery
 neither consumes nor renews it, and expiry requires a separate intentional publication.
 File-capable extensions use their declared binary transport.
 
 Keep the returned `operation`, including an attachment notification's workflow result.
-`operation_get({ reference })` never uploads, renders or sends again. A closed uncertain owner
+`communication({ action: "collect", reference })` never uploads, renders or sends again. A closed uncertain owner
 outcome projects as `unconfirmed` even if its private receipt is terminal; a confirmed refusal
 remains completed with `outcome.ok:false`. One channel can remain uncertain after another succeeded.
 Discovery returns references and safe metadata, not full outcomes; collect the selected original
-explicitly. If the first reply was lost, use `operation_find` at the selected owner and choose a
+explicitly. If the first reply was lost, use `communication` (`find`) at the selected owner and choose a
 candidate deliberately. Neither one candidate nor no candidate proves which effect occurred.
 Never create a new delivery merely because collection is absent, unavailable or unconfirmed.
 
@@ -342,7 +342,7 @@ than choosing a different owner. Ordinary text remains independent. A materializ
 HTTP 409 `COMMUNICATION_OUTCOME_UNCONFIRMED` is collected through the same grant URL; it cannot
 resubmit or change owners. HTTP 422 reports an owner error and HTTP 503 an unavailable controller.
 Do not complete a workflow step without its files. A fresh `current_step` presentation is an
-explicit separate attempt; the `session materialize` text fallback requires no file owner.
+explicit separate attempt; the `execution` (`materialize`) text fallback requires no file owner.
 
 ## GitHub setup and remote readiness
 
@@ -353,7 +353,7 @@ current enrolled connection; a saved `running` observation alone does not provid
 For initial `unconfigured` or `enrollment_unavailable` remote state, first collect the original
 operation and settle its scoped SSH custody. If `CODESPACE_LOCAL_SETUP_INCOMPLETE` remains on a
 known GitHub environment, restore the selected controller and current GitHub access, then choose
-**Resume setup** or use `workspace_lifecycle({ workspace, action: "resume_setup" })` with its
+**Resume setup** or use `codespace({ action: "lifecycle", workspace, operation: "resume_setup" })` with its
 returned workspace reference. The controller uses the saved original root/repository, guest life,
 installed release and assignment proof. It performs fixed configuration and enrollment without
 provider start, payload installation, adoption or another VM. Missing proof or changed life,
@@ -372,10 +372,10 @@ A cold restart can interrupt processes and does not promise uninterrupted comman
 
 ## Local codespaces
 
-Use `command_run` or `command_run_native` with the returned workspace reference.
+Use `codespace_terminal` (`run`) or `codespace_terminal` (`run_native`) with the returned workspace reference.
 The adapter creates internal request identity; do not manufacture UUIDs or process IDs.
-A live command may return before completion. Use its `operation` for `operation_get`, and its
-`process` for `process_output` or explicit `process_stop`. Observation does not cancel work;
+A live command may return before completion. Use its `operation` for `codespace_terminal` (`collect`), and its
+`process` for `codespace_terminal` (`output`) or explicit `codespace_terminal` (`stop`). Observation does not cancel work;
 pending cancellation is not a confirmed physical stop. Deliberately identical commands are
 distinct intentions. An uncontrolled first reply has no automatic deduplication guarantee.
 
@@ -392,7 +392,7 @@ the new namespace. Explicit command deadlines and client wait bounds are separat
 
 Guest daemon diagnostics are in `~/.local/state/moira/workspace-service/daemon.log`,
 `daemon.log.1` and `daemon.log.2`, each bounded to 1 MiB. Their rotation does not trim command
-stdout/stderr. Read complete command streams with `process_output` or
+stdout/stderr. Read complete command streams with `codespace_terminal` (`output`) or
 `moira-workspace output "$PROCESS_REF" --stream stdout` (use `stderr` for that stream).
 Preserve journals and unresolved input when diagnosing an owner failure.
 
@@ -417,14 +417,14 @@ and security requests retain their separate `collect ORIGINAL_REQUEST_ID` path; 
 raw lifecycle submission. Fresh create requires cloud registration and initial Git authority.
 Already admitted VMs remain subject to current local authority offline.
 
-Use `workspace_targets` to obtain the selected controller and personal installation references.
-`repository_admit` requires current applied existing-private consent and an App-accessible
+Use `codespace` (`targets`) to obtain the selected controller and personal installation references.
+`codespace` (`repository_admit`) requires current applied existing-private consent and an App-accessible
 repository owned by the connected personal account. It cannot broaden rights; a pending settings
-revision must settle first. `repository_create` requires new-private consent. Organization
+revision must settle first. `codespace` (`repository_create`) requires new-private consent. Organization
 installations and public creation are unsupported.
 
-Preserve the returned original operation. `operation_get` is read-only; after fixing permissions,
-installation access or admission, `operation_resume` explicitly continues only the original
+Preserve the returned original operation. `codespace` (`collect`) is read-only; after fixing permissions,
+installation access or admission, `codespace` (`resume`) explicitly continues only the original
 private-repository creation. It does not restart commands or create a replacement repository.
 `setup_required` can retain a confirmed repository while admission remains incomplete.
 Unknown creation checks the retained description marker; an unrelated same-name repository or
@@ -449,7 +449,18 @@ A revoked device requires a new pairing and browser confirmation.
 Open that computer's codespace card and use **Check state again** for a pending start, stop or
 delete. It collects the original lifecycle receipt when its identity is known, otherwise it
 performs a read-only refresh. It never resubmits start/stop/delete or creates a replacement VM.
-Errors and loaders stay on the affected card.
+That refresh observes only the selected VM. Errors and loaders stay on the affected card.
+A collected successful result can describe the operation's historical observation. It remains
+confirmed if a subsequent read fails, but does not authorize another lifecycle action. Use
+**Check state again** to obtain current state before making that next decision.
+For both Local and GitHub, collection returns the same public workspace shape as the immediate
+result without another full scan. If the confirmed receipt cannot provide that snapshot, the UI
+shows **Original operation completed** and retains the same original for another check. The API
+returns `outcome:{ok:true,result:null}` with a separate safe `observation_error`; this is not an
+unknown effect or permission to create again. A lost first create reply needs no existing card to
+retain its confirmation. Current account/controller authority is still required: revocation during
+collection refuses the response even when the private operation completed. Restore the permitted
+access and inspect that same original rather than repeating the effect.
 **Delete** is available with confirmation during pending creation, cleanup or uncertain
 local state when a current summary supplies a returned workspace reference. Unavailable identities
 have no lifecycle controls. Deletion targets that same captured observation and completes only
@@ -473,25 +484,32 @@ still refresh and run. Physical startup alone does not mean guest preparation co
 an SDK error does not itself complete a local stop. Before Local create/start/stop/delete,
 use the returned target/workspace references unchanged. Lifecycle conflicts require a fresh
 observation and explicit decision, not an automatic refreshed-precondition retry.
-`operation_get` collects the retained original; `pending_operations` restores collection after
-reload. A lost first reply instead offers `operation_find` on the selected controller, with
+`codespace` (`collect`) collects the retained original; `pending_operations` restores collection after
+reload. A lost first reply instead offers `codespace` (`find`) on the selected controller, with
 explicit candidate selection. `absent` or newer metadata does not re-enable an uncertain mutation.
 
-Cloud registration is a route, not a machine observation. `workspace_observe` can report
+Cloud registration is a route, not a machine observation. `codespace` (`observe`) can report
 `CODESPACE_PROVIDER_UNAVAILABLE` without inventing state or generation. Call
-`workspace_list({ provider: "local-sandboxes", view: "diagnostics" })` for Local diagnostics, or
+`codespace({ action: "list", provider: "local-sandboxes", view: "diagnostics" })` for Local diagnostics, or
 select `provider: "github-codespaces"` for GitHub. The normal actionable list keeps current useful
 environments and known incomplete setup; diagnostics preserves uncertain or unavailable identities,
 safe errors and original-operation references without lifecycle generations. `has_diagnostics`
 points to retained diagnostics; `view: "history"` exposes confirmed retired environments.
 A selected-provider failure is not an empty inventory, and Local does not await GitHub or billing.
+Device/settings reads and exact repository Git authorization do not await all-VM native inventory.
+They still require current owner policy and binding; reachable management or a healthy heartbeat
+does not prove guest readiness or physical VM state. A pending settings request is not applied permission.
+Repository/controller choices and VM inventory load and retry independently; a delayed inventory
+does not remove the creation form or its draft. An authority or response-schema failure belonging
+to one computer makes its owner observation unavailable without hiding healthy computers or
+accepting its untrusted policy. An account-wide admission failure still refuses the request.
 In Settings, select Diagnostics or History for that provider; billing has its own read and retry
 in the GitHub subsection. A pending unknown creation
 remains collectable as its original operation, not a replacement VM. A nullable machine is not a
 default profile or permission to start.
 
 For Local `CODESPACE_LOCAL_SETUP_INCOMPLETE`, repair the reported prerequisite and choose **Resume setup**,
-`workspace_lifecycle({ workspace, action: "resume_setup" })`, or host
+`codespace({ action: "lifecycle", workspace, operation: "resume_setup" })`, or host
 `resume-setup WORKSPACE_REF`. This prepares the same known VM and preserves its files and original
 create outcome. Ordinary Start and custody `recover` do not resume setup.
 The optional `setup_failure` guides preserved-root inspection (`repository_unproven`),
@@ -499,6 +517,16 @@ Python3/libc/exclusive-publication prerequisites (`prerequisite_unavailable`), r
 repair (`repository_checkout_failed`) or fixed configuration diagnostics (`configuration_failed`).
 Unknown creation or guest settlement still requires original collection, not adoption by name.
 An owner-confirmed custody acknowledgement preserves incomplete setup; explicitly resume it afterward.
+
+Preparation retains an exact setup-attempt identity and links its security requests before issuing
+credentials. If the safe failure asks for original security collection, inspect `moira-local status --json`
+and use `moira-local collect ORIGINAL_ID` for those requests before explicitly resuming that same VM.
+Collection does not retry checkout. Older security originals without that association must be inspected
+by their known IDs; do not infer a match from time, repository or pending state. Unavailable authority,
+unconfirmed credential custody and a confirmed checkout/ref refusal require different repairs.
+Without exact evidence the diagnostic names the failed phase rather than claiming a GitHub refusal.
+Unknown physical execution retains its settlement/recovery requirement; a logical checkout refusal
+alone does not require stopping or recovering the entire VM.
 
 For `CODESPACE_LOCAL_PROTOCOL_ERROR`, coordinate matching server/companion builds and preserve
 saved identity and journals. For `CODESPACE_LOCAL_RUNTIME_ERROR`, repair the actual runtime and
@@ -538,9 +566,9 @@ On the Local host use `moira-local status --json` and `moira-local collect ORIGI
 Pure collection cannot mint a token, replay Git or cancel a live stream; absence does not
 authorize automatic reissuance. A refused issuer never enables a host-token fallback.
 
-For an unknown PR create, retain its operation and collect with `operation_get` or guest
-`moira-workspace get OPERATION_REF`. Use `pull_request_read` or `pr-find HEAD BASE` to inspect
-that head/base before a deliberate new create. Do not call `pull_request_create` again to collect.
+For an unknown PR create, retain its operation and collect with `codespace_git` (`collect`) or guest
+`moira-workspace get OPERATION_REF`. Use `codespace_git` (`read`) or `pr-find HEAD BASE` to inspect
+that head/base before a deliberate new create. Do not call `codespace_git` (`create`) again to collect.
 A pre-dispatch PR refusal can coexist with uncertain credential custody; follow the separate
 privileged security collection without issuing another token.
 
@@ -573,7 +601,9 @@ Device `active`/`enabled` and setup `ready` describe authorization and configura
 successful guest connection. A working guest Unix API is ready before optional workspace-credential
 acquisition and can remain ready while remote access is not. A held cloud reply does not hold local
 work/lifecycle admission; current runtime, generation, grant and connection are revalidated before
-applying it. Warm preparation uses configured or exact retained author data; public checkout does
+applying it. Each VM has at most one active enrollment attempt; a held response for one VM does
+not delay another VM's attempt or its retry after a confirmed failure. This does not replay commands
+or bypass current authority. Warm preparation uses configured or exact retained author data; public checkout does
 not depend on optional Git author lookup. Initial private checkout still requires current authority.
 Optional observed `remote.state` is `unconfigured`, `enrollment_unavailable`, `connecting`, `connected`,
 `unavailable` or `refused`; missing observation is unknown. Enrollment unavailability needs current
@@ -699,6 +729,11 @@ Do not erase approval/journals, create replacement state or kill arbitrary guard
 can be interrupted; mixed-edition rolling upgrade is unsupported. Live append in a matched edition
 does not make the upgrade itself uninterrupted.
 
+For the management and addressed-resource read contracts, activate the matching controller producer
+through supported maintenance before switching the server reader. An unavailable management or
+addressed-resource route does not fall back to full native inventory. Check the active release and every VM's recovery result; staging a bundle,
+server health or completed maintenance alone does not confirm that each VM recovered.
+
 Archived cloud Local policy/control, relay, grants and operational rows remain diagnostic data;
 archives do not authorize dispatch. The owner imports only verified existing native bindings
 and retains unknown outcomes. An unsupported private owner format remains refused: preserve
@@ -731,15 +766,15 @@ and resolve that refusal before enabling more work. See [local setup](/docs/gett
 User: Continue working on the auth feature
 
 Agent:
-1. session({ action: "executions", search: "auth" })
+1. execution({ action: "executions", search: "auth" })
    → Found: executionId: "abc-123", status: "waiting"
 
-2. session({ action: "current_step", executionId: "abc-123" })
+2. execution({ action: "current_step", executionId: "abc-123" })
    → attemptId: "attempt-current", directive: "Implement login endpoint"
 
 3. [Does the work]
 
-4. step({ processId: "abc-123", attemptId: "attempt-current", input: { result: "done" } })
+4. execution({ action: "step", processId: "abc-123", attemptId: "attempt-current", input: { result: "done" } })
 ```
 
 ### Scenario: Find Lost Process ID
@@ -748,10 +783,10 @@ Agent:
 User: What workflows am I running?
 
 Agent:
-1. session({ action: "executions" })
+1. execution({ action: "executions" })
    → Returns a page of active executions with notes
 
-2. session({ action: "execution_context", executionId: "abc-123" })
+2. execution({ action: "execution_context", executionId: "abc-123" })
    → Shows full context including variables
 ```
 
@@ -759,10 +794,10 @@ Agent:
 
 ```
 Agent:
-1. session({ action: "execution_context", executionId: "abc-123" })
+1. execution({ action: "execution_context", executionId: "abc-123" })
    → status: "waiting", currentNodeId: "validation-step"
 
-2. session({ action: "current_step", executionId: "abc-123" })
+2. execution({ action: "current_step", executionId: "abc-123" })
    → Shows what the workflow is waiting for
 ```
 

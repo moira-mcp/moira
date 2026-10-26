@@ -441,6 +441,7 @@ async function setup(fileDatabase = false) {
     repository: {} as never,
     audit: async () => {},
   });
+  // Inject private purpose owners; registered public groups still perform their real dispatch.
   const bindings = TOOL_BINDINGS as Record<string, unknown>;
   for (const name of Object.keys(WORKSPACE_TOOL_SCHEMAS) as WorkspaceToolName[]) {
     const original = bindings[name];
@@ -451,7 +452,8 @@ async function setup(fileDatabase = false) {
   }
   const mcp = await client();
   cleanups.push(mcp.close);
-  const created = await mcp.call("workspace_create", {
+  const created = await mcp.call("codespace", {
+    action: "create",
     target: encodeReference("target", {
       provider: "github-codespaces",
       repositoryId: "301",
@@ -640,7 +642,7 @@ describe("registered MCP tools against actual workspace and lifecycle services",
     expect(caller.pid).not.toBe(backend.pid);
     writeFileSync(join(value.root, "binary.bin"), value.nativeBytes);
     const download = await callCloud(caller, "tool", {
-      tool: "file_download",
+      tool: "codespace_download",
       request: { workspace: value.reference, path: "binary.bin" },
     });
     expect(download.isError).not.toBe(true);
@@ -780,8 +782,9 @@ describe("registered MCP tools against actual workspace and lifecycle services",
     );
     await callCloud(backend, "revoke-at-rendezvous", { resourceId: value.id });
     const refused = await callCloud(caller, "tool", {
-      tool: "command_run",
+      tool: "codespace_terminal",
       request: {
+        action: "run",
         workspace: value.reference,
         command: {
           argv: [
@@ -1091,13 +1094,15 @@ describe("registered MCP tools against actual workspace and lifecycle services",
     const value = await setup();
     const args = { workspace: value.reference };
     const source = "export const value = 1;\n";
-    const written = await value.mcp.call("file_create", {
+    const written = await value.mcp.call("codespace_edit", {
+      action: "create",
       ...args,
       path: "app.mjs",
       text: source,
     });
     expect(written.isError).not.toBe(true);
-    const patched = await value.mcp.call("file_patch", {
+    const patched = await value.mcp.call("codespace_edit", {
+      action: "patch",
       ...args,
       files: [
         {
@@ -1108,7 +1113,8 @@ describe("registered MCP tools against actual workspace and lifecycle services",
       ],
     });
     expect(patched.isError).not.toBe(true);
-    const tested = await value.mcp.call("command_run", {
+    const tested = await value.mcp.call("codespace_terminal", {
+      action: "run",
       ...args,
       command: {
         argv: [
@@ -1129,11 +1135,18 @@ describe("registered MCP tools against actual workspace and lifecycle services",
     await guest.stop(value);
     await guest.start(value);
     expect(
-      (await value.mcp.call("file_read", { ...args, path: "app.mjs" })).structuredContent,
+      (await value.mcp.call("codespace_read", { action: "read", ...args, path: "app.mjs" }))
+        .structuredContent,
     ).toMatchObject({ text: "export const value = 2;\n" });
     expect(readFileSync(join(value.root, "app.mjs"), "utf8")).toBe("export const value = 2;\n");
     expect(
-      (await value.mcp.call("file_read", { ...args, path: "app.mjs" }, OTHER_USER_ID)).isError,
+      (
+        await value.mcp.call(
+          "codespace_read",
+          { action: "read", ...args, path: "app.mjs" },
+          OTHER_USER_ID,
+        )
+      ).isError,
     ).toBe(true);
   });
 
@@ -1141,7 +1154,7 @@ describe("registered MCP tools against actual workspace and lifecycle services",
     const value = await setup();
     const args = { workspace: value.reference };
     writeFileSync(join(value.root, "binary.bin"), value.nativeBytes);
-    const boundedDownload = await value.mcp.call("file_download", {
+    const boundedDownload = await value.mcp.call("codespace_download", {
       ...args,
       path: "binary.bin",
       file_name: "binary.bin",
@@ -1153,7 +1166,7 @@ describe("registered MCP tools against actual workspace and lifecycle services",
       structuredContent: { error: { code: "CODESPACE_DOWNLOAD_BOUND_EXCEEDED" } },
     });
     expect(boundedDownload.content.some((block) => block.type === "resource_link")).toBe(false);
-    const download = await value.mcp.call("file_download", {
+    const download = await value.mcp.call("codespace_download", {
       ...args,
       path: "binary.bin",
       file_name: "binary.bin",

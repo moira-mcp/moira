@@ -65,7 +65,7 @@ export class LocalCodespaceProvider {
         "Local resource binding is missing",
       );
     const snapshot =
-      observed ?? (await this.devices.localSnapshot(record.userId, binding.deviceId));
+      observed ?? (await this.devices.localSnapshot(record.userId, binding.deviceId, record.id));
     if (snapshot.resourceObservation.state !== "available")
       throw new CodespaceResourceError(
         "CODESPACE_PROVIDER_UNAVAILABLE",
@@ -73,11 +73,26 @@ export class LocalCodespaceProvider {
       );
     const match = snapshot.resources.find((resource) => resource.resourceId === record.id);
     if (!match?.space) return null;
-    const parsed = localResourceSnapshotSchema.safeParse({
+    return this.fromSnapshot(localCodespaceCredential(record.userId), record.id, {
       deviceId: binding.deviceId,
       creation: { state: "manifest", spaceId: match.space.id },
       spaces: [match.space],
     });
+  }
+  /** Project the exact observation captured by a completed lifecycle receipt without another read. */
+  async fromSnapshot(
+    credential: string,
+    name: string,
+    value: unknown,
+  ): Promise<CodespaceProviderResource | null> {
+    const record = await this.exactRecord(credential, name);
+    const binding = this.devices.getBinding(record.userId, record.id);
+    if (!binding)
+      throw new CodespaceResourceError(
+        "CODESPACE_AUTHORIZATION_REQUIRED",
+        "Local resource binding is missing",
+      );
+    const parsed = localResourceSnapshotSchema.safeParse(value);
     if (!parsed.success)
       throw new CodespaceResourceError(
         "CODESPACE_LOCAL_PROTOCOL_ERROR",

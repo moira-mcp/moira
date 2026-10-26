@@ -463,8 +463,8 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
           agentErrorMessage =
             `STEP_BLOCKED: This step's expression needs saved execution variables that its answer ` +
             `cannot supply: ${missingState.join(", ")}. Do not retry the same answer. ` +
-            `Call session({ action: "diagnose", executionId: "${context.executionId}" }), ` +
-            `then session({ action: "recover", executionId: "${context.executionId}", ` +
+            `Call execution({ action: "diagnose", executionId: "${context.executionId}" }), ` +
+            `then execution({ action: "recover", executionId: "${context.executionId}", ` +
             `nodeId: "${currentNode.id}", variableValues: { ... } }) with the missing values.`;
         }
 

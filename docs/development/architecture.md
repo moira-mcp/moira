@@ -128,13 +128,34 @@ implementation. Production workflow and execution state does not live in a graph
 Repository reads still require the appropriate user/resource authorization at their caller or
 domain service; possession of a storage adapter is not authority.
 
-There are distinct revisions: saved workflow definitions use optimistic write revisions; executions
-have step-generation revisions and separately guarded metadata; Notes, Playbooks and global settings
-use append-only content revisions. Do not interchange these tokens. The
+There are distinct revisions: a workflow's authored `metadata.version` is its semantic version;
+saved definitions have optimistic write revisions and separately numbered immutable content
+snapshots. Executions have step-generation revisions and separately guarded metadata. Workflows,
+Notes, Playbooks and global settings use append-only content revisions. Do not interchange these tokens. The
 [shared revision repository](../../packages/shared/src/database/repositories/revision-repository.ts)
 stores an opaque entity kind/ID, revision content and retention chosen by its entity owner. History
 lists transfer bounded previews, comparison distinguishes a missing revision from equal content,
 and restoring appends a revision. Null content is distinct from an absent or pruned revision.
+
+Workflow history stores complete, independently gzip-compressed JSON payloads. Object keys use
+locale-independent ordinal ordering; array order remains significant. Equal canonical content
+shares one payload within the same workflow, while every save retains its own revision number,
+author and timestamp. Reads and comparisons return formatted JSON. Lists read a bounded stored
+preview without decompressing every payload. Deleting or pruning a revision removes its payload
+only after the last reference is gone; Notes, Playbooks and settings retain their text storage.
+The schema initializer atomically converts existing workflow history to this representation,
+preserving revision metadata. Conversion is idempotent; malformed content fails rather than
+discarding the original history.
+
+Workflow snapshots and graph writes share the owning synchronous transaction. Ordinary guarded
+mutations also keep the optimistic check and gate recomputation in that transaction. Catalog
+reconciliation and stored definition upgrades use the same history writer. A definition without history gains its actual
+preceding baseline at its next content write. Historical content requires editing authority;
+publication of the current definition does not publish its private past. Rollback validates the
+selected content and appends a guarded save while preserving current identity and sharing.
+Soft deletion retains history; permanent workflow/account deletion removes owned history.
+See [HTTP history operations](../reference/http-api.md#workflow-content-history) and the
+[author guide](../../packages/mcp-server/src/help/content/guides/editing-workflows.md#definition-versions-and-saved-history).
 
 List selection, predicates, count and pagination belong in the shared query/repository layer;
 enrich the selected page rather than filtering it afterwards. Overview reads use a consistent

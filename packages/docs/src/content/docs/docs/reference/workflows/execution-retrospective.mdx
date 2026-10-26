@@ -6,12 +6,12 @@ description: Evidence-backed analysis of one Moira execution with reviewed impro
 Execution Retrospective analyzes one completed, interrupted, or failed Moira execution from authorized execution context, agent-session evidence, artifacts, reviews, retries, user corrections, and terminal behavior. It produces prioritized proposals for improving the result, workflow definition, or system prompt without changing the subject execution.
 
 ```bash
-mcp__moira__start({
+mcp__moira__execution({
   action: "prepare",
   workflowId: "moira/execution-retrospective",
   parentExecutionId: "none"
 })
-mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
+mcp__moira__execution({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 Give the execution to analyze at intake. Its identity is separate from the parent: a completed

@@ -54,7 +54,7 @@ describe("Upload workflow via token with visibility parameter", () => {
    * Helper to get upload token via MCP
    */
   async function getUploadToken(): Promise<string> {
-    const rawResult = await callMCPTool<string>(mcpClient, "token", {
+    const rawResult = await callMCPTool<string>(mcpClient, "workflow", {
       action: "upload",
       ttlMinutes: 60,
     });
@@ -108,7 +108,7 @@ describe("Upload workflow via token with visibility parameter", () => {
     createdWorkflows.push(workflowId);
 
     // Verify visibility via MCP (same user who owns the token)
-    const verifyResult = await callMCPTool(mcpClient, "manage", {
+    const verifyResult = await callMCPTool(mcpClient, "workflow", {
       action: "get",
       workflowId,
     });

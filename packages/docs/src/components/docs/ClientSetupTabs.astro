@@ -4,7 +4,7 @@
  * Uses the shared client registry as single data source.
  * Renders Starlight-compatible Tabs/TabItem with setup instructions and token auth.
  */
-import { Tabs, TabItem } from "@astrojs/starlight/components";
+import { Tabs, TabItem, LinkButton } from "@astrojs/starlight/components";
 import CodeBlock from "~/components/ui/CodeBlock.astro";
 import { getMcpUrl } from "@mcp-moira/shared/urls";
 import { mcpClients as canonicalMcpClients } from "@mcp-moira/shared/mcp-clients";
@@ -13,7 +13,7 @@ import {
   getClientSetupPresentation,
   resolveClientDeeplink,
   type HelpLanguage,
-} from "@mcp-moira/mcp-server/help-contract";
+} from "@mcp-moira/shared/mcp-clients";
 
 interface Props {
   lang?: HelpLanguage;
@@ -30,87 +30,50 @@ const presentations = getClientSetupPresentation(lang, mcpUrl, clients);
     presentations.map((presentation) => (
       <TabItem label={presentation.label}>
         <div class="space-y-4">
-          {/* GUI / Config: description + code block */}
-          {(presentation.client.setupType === "gui" ||
-            presentation.client.setupType === "config") && (
-            <Fragment>
-              <p>{presentation.description}</p>
-              <CodeBlock
-                code={presentation.primary!.code}
-                language={presentation.primary!.language}
-                title={presentation.primary!.title}
-              />
-            </Fragment>
+          <p class="whitespace-pre-line">{presentation.setup}</p>
+          {presentation.primary && (
+            <CodeBlock
+              code={presentation.primary.code}
+              language={presentation.primary.language}
+              title={presentation.primary.title}
+            />
           )}
-
-          {/* CLI: recommended + primary command + auth + alternative */}
-          {presentation.client.setupType === "cli" && (
-            <Fragment>
-              <p>
-                <strong>{presentation.recommended}</strong>
-              </p>
-              <CodeBlock
-                code={presentation.primary!.code}
-                language={presentation.primary!.language}
-                title={presentation.primary!.title}
-              />
-              <p>{presentation.authIntro}</p>
-              <CodeBlock
-                code={presentation.auth!.code}
-                language={presentation.auth!.language}
-                title={presentation.auth!.title}
-              />
-              <details>
-                <summary>{presentation.alternativeTitle}</summary>
-                <div class="mt-2">
-                  <CodeBlock
-                    code={presentation.alternative!.code}
-                    language={presentation.alternative!.language}
-                    title={presentation.alternative!.title}
-                  />
-                </div>
-              </details>
-            </Fragment>
+          {presentation.deeplink && (
+            <LinkButton
+              href={resolveClientDeeplink(presentation, mcpUrl)!}
+              aria-label={presentation.deeplink.ariaLabel}
+              icon="download"
+              iconPlacement="start"
+            >
+              {presentation.deeplink.label}
+            </LinkButton>
           )}
-
-          {/* Deeplink: recommended + button + auth + alternative */}
-          {presentation.client.setupType === "deeplink" && (
-            <Fragment>
-              <p>
-                <strong>{presentation.recommended}</strong>
-              </p>
-              <a
-                href={resolveClientDeeplink(presentation, mcpUrl)}
-                aria-label={presentation.deeplinkAriaLabel}
-                class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors no-underline"
-              >
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                  />
-                </svg>
-                {presentation.deeplinkButton}
-              </a>
-              <p>{presentation.authIntro}</p>
-              <CodeBlock
-                code={presentation.auth!.code}
-                language={presentation.auth!.language}
-                title={presentation.auth!.title}
-              />
-              <details>
-                <summary>{presentation.alternativeTitle}</summary>
-                <div class="mt-2">
-                  <CodeBlock
-                    code={presentation.alternative!.code}
-                    language={presentation.alternative!.language}
-                    title={presentation.alternative!.title}
-                  />
-                </div>
-              </details>
-            </Fragment>
+          <p class="whitespace-pre-line">{presentation.authIntro}</p>
+          {presentation.auth && (
+            <CodeBlock
+              code={presentation.auth.code}
+              language={presentation.auth.language}
+              title={presentation.auth.title}
+            />
+          )}
+          {presentation.alternative && (
+            <details>
+              <summary>
+                {presentation.alternativeTitle ??
+                  presentation.alternative.title ??
+                  presentation.label}
+              </summary>
+              <div class="mt-2">
+                {presentation.alternativeDescription && (
+                  <p class="whitespace-pre-line">{presentation.alternativeDescription}</p>
+                )}
+                <CodeBlock
+                  code={presentation.alternative.code}
+                  language={presentation.alternative.language}
+                  title={presentation.alternative.title}
+                />
+              </div>
+            </details>
           )}
 
           {/* Token Auth: collapsible section for API token as OAuth alternative */}
@@ -134,10 +97,7 @@ const presentations = getClientSetupPresentation(lang, mcpUrl, clients);
               </summary>
               <div class="px-4 pb-4 space-y-3">
                 <p class="text-sm">{presentation.tokenAuth.description}</p>
-                <div
-                  class="text-sm"
-                  set:html={presentation.tokenAuth.steps.replace(/\n/g, "<br>")}
-                />
+                <p class="text-sm whitespace-pre-line">{presentation.tokenAuth.steps}</p>
                 <CodeBlock
                   code={presentation.tokenAuth.code.code}
                   language={presentation.tokenAuth.code.language}
@@ -146,6 +106,10 @@ const presentations = getClientSetupPresentation(lang, mcpUrl, clients);
               </div>
             </details>
           )}
+          <p class="whitespace-pre-line">{presentation.verification}</p>
+          <a href={presentation.officialDocs.url} target="_blank" rel="noopener noreferrer">
+            {presentation.officialDocs.label}
+          </a>
         </div>
       </TabItem>
     ))

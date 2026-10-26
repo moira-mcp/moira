@@ -124,7 +124,8 @@ describe("MCP Help System E2E", () => {
     });
 
     expect(typeof result).toBe("string");
-    expect(result).toContain("## `step`");
+    expect(result).toContain("## `execution`");
+    expect(result).toContain('"const": "step"');
     expect(result).toContain("Continue an existing workflow execution.");
     expect(result).toContain("### Input schema");
     expect(result).toContain('"processId"');

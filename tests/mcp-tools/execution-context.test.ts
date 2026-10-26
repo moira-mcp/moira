@@ -23,7 +23,7 @@ describe("MCP Execution Context Tools E2E", () => {
     cleanup = mcpClient.cleanup;
 
     // Dedicated workflow that pauses on an agent-directive, so the execution stays inspectable
-    const created = await callMCPTool(client, "manage", {
+    const created = await callMCPTool(client, "workflow", {
       action: "create",
       workflow: {
         metadata: {
@@ -61,7 +61,7 @@ describe("MCP Execution Context Tools E2E", () => {
   });
 
   test("get_execution_context returns execution state", async () => {
-    const context = await callMCPTool(client, "session", {
+    const context = await callMCPTool(client, "execution", {
       action: "execution_context",
       executionId: testExecutionId,
     });

@@ -6,12 +6,12 @@ description: Builds one verified screencast video from a source-backed story, lo
 Agentic Screencast Video turns a stated subject into a finished video presentation. It fixes what the video must show and for whom, checks that the local environment can render and narrate, then works through facts, story, materials and narration, reviewing each artifact independently before the next one depends on it.
 
 ```bash
-mcp__moira__start({
+mcp__moira__execution({
   action: "prepare",
   workflowId: "moira/agentic-screencast-video",
   parentExecutionId: "none"
 })
-mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
+mcp__moira__execution({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 ## Evidence and process

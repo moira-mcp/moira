@@ -12,12 +12,12 @@ The workflow is analysis-first. It changes the repository only when the user exp
 ## Start
 
 ```js
-mcp__moira__start({
+mcp__moira__execution({
   action: "prepare",
   workflowId: "moira/test-suite-audit",
   parentExecutionId: "none"
 })
-mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
+mcp__moira__execution({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 The caller should identify the project and desired audit boundary. The workflow discovers applicable project instructions, languages, frameworks, runners, source and test roots, exclusions, dirty-work boundaries, available commands, and permitted operations. It asks only for a material fact or decision that cannot be discovered safely.
@@ -115,7 +115,7 @@ Report-producing outcomes are distinct:
 
 Local delivery has no external side effect. Publication uploads only the independently reviewed self-contained `report.html` through the authorized Moira static-artifact file/archive API. Raw source files, workspace evidence, and sensitive records are not uploaded. The workflow returns a URL only after observing a real successful upload; upload failure leaves an empty URL and remains visible.
 
-A user notification is attempted through the authenticated `communication_send` tool only after explicit `publish_notify` selection and a real report URL. The message states the factual outcome, limitations, and exact test summary. Notification failure does not invalidate the reviewed local report or successful upload, but remains visible in `notification_state`.
+A user notification is attempted through the authenticated `communication` (`action: "send"`) tool only after explicit `publish_notify` selection and a real report URL. The message states the factual outcome, limitations, and exact test summary. Notification failure does not invalidate the reviewed local report or successful upload, but remains visible in `notification_state`.
 
 The final review checks privacy, licensing, minimization, publication safety, stale evidence, and unsupported success language. The workflow never discovers credentials or broadens access.
 

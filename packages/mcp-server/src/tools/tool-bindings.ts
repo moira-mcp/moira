@@ -1,8 +1,17 @@
 import type { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
-import type { AnyToolDefinition, McpToolName, ToolResponsePolicy } from "./tool-definitions.js";
-import { renderToolReference } from "./tool-definitions.js";
+import type {
+  AnyToolDefinition,
+  InternalToolDefinition,
+  InternalToolName,
+  ToolResponsePolicy,
+} from "./tool-definitions.js";
+import {
+  renderToolReference,
+  resolvePublicTool,
+  getInternalToolDefinition,
+} from "./tool-definitions.js";
 import { WORKSPACE_TOOL_SCHEMAS, type WorkspaceToolName } from "./workspace-tool-contract.js";
 
 export type ToolCallResult = CallToolResult;
@@ -15,10 +24,10 @@ interface ToolResultLike {
 }
 
 type ToolInvocationResult = CallToolResult | ToolResultLike;
-type DefinitionFor<Name extends McpToolName> = Extract<AnyToolDefinition, { name: Name }>;
-type ToolParams<Name extends McpToolName> = z.infer<DefinitionFor<Name>["schema"]>;
+type DefinitionFor<Name extends InternalToolName> = Extract<InternalToolDefinition, { name: Name }>;
+type ToolParams<Name extends InternalToolName> = z.infer<DefinitionFor<Name>["schema"]>;
 type ToolBindings = {
-  [Name in McpToolName]: (params: ToolParams<Name>) => Promise<ToolInvocationResult>;
+  [Name in InternalToolName]: (params: ToolParams<Name>) => Promise<ToolInvocationResult>;
 };
 
 function isToolResultLike(result: ToolInvocationResult): result is ToolResultLike {
@@ -105,10 +114,14 @@ export async function invokeToolDefinition(
   definition: AnyToolDefinition,
   params: unknown,
 ): Promise<CallToolResult> {
-  const parsed = definition.schema.parse(params);
-  const invoke = TOOL_BINDINGS[definition.name] as (
-    validated: typeof parsed,
+  const resolved = resolvePublicTool(definition.name, params);
+  const original = getInternalToolDefinition(resolved.purpose);
+  // The public branch already validated the complete input. Re-parsing the former broad
+  // published schema would strip authored graph extension fields before their owner sees them.
+  const parsed = resolved.params;
+  const invoke = TOOL_BINDINGS[original.name] as (
+    validated: unknown,
   ) => Promise<ToolInvocationResult>;
   const result = await invoke(parsed);
-  return isToolResultLike(result) ? renderToolResult(result, definition.responsePolicy) : result;
+  return isToolResultLike(result) ? renderToolResult(result, original.responsePolicy) : result;
 }

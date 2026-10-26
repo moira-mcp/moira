@@ -27,7 +27,7 @@ These fragments assume the workflow declares tasks (array), resume_from_task (in
 ## 1. The entry is a teleport
 
 A `teleport` node has no ordinary incoming connections, so no route walks into it: an agent reaches
-it only with `step({ processId, attemptId, teleportTo: "..." })`, using the attempt ID from the
+it only with `execution({ action: "step", processId, attemptId, teleportTo: "..." })`, using the attempt ID from the
 current presentation. Its `hint` is appended to every step of the
 run, which makes the hint the place to state both when the jump is legitimate and when it is abuse.
 The abuse boundary is the important half — a failing check, a flaky test, an unwelcome review
@@ -97,7 +97,7 @@ declared in `variableRegistry`.
 
 ## Why not an API that sets variables directly
 
-The platform supports policy-controlled `session set-variable`: it requires a declared registry variable, explicit external-write policy for the current paused step, current execution/context revisions and a schema-valid value, and records the adjustment. It is not an unrestricted bypass. For substantive plan or checklist revision, prefer the authored teleport/owner route: it preserves reasoning, dependent-state derivation and required review/approval. An allowed single-variable edit alone does not perform that process.
+The platform supports policy-controlled `execution` (`set-variable`): it requires a declared registry variable, explicit external-write policy for the current paused step, current execution/context revisions and a schema-valid value, and records the adjustment. It is not an unrestricted bypass. For substantive plan or checklist revision, prefer the authored teleport/owner route: it preserves reasoning, dependent-state derivation and required review/approval. An allowed single-variable edit alone does not perform that process.
 
 ## When a workflow needs this
 

@@ -189,12 +189,22 @@ Three small flows for getting to know Moira: a straight sequence of steps, one f
 Start any workflow:
 
 ```bash
-mcp__moira__start({ action: "prepare", workflowId: "moira/quick-task", parentExecutionId: "none" })
-mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
+mcp__moira__execution({ action: "prepare", workflowId: "moira/quick-task", parentExecutionId: "none" })
+mcp__moira__execution({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
+
+Copy the returned Start attempt ID unchanged into `startAttemptId`. Preparation reserves an
+attempt and a Process ID; it does not create an execution. Only a successful execute confirms
+the run and returns its current Step attempt. Use the actual running parent's execution ID for
+`parentExecutionId`, or `"none"` for a standalone run.
+
+If the execute reply is lost, collect the same start attempt rather than preparing another.
+`ATTEMPT_PROCESSING` retains that attempt. For `ATTEMPT_OUTCOME_UNKNOWN`, inspect the reserved
+Process ID through `execution` with `action: "current_step"` or `action: "execution_context"`
+and follow its diagnosis; do not automatically execute again or create a new attempt.
 
 List available workflows:
 
 ```bash
-mcp__moira__list()
+mcp__moira__workflow({ action: "list" })
 ```

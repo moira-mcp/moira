@@ -1,393 +1,207 @@
+import { execFileSync } from "node:child_process";
 import { describe, it, expect } from "@jest/globals";
+import { parse as parseYaml } from "yaml";
+import { parse as parseToml } from "smol-toml";
 import {
-  mcpClients,
   getClientById,
   getClientsByCategory,
   getClientIds,
   CLIENT_COUNT,
-  generateMcpConfig,
-  generateClaudeCodeCommand,
-  generateCopilotCliConfig,
+  configGenerators,
+  tokenConfigGenerators,
   generateCursorDeeplink,
   generateVSCodeDeeplink,
-  generateContinueConfig,
-  generateZedConfig,
-  generateGeminiCliConfig,
-  configGenerators,
-  deeplinkGenerators,
-  generateMcpConfigWithToken,
-  generateCopilotCliConfigWithToken,
-  generateContinueConfigWithToken,
-  generateZedConfigWithToken,
-  generateGeminiCliConfigWithToken,
-  tokenConfigGenerators,
+  getClientSetupPresentation,
+  resolveClientDeeplink,
 } from "@mcp-moira/shared/mcp-clients";
-import type { McpClient } from "@mcp-moira/shared/mcp-clients";
 
-describe("mcp-clients", () => {
-  describe("client registry", () => {
-    it("has all 11 clients", () => {
-      expect(mcpClients).toHaveLength(11);
-      expect(CLIENT_COUNT).toBe(11);
-    });
+const configuredUrl = "https://self.example/путь?x=a'b&value=$&";
+const bearer = "Bearer moira_YOUR_TOKEN";
 
-    it("each client has required fields", () => {
-      for (const client of mcpClients) {
-        expect(client.id).toBeTruthy();
-        expect(client.name).toBeTruthy();
-        expect(client.description).toBeTruthy();
-        expect(client.configLanguage).toBeTruthy();
-        expect(client.setupType).toBeTruthy();
-        expect(client.category).toBeTruthy();
-        expect(typeof client.requiresOAuth).toBe("boolean");
+describe("MCP client configuration", () => {
+  it("offers the supported clients, including Codex and Kimi, without duplicate tabs", () => {
+    expect(getClientIds()).toEqual([
+      "claude-code",
+      "copilot-cli",
+      "cursor",
+      "claude-desktop",
+      "vscode",
+      "claude-web",
+      "chatgpt",
+      "perplexity",
+      "continue",
+      "zed",
+      "gemini-cli",
+      "codex",
+      "kimi-code",
+    ]);
+    expect(CLIENT_COUNT).toBe(13);
+    expect(getClientById("codex")?.name).toBe("Codex");
+    expect(getClientById("unknown")).toBeUndefined();
+    expect(getClientsByCategory("web").map(({ id }) => id)).toEqual([
+      "claude-web",
+      "chatgpt",
+      "perplexity",
+    ]);
+  });
+
+  it.each(["mcp-json", "claude-code-json", "copilot-cli-json", "gemini-cli-json"] as const)(
+    "%s retains its native JSON transport and the exact selected endpoint",
+    (id) => {
+      const parsed = JSON.parse(configGenerators[id](configuredUrl));
+      const entry = parsed.mcpServers.moira;
+      if (id === "gemini-cli-json") {
+        expect(entry).toEqual({ httpUrl: configuredUrl });
+      } else if (id === "mcp-json") {
+        expect(entry).toEqual({ url: configuredUrl });
+      } else if (id === "copilot-cli-json") {
+        expect(entry).toEqual({ type: "http", url: configuredUrl, tools: ["*"] });
+      } else {
+        expect(entry).toEqual({ type: "http", url: configuredUrl });
       }
-    });
+    },
+  );
 
-    it("each client has setup panel data", () => {
-      for (const client of mcpClients) {
-        expect(client.setup).toBeDefined();
-        expect(typeof client.setup).toBe("object");
-      }
+  it("uses VS Code servers and Zed context_servers instead of generic mcpServers", () => {
+    expect(JSON.parse(configGenerators["vscode-json"](configuredUrl))).toEqual({
+      servers: { moira: { type: "http", url: configuredUrl } },
     });
-
-    it("client IDs are unique", () => {
-      const ids = mcpClients.map((c) => c.id);
-      expect(new Set(ids).size).toBe(ids.length);
+    expect(JSON.parse(configGenerators["zed-json"](configuredUrl))).toEqual({
+      context_servers: { moira: { url: configuredUrl } },
     });
   });
 
-  describe("setup panel structure by setupType", () => {
-    function getClientsBySetupType(type: string): McpClient[] {
-      return mcpClients.filter((c) => c.setupType === type);
-    }
-
-    it("gui clients have primaryTitle", () => {
-      const guiClients = getClientsBySetupType("gui");
-      expect(guiClients.length).toBeGreaterThan(0);
-      for (const client of guiClients) {
-        expect(client.setup.primaryTitle).toBeTruthy();
-      }
+  it("parses Continue as an active YAML fragment with Streamable HTTP and nested token headers", () => {
+    const primary = getClientSetupPresentation("en", configuredUrl).find(
+      ({ client }) => client.id === "continue",
+    )!;
+    const parsed = parseYaml(primary.primary!.code);
+    expect(parsed).toEqual({
+      mcpServers: [
+        {
+          name: "moira",
+          type: "streamable-http",
+          url: configuredUrl,
+          requestOptions: { headers: { Authorization: bearer } },
+        },
+      ],
     });
+    expect(primary.tokenAuth).toBeUndefined();
+  });
 
-    it("cli clients have primaryGenerator, auth, and alternative", () => {
-      const cliClients = getClientsBySetupType("cli");
-      expect(cliClients.length).toBeGreaterThan(0);
-      for (const client of cliClients) {
-        expect(client.setup.primaryGenerator).toBeTruthy();
-        expect(client.setup.auth).toBeDefined();
-        expect(client.setup.auth!.language).toBeTruthy();
-        expect(client.setup.auth!.title).toBeTruthy();
-        expect(client.setup.alternative).toBeDefined();
-        expect(client.setup.alternative!.language).toBeTruthy();
-      }
-    });
-
-    it("deeplink clients have deeplinkGenerator, auth, and alternative", () => {
-      const deeplinkClients = getClientsBySetupType("deeplink");
-      expect(deeplinkClients.length).toBeGreaterThan(0);
-      for (const client of deeplinkClients) {
-        expect(client.deeplinkGenerator).toBeTruthy();
-        expect(client.setup.auth).toBeDefined();
-        expect(client.setup.auth!.language).toBeTruthy();
-        expect(client.setup.auth!.title).toBeTruthy();
-        expect(client.setup.alternative).toBeDefined();
-        expect(client.setup.alternative!.language).toBeTruthy();
-      }
-    });
-
-    it("config clients have primaryTitle and primaryGenerator", () => {
-      const configClients = getClientsBySetupType("config");
-      expect(configClients.length).toBeGreaterThan(0);
-      for (const client of configClients) {
-        expect(client.setup.primaryTitle).toBeTruthy();
-        expect(client.setup.primaryGenerator).toBeTruthy();
-      }
-    });
-
-    it("non-gui clients have tokenAuth setup", () => {
-      const nonGuiClients = mcpClients.filter((c) => c.setupType !== "gui");
-      expect(nonGuiClients.length).toBeGreaterThan(0);
-      for (const client of nonGuiClients) {
-        expect(client.setup.tokenAuth).toBeDefined();
-        expect(client.setup.tokenAuth!.language).toBeTruthy();
-        expect(client.setup.tokenAuth!.generator).toBeTruthy();
-      }
-    });
-
-    it("gui clients do not have tokenAuth setup", () => {
-      const guiClients = getClientsBySetupType("gui");
-      for (const client of guiClients) {
-        expect(client.setup.tokenAuth).toBeUndefined();
-      }
+  it("parses Codex TOML without treating a token environment variable as a token value", () => {
+    const expected = { mcp_servers: { moira: { url: configuredUrl } } };
+    expect(parseToml(configGenerators["codex-toml"](configuredUrl))).toEqual(expected);
+    expect(parseToml(tokenConfigGenerators["codex-toml-token"](configuredUrl))).toEqual({
+      mcp_servers: { moira: { url: configuredUrl, bearer_token_env_var: "MOIRA_API_TOKEN" } },
     });
   });
 
-  describe("client ordering", () => {
-    it("has claude-code first, copilot-cli second, cursor third", () => {
-      expect(mcpClients[0].id).toBe("claude-code");
-      expect(mcpClients[1].id).toBe("copilot-cli");
-      expect(mcpClients[2].id).toBe("cursor");
+  it.each([
+    ["mcp-json-token", "mcpServers", { url: configuredUrl }],
+    ["claude-code-json-token", "mcpServers", { type: "http", url: configuredUrl }],
+    ["copilot-cli-json-token", "mcpServers", { type: "http", url: configuredUrl, tools: ["*"] }],
+    ["vscode-json-token", "servers", { type: "http", url: configuredUrl }],
+    ["zed-json-token", "context_servers", { url: configuredUrl }],
+    ["gemini-cli-json-token", "mcpServers", { httpUrl: configuredUrl }],
+  ] as const)("%s puts bearer auth in its client's native entry", (id, key, entry) => {
+    expect(JSON.parse(tokenConfigGenerators[id](configuredUrl))).toEqual({
+      [key]: { moira: { ...entry, headers: { Authorization: bearer } } },
     });
   });
 
-  describe("no mcp-remote in HTTP-capable generators", () => {
-    const testUrl = "https://moira.example.com/mcp";
+  it.each([
+    ["claude-code-cli", "claude", ["mcp", "add", "--transport", "http", "moira"]],
+    ["copilot-cli-command", "copilot", ["mcp", "add", "--transport", "http", "moira"]],
+    ["gemini-cli-command", "gemini", ["mcp", "add", "--transport", "http", "moira"]],
+    ["codex-cli", "codex", ["mcp", "add", "moira", "--url"]],
+  ] as const)(
+    "%s passes a special-character URL as one literal shell argument",
+    (id, binary, prefix) => {
+      const url = `${configuredUrl}&d=$HOME&sub=$(printf WRONG)&tick=\`printf WRONG\`&quote="`;
+      const output = execFileSync("/bin/sh", [
+        "-c",
+        `${binary}() { printf '%s\\0' "$@"; }; ${configGenerators[id](url)}`,
+      ]);
+      expect(output.toString().split("\0").slice(0, -1)).toEqual([...prefix, url]);
+    },
+  );
 
-    it("generateMcpConfig does not use mcp-remote", () => {
-      expect(generateMcpConfig(testUrl)).not.toContain("mcp-remote");
+  it("decodes Cursor and VS Code install links to one native server with the selected URL", () => {
+    const cursor = new URL(generateCursorDeeplink(configuredUrl));
+    expect(cursor.searchParams.get("name")).toBe("moira");
+    expect(
+      JSON.parse(Buffer.from(cursor.searchParams.get("config")!, "base64").toString("utf8")),
+    ).toEqual({ url: configuredUrl });
+    const vscode = generateVSCodeDeeplink(configuredUrl);
+    expect(JSON.parse(decodeURIComponent(vscode.split("?")[1]))).toEqual({
+      name: "moira",
+      type: "http",
+      url: configuredUrl,
     });
-
-    it("generateClaudeCodeCommand does not use mcp-remote", () => {
-      expect(generateClaudeCodeCommand(testUrl)).not.toContain("mcp-remote");
-    });
-
-    it("generateContinueConfig does not use mcp-remote", () => {
-      expect(generateContinueConfig(testUrl)).not.toContain("mcp-remote");
-    });
-
-    it("generateCopilotCliConfig does not use mcp-remote", () => {
-      expect(generateCopilotCliConfig(testUrl)).not.toContain("mcp-remote");
-    });
-
-    it("generateZedConfig does not use mcp-remote", () => {
-      expect(generateZedConfig(testUrl)).not.toContain("mcp-remote");
-    });
-
-    it("generateGeminiCliConfig does not use mcp-remote", () => {
-      expect(generateGeminiCliConfig(testUrl)).not.toContain("mcp-remote");
-    });
+    const presentation = getClientSetupPresentation("en", configuredUrl).find(
+      ({ client }) => client.id === "vscode",
+    )!;
+    expect(resolveClientDeeplink(presentation, configuredUrl)).toBe(vscode);
   });
 
-  describe("generator references resolve correctly", () => {
-    it("all primaryGenerator references exist in configGenerators", () => {
-      for (const client of mcpClients) {
-        if (client.setup.primaryGenerator) {
-          expect(configGenerators[client.setup.primaryGenerator]).toBeDefined();
-          expect(typeof configGenerators[client.setup.primaryGenerator]).toBe("function");
-        }
-      }
-    });
+  it.each(["en", "ru"] as const)(
+    "%s gives ChatGPT a direct setup link while retaining the selected server URL",
+    (language) => {
+      const presentation = getClientSetupPresentation(language, configuredUrl).find(
+        ({ client }) => client.id === "chatgpt",
+      )!;
+      expect(resolveClientDeeplink(presentation, configuredUrl)).toBe(
+        "https://chatgpt.com/plugins",
+      );
+      expect(presentation.deeplink?.label).toBe(
+        language === "en" ? "Open ChatGPT plugins" : "Открыть плагины ChatGPT",
+      );
+      expect(presentation.primary?.code).toBe(configuredUrl);
+    },
+  );
 
-    it("all alternative generator references exist in configGenerators", () => {
-      for (const client of mcpClients) {
-        if (client.setup.alternative?.generator) {
-          expect(configGenerators[client.setup.alternative.generator]).toBeDefined();
-          expect(typeof configGenerators[client.setup.alternative.generator]).toBe("function");
-        }
-      }
-    });
-
-    it("all deeplinkGenerator references exist in deeplinkGenerators", () => {
-      for (const client of mcpClients) {
-        if (client.deeplinkGenerator) {
-          expect(deeplinkGenerators[client.deeplinkGenerator]).toBeDefined();
-          expect(typeof deeplinkGenerators[client.deeplinkGenerator]).toBe("function");
-        }
-      }
-    });
-
-    it("all configGenerators produce non-empty string output", () => {
-      const testUrl = "https://moira.example.com/mcp";
-      for (const [id, generator] of Object.entries(configGenerators)) {
-        const result = generator(testUrl);
-        expect(result).toBeTruthy();
-        expect(typeof result).toBe("string");
-        expect(result.length).toBeGreaterThan(0);
-      }
-    });
-
-    it("all deeplinkGenerators produce valid URL output", () => {
-      const testUrl = "https://moira.example.com/mcp";
-      for (const [id, generator] of Object.entries(deeplinkGenerators)) {
-        const result = generator(testUrl);
-        expect(result).toBeTruthy();
-        expect(typeof result).toBe("string");
-        expect(result).toMatch(/^(cursor|vscode):/);
-      }
-    });
-
-    it("all tokenAuth generator references exist in tokenConfigGenerators", () => {
-      for (const client of mcpClients) {
-        if (client.setup.tokenAuth?.generator) {
-          expect(tokenConfigGenerators[client.setup.tokenAuth.generator]).toBeDefined();
-          expect(typeof tokenConfigGenerators[client.setup.tokenAuth.generator]).toBe("function");
-        }
-      }
-    });
-
-    it("all tokenConfigGenerators produce non-empty string with Bearer token placeholder", () => {
-      const testUrl = "https://moira.example.com/mcp";
-      for (const [id, generator] of Object.entries(tokenConfigGenerators)) {
-        const result = generator(testUrl);
-        expect(result).toBeTruthy();
-        expect(typeof result).toBe("string");
-        expect(result).toContain("moira_YOUR_TOKEN");
-        expect(result).toContain("Bearer");
-        expect(result).toContain(testUrl);
-      }
-    });
-  });
-
-  describe("getClientById", () => {
-    it("finds existing client", () => {
-      const client = getClientById("cursor");
-      expect(client).toBeDefined();
-      expect(client?.name).toBe("Cursor");
-    });
-
-    it("returns undefined for unknown id", () => {
-      expect(getClientById("nonexistent")).toBeUndefined();
-    });
-  });
-
-  describe("getClientsByCategory", () => {
-    it("filters by IDE category", () => {
-      const ideClients = getClientsByCategory("ide");
-      expect(ideClients.length).toBeGreaterThan(0);
-      for (const c of ideClients) {
-        expect(c.category).toBe("ide");
-      }
-    });
-
-    it("returns empty for unknown category", () => {
-      expect(getClientsByCategory("unknown" as never)).toHaveLength(0);
-    });
-  });
-
-  describe("getClientIds", () => {
-    it("returns all IDs", () => {
-      const ids = getClientIds();
-      expect(ids).toHaveLength(11);
-      expect(ids).toContain("cursor");
-      expect(ids).toContain("claude-code");
-      expect(ids).toContain("copilot-cli");
-      expect(ids).toContain("zed");
-      expect(ids).toContain("gemini-cli");
-    });
-  });
-
-  describe("config generators", () => {
-    const testUrl = "https://moira.example.com/mcp";
-
-    describe("generateMcpConfig", () => {
-      it("generates valid JSON config with HTTP url", () => {
-        const config = generateMcpConfig(testUrl);
-        const parsed = JSON.parse(config);
-        expect(parsed.mcpServers.moira.url).toBe(testUrl);
-        expect(parsed.mcpServers.moira.command).toBeUndefined();
+  it.each(["en", "ru"] as const)(
+    "%s presents GUI endpoints as copyable URLs and keeps hosted Kimi optional",
+    (language) => {
+      const presentations = getClientSetupPresentation(language, configuredUrl);
+      const gui = presentations.filter(({ client }) => client.setupType === "gui");
+      expect(gui.map(({ client }) => client.id)).toEqual([
+        "claude-desktop",
+        "claude-web",
+        "chatgpt",
+        "perplexity",
+      ]);
+      for (const { primary } of gui)
+        expect(primary).toEqual({
+          code: configuredUrl,
+          language: "text",
+          title: language === "en" ? "Server URL" : "URL сервера",
+        });
+      const kimi = presentations.find(({ client }) => client.id === "kimi-code")!;
+      expect(JSON.parse(kimi.primary!.code)).toEqual({
+        mcpServers: { moira: { url: configuredUrl } },
       });
-    });
+      expect(kimi.alternativeDescription).toContain("https://moira-mcp.com/mcp");
+      expect(kimi.alternative!.code).toBe(
+        "/plugins install https://github.com/moira-mcp/moira/tree/master\n/reload",
+      );
+    },
+  );
 
-    describe("generateClaudeCodeCommand", () => {
-      it("generates CLI command with --transport http", () => {
-        const cmd = generateClaudeCodeCommand(testUrl);
-        expect(cmd).toBe(`claude mcp add --transport http moira ${testUrl}`);
-      });
-    });
-
-    describe("generateCursorDeeplink", () => {
-      it("generates cursor:// protocol link", () => {
-        const link = generateCursorDeeplink(testUrl);
-        expect(link).toMatch(/^cursor:\/\/anysphere\.cursor-deeplink\/mcp\/install/);
-        expect(link).toContain("name=moira");
-      });
-    });
-
-    describe("generateVSCodeDeeplink", () => {
-      it("generates vscode: protocol link", () => {
-        const link = generateVSCodeDeeplink(testUrl);
-        expect(link).toMatch(/^vscode:mcp\/install\?/);
-        expect(link).toContain("moira");
-      });
-    });
-
-    describe("generateCopilotCliConfig", () => {
-      it("generates JSON config with type http", () => {
-        const config = generateCopilotCliConfig(testUrl);
-        const parsed = JSON.parse(config);
-        expect(parsed.mcpServers.moira.type).toBe("http");
-        expect(parsed.mcpServers.moira.url).toBe(testUrl);
-      });
-    });
-
-    describe("generateContinueConfig", () => {
-      it("generates YAML config with HTTP url", () => {
-        const config = generateContinueConfig(testUrl);
-        expect(config).toContain("mcpServers:");
-        expect(config).toContain("name: moira");
-        expect(config).toContain(`url: ${JSON.stringify(testUrl)}`);
-        expect(config).not.toContain("mcp-remote");
-      });
-    });
-
-    describe("generateZedConfig", () => {
-      it("generates JSON config with context_servers", () => {
-        const config = generateZedConfig(testUrl);
-        const parsed = JSON.parse(config);
-        expect(parsed.context_servers.moira.url).toBe(testUrl);
-      });
-    });
-
-    describe("generateGeminiCliConfig", () => {
-      it("generates JSON config with httpUrl", () => {
-        const config = generateGeminiCliConfig(testUrl);
-        const parsed = JSON.parse(config);
-        expect(parsed.mcpServers.moira.httpUrl).toBe(testUrl);
-      });
-    });
-  });
-
-  describe("token config generators", () => {
-    const testUrl = "https://moira.example.com/mcp";
-
-    describe("generateMcpConfigWithToken", () => {
-      it("generates JSON config with headers containing Bearer token", () => {
-        const config = generateMcpConfigWithToken(testUrl);
-        const parsed = JSON.parse(config);
-        expect(parsed.mcpServers.moira.url).toBe(testUrl);
-        expect(parsed.mcpServers.moira.headers.Authorization).toContain("Bearer moira_YOUR_TOKEN");
-      });
-    });
-
-    describe("generateCopilotCliConfigWithToken", () => {
-      it("generates JSON config with type http and Bearer token", () => {
-        const config = generateCopilotCliConfigWithToken(testUrl);
-        const parsed = JSON.parse(config);
-        expect(parsed.mcpServers.moira.type).toBe("http");
-        expect(parsed.mcpServers.moira.url).toBe(testUrl);
-        expect(parsed.mcpServers.moira.headers.Authorization).toContain("Bearer moira_YOUR_TOKEN");
-      });
-    });
-
-    describe("generateContinueConfigWithToken", () => {
-      it("generates YAML config with Bearer token in headers", () => {
-        const config = generateContinueConfigWithToken(testUrl);
-        expect(config).toContain("mcpServers:");
-        expect(config).toContain("name: moira");
-        expect(config).toContain(`url: ${JSON.stringify(testUrl)}`);
-        expect(config).toContain("Authorization:");
-        expect(config).toContain("Bearer moira_YOUR_TOKEN");
-      });
-    });
-
-    describe("generateZedConfigWithToken", () => {
-      it("generates JSON config with context_servers and Bearer token", () => {
-        const config = generateZedConfigWithToken(testUrl);
-        const parsed = JSON.parse(config);
-        expect(parsed.context_servers.moira.url).toBe(testUrl);
-        expect(parsed.context_servers.moira.headers.Authorization).toContain(
-          "Bearer moira_YOUR_TOKEN",
-        );
-      });
-    });
-
-    describe("generateGeminiCliConfigWithToken", () => {
-      it("generates JSON config with httpUrl and Bearer token", () => {
-        const config = generateGeminiCliConfigWithToken(testUrl);
-        const parsed = JSON.parse(config);
-        expect(parsed.mcpServers.moira.httpUrl).toBe(testUrl);
-        expect(parsed.mcpServers.moira.headers.Authorization).toContain("Bearer moira_YOUR_TOKEN");
-      });
-    });
+  it("gives an injected client truthful generic guidance instead of missing localization keys", () => {
+    const client = {
+      ...getClientById("cursor")!,
+      id: "fixture-editor",
+      name: "Fixture editor",
+      description: "Fixture client instructions",
+    };
+    const [presentation] = getClientSetupPresentation("en", configuredUrl, [client]);
+    expect(presentation.label).toBe("Fixture editor");
+    expect(presentation.setup).toBe("Fixture client instructions");
+    expect(presentation.authIntro).toContain("official client documentation");
+    expect(presentation.verification).toContain("read-only list tool");
+    expect(presentation.alternative?.code).toBe(configGenerators["mcp-json"](configuredUrl));
+    expect(JSON.stringify(presentation)).not.toContain("quickStart.tabs.");
   });
 });

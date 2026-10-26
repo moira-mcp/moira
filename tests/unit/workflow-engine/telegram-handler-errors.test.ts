@@ -639,7 +639,10 @@ describe("TelegramNotificationHandler Error Handling", () => {
     const notification = flushed.messages[0] as any;
     expect(notification.notificationText).toContain("Settings > Notifications");
     expect(notification.notificationText).toContain(
-      'start({ workflowId: "moira/telegram-setup", parentExecutionId: "none", skipNotificationCheck: true })',
+      'execution({ action: "prepare", workflowId: "moira/telegram-setup", parentExecutionId: "none", skipNotificationCheck: true })',
+    );
+    expect(notification.notificationText).toContain(
+      'then call execution({ action: "execute", startAttemptId }) with its returned Start attempt ID',
     );
     expect(notification.status).toBe("configuration_error");
   });

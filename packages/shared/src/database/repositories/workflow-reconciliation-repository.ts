@@ -6,6 +6,8 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "../schema.js";
 import { recomputeGateWaiting, storedGraphNodes } from "../gate-waiting.js";
 import { recordExecutionsDeleted } from "../execution-change.js";
+import { recordWorkflowRevision } from "../workflow-history.js";
+import { RevisionRepository, REVISION_ENTITY_TYPES } from "./revision-repository.js";
 import type { ManagedResourceState } from "../../services/managed-resource-reconciler.js";
 import { AuditAction } from "../../audit/actions.js";
 
@@ -507,7 +509,14 @@ export class WorkflowReconciliationRepository {
       this.assertBaselinePreconditions(plan.baselinePreconditions);
       this.assertPreconditions(plan.preconditions);
       const now = Date.now();
-      for (const operation of plan.workflows) this.applyWorkflow(operation, now);
+      for (const operation of plan.workflows) {
+        const actorId =
+          plan.resolutionAudits?.find(
+            (resolution) =>
+              resolution.owner === operation.owner && resolution.slug === operation.slug,
+          )?.actorId ?? null;
+        this.applyWorkflow(operation, now, actorId);
+      }
       for (const baseline of plan.baselines) {
         if (baseline.previousSlug && baseline.previousSlug !== baseline.slug) {
           this.sqlite
@@ -741,7 +750,17 @@ export class WorkflowReconciliationRepository {
     );
   }
 
-  private applyWorkflow(operation: WorkflowApplyOperation, now: number): void {
+  private applyWorkflow(
+    operation: WorkflowApplyOperation,
+    now: number,
+    authorId: string | null,
+  ): void {
+    const db = drizzle(this.sqlite, { schema });
+    const previousDefinition = operation.workflowId
+      ? (this.sqlite
+          .prepare("SELECT graph FROM workflow WHERE id=? AND userId=?")
+          .get(operation.workflowId, operation.owner) as { graph: string } | undefined)
+      : undefined;
     if (operation.state.lifecycle === "absent") {
       if (operation.workflowId) {
         // The workflow's runs go with it (cascade): record them as deleted first, in this transaction.
@@ -754,6 +773,10 @@ export class WorkflowReconciliationRepository {
         if (result.changes !== 1) {
           throw new Error(`Workflow ${operation.owner}/${operation.slug} changed during apply`);
         }
+        new RevisionRepository(db).deleteHistorySync({
+          entityType: REVISION_ENTITY_TYPES.workflow,
+          entityId: operation.workflowId,
+        });
       }
       return;
     }
@@ -786,6 +809,12 @@ export class WorkflowReconciliationRepository {
         if (result.changes !== 1) {
           throw new Error(`Workflow ${operation.owner}/${operation.slug} changed during apply`);
         }
+        recordWorkflowRevision(db, {
+          id: operation.workflowId,
+          graph: storedGraph,
+          previousGraph: previousDefinition?.graph,
+          authorId,
+        });
         this.recomputeGateWaiting(operation.workflowId, previous, graph);
       }
       return;
@@ -823,6 +852,12 @@ export class WorkflowReconciliationRepository {
       if (result.changes !== 1) {
         throw new Error(`Workflow ${operation.owner}/${operation.slug} changed during apply`);
       }
+      recordWorkflowRevision(db, {
+        id: workflowId,
+        graph: storedGraph,
+        previousGraph: previousDefinition?.graph,
+        authorId,
+      });
       this.recomputeGateWaiting(workflowId, previous, graph);
       return;
     }
@@ -848,6 +883,7 @@ export class WorkflowReconciliationRepository {
         JSON.stringify(validation.errors),
         now,
       );
+    recordWorkflowRevision(db, { id: workflowId, graph: storedGraph, authorId });
   }
 }
 

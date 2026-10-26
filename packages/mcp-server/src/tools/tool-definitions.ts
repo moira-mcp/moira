@@ -5,6 +5,12 @@ import type { McpPromptContext } from "@mcp-moira/shared";
 import { WORKSPACE_TOOL_DEFINITIONS } from "./workspace-tool-contract.js";
 import { toolDescriptions } from "./tool-descriptions.js";
 import {
+  PUBLIC_TOOL_SCHEMAS,
+  WORKSPACE_PUBLIC_ACTIONS,
+  WORKSPACE_PUBLIC_SINGLETONS,
+  resolvePublicTool,
+} from "./public-tool-contract.js";
+import {
   getSessionInfoSchema,
   helpSchema,
   listWorkflowsSchema,
@@ -82,7 +88,7 @@ function defineTool<const Name extends string, Schema extends ZodTypeAny>(
   };
 }
 
-export const TOOL_DEFINITIONS = [
+export const INTERNAL_TOOL_DEFINITIONS = [
   defineTool({
     name: "list",
     schema: listWorkflowsSchema,
@@ -116,7 +122,8 @@ export const TOOL_DEFINITIONS = [
         result: "Conflict status, a candidate, or a resolution result.",
       },
       ru: {
-        summary: "Показывает и разрешает конфликты сверки встроенных процессов.",
+        summary:
+          "Показывает и разрешает конфликты сверки встроенных процессов. Статус возвращает ссылки на кандидатов всем агентам, а полные состояния кандидатов — администраторам. Чтение кандидата и разрешение конфликта доступны только администратору; для смыслового слияния кандидатов используйте Workflow Management Flow, затем передайте объединённый граф.",
         result: "Статус конфликта, кандидат или результат разрешения.",
       },
     },
@@ -330,8 +337,193 @@ export const TOOL_DEFINITIONS = [
   ...WORKSPACE_TOOL_DEFINITIONS,
 ] as const;
 
-export type McpToolName = (typeof TOOL_DEFINITIONS)[number]["name"];
-export type AnyToolDefinition = (typeof TOOL_DEFINITIONS)[number];
+export type InternalToolDefinition = (typeof INTERNAL_TOOL_DEFINITIONS)[number];
+export type InternalToolName = InternalToolDefinition["name"];
+const internalDefinitions = new Map<string, InternalToolDefinition>(
+  INTERNAL_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]),
+);
+export function getInternalToolDefinition(name: string): InternalToolDefinition {
+  const definition = internalDefinitions.get(name);
+  if (!definition) throw new Error(`Unknown internal MCP purpose: ${name}`);
+  return definition;
+}
+
+function publicDescription(text: string): string {
+  return text
+    .replace(/\b(list|manage|token)\(\{/g, (_match, name: string) =>
+      name === "list" ? 'workflow({ action: "list",' : "workflow({",
+    )
+    .replace(/\blist\(\)/g, 'workflow({ action: "list" })')
+    .replace(/\bmanage\(\)/g, "workflow authoring")
+    .replace(/\bstart\(\{/g, "execution({")
+    .replace(/\bstep\(\{/g, 'execution({ action: "step",')
+    .replace(/\block\(\{ action: "(status|list)"/g, 'execution({ action: "lock_$1"')
+    .replace(/\b(session|lock)\(\{/g, "execution({")
+    .replace(/\b(start|step)\(\)/g, "execution")
+    .replace(
+      "completed calls replay the exact stored receipt",
+      "completed calls reuse the same durable receipt and attempt; the returned presentation may include current common language guidance without rewriting the saved receipt",
+    )
+    .replace(
+      /\bsession (current_step|execution_context|cancel-execution|executions)\b/g,
+      "execution $1",
+    )
+    .replace(/\boperation_get\b/g, 'codespace action="collect"')
+    .replace(/\boperation_find\b/g, 'codespace action="find"')
+    .replace("input schema's `action` enum", "input schema's strict `action` branches");
+}
+function publicDefinition<Name extends keyof typeof PUBLIC_TOOL_SCHEMAS>(
+  name: Name,
+): ToolDefinition<Name, (typeof PUBLIC_TOOL_SCHEMAS)[Name]> {
+  const actions =
+    name in WORKSPACE_PUBLIC_ACTIONS
+      ? WORKSPACE_PUBLIC_ACTIONS[name as keyof typeof WORKSPACE_PUBLIC_ACTIONS]
+      : undefined;
+  const singleton =
+    name in WORKSPACE_PUBLIC_SINGLETONS
+      ? WORKSPACE_PUBLIC_SINGLETONS[name as keyof typeof WORKSPACE_PUBLIC_SINGLETONS]
+      : undefined;
+  const owners = actions
+    ? [...new Set(Object.values(actions))]
+    : singleton
+      ? [singleton]
+      : name === "workflow"
+        ? ["list", "manage", "token", "reconciliation"]
+        : name === "execution"
+          ? ["start", "step", "session", "lock"]
+          : [name];
+  const sources = owners.map(getInternalToolDefinition);
+  const examples = sources.flatMap((source) =>
+    source.examples.map((original) => {
+      if (singleton) return original;
+      const input = original as Readonly<Record<string, unknown>>;
+      if (actions) {
+        const action = Object.entries(actions).find(([, purpose]) => purpose === source.name)![0];
+        const { action: operation, ...fields } = input;
+        return {
+          action,
+          ...fields,
+          ...(source.name === "workspace_lifecycle" ? { operation } : {}),
+        };
+      }
+      if (name === "workflow")
+        return {
+          ...input,
+          action:
+            source.name === "list"
+              ? "list"
+              : source.name === "reconciliation"
+                ? `reconciliation_${input.action}`
+                : input.action,
+        };
+      if (name === "execution")
+        return {
+          ...input,
+          action:
+            source.name === "step"
+              ? "step"
+              : source.name === "lock" && ["status", "list"].includes(String(input.action))
+                ? `lock_${input.action}`
+                : input.action,
+        };
+      return input;
+    }),
+  );
+  const actionGuide = actions
+    ? Object.entries(actions)
+        .map(
+          ([action, purpose]) =>
+            `${action}: ${getInternalToolDefinition(purpose).documentation.en.summary}`,
+        )
+        .join("\n")
+    : undefined;
+  const guidance: Partial<Record<keyof typeof PUBLIC_TOOL_SCHEMAS, string>> = {
+    codespace:
+      "lifecycle.operation=start starts a stopped environment. For incomplete setup, correct the returned prerequisite and explicitly use resume_setup on the same workspace; start does not repair setup and creating another VM is not recovery. Historical collected results retain their original time and do not grant fresh mutation authority. If a confirmed effect has no workspace observation, retain the original and collect it; do not repeat the effect.",
+    codespace_terminal:
+      "Named sessions preserve cwd and exported environment. session.mode=open resets the named context even if it exists; continue requires an existing context from this workspace lifetime. A missing or old-lifetime context cannot be continued. timeout_seconds is an explicit command execution deadline; without it there is no default deadline. A returned process or operation can still be running when the response returns. Use output/collect on those unchanged references, never rerun a command to obtain its output. Output windows return continuation cursors on complete UTF-8 characters; follow them to read more. run_native requires native-file stdin and cannot mix stdin_text.",
+    codespace_read:
+      "read returns UTF-8 windows with continuation and a whole-file reference. stat is optional metadata inspection, not a prerequisite for read or download. preview returns native PNG/JPEG only; SVG and truncated data are refused. Structural image validation does not prove page rendering or visual correctness; inspect the image.",
+    codespace_download:
+      'Download directly by path without a prior stat. max_bytes refuses a too-large complete file; it never returns a successful truncated file. The result is an immutable complete publication. Pass its file.reference_id unchanged to communication({action: "deliver_publication", publication: file.reference_id, kind: "document"}) to deliver the existing bytes. Publication itself does not send a message.',
+    codespace_git:
+      "Before creating, read by exact pushed head/base to inspect an existing pull request. A lost create reply requires collect/find of the original, not another PR. Credential/security operations have separate originals: follow the actual returned owner/security collection handle, never invent a collection path or obtain a new credential solely because a reply was lost. codespace collect/find remains available for separate security originals.",
+    communication:
+      "send delivers ordinary text and has no exactly-once replay guarantee. deliver consumes a native attachment. deliver_publication consumes file.reference_id from codespace_download without downloading or uploading those bytes again. Publication alone sends nothing. collect/find inspect returned delivery originals without repeating delivery; preserve the actual returned owner references.",
+    workflow:
+      "Use Workflow Management Flow for complex workflow changes and semantic reconciliation merges; simple supported operations remain available directly. Reconciliation actions are reconciliation_status, reconciliation_get and reconciliation_resolve. Validate the full merged graph, retain intentional changes, then resolve using the returned revision and rationale.",
+    notes:
+      "list and history return previews, not complete material for analysis. Read complete content with get, optionally specifying version. Empty saved text is valid.",
+    playbooks:
+      "list and history return previews; read full current or historical content with get and optional revision. Templates resolve {{playbook:name}} or {{playbook:@owner/name}}. Editing a playbook affects running processes at their next step-text resolution. Empty content is valid.",
+    settings:
+      "A masked secret is not its stored value; never write the mask back. Saving telegram.bot_token also attempts external webhook registration and updates the webhook secret. Confirmation that the setting was saved does not prove that webhook registration succeeded; inspect its returned warning/result.",
+  };
+  const description = [
+    publicDescription(
+      actionGuide ??
+        sources
+          .map((source) =>
+            source.name === "reconciliation"
+              ? source.descriptions.default.replace(
+                  /`(status|get|resolve)`/g,
+                  "`reconciliation_$1`",
+                )
+              : source.descriptions.default,
+          )
+          .join("\n\n"),
+    ),
+    guidance[name],
+    actions || singleton
+      ? "Copy returned references unchanged. Conflicts require a fresh observation and explicit decision. For an uncertain accepted effect use codespace collect/find (or the matching group's collect/find); never automatically resubmit. Two deliberate effect calls are distinct intents."
+      : undefined,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const metadata =
+    name === "codespace_terminal"
+      ? { "openai/fileParams": ["stdin_file"] }
+      : name === "codespace_upload" || name === "communication"
+        ? { "openai/fileParams": ["file"] }
+        : undefined;
+  return {
+    name,
+    schema: PUBLIC_TOOL_SCHEMAS[name],
+    responsePolicy: "native",
+    descriptions: {
+      default: description,
+      ...(name === "execution"
+        ? {
+            agents: {
+              cursor: {
+                description:
+                  description +
+                  "\n\nCursor input note: send structured input as JSON; never JavaScript's [object Object] value.",
+              },
+            },
+          }
+        : {}),
+    },
+    examples,
+    ...(metadata ? { _meta: metadata } : {}),
+    documentation: {
+      en: {
+        summary: sources.map((source) => source.documentation.en.summary).join(" "),
+        result: sources.map((source) => source.documentation.en.result).join(" "),
+      },
+      ru: {
+        summary: sources.map((source) => source.documentation.ru.summary).join(" "),
+        result: sources.map((source) => source.documentation.ru.result).join(" "),
+      },
+    },
+  };
+}
+export const TOOL_DEFINITIONS = (
+  Object.keys(PUBLIC_TOOL_SCHEMAS) as Array<keyof typeof PUBLIC_TOOL_SCHEMAS>
+).map(publicDefinition);
+export { resolvePublicTool, PUBLIC_TOOL_SCHEMAS };
+export type McpToolName = keyof typeof PUBLIC_TOOL_SCHEMAS;
+export type AnyToolDefinition = ToolDefinition<McpToolName>;
 export const MCP_TOOL_NAMES = TOOL_DEFINITIONS.map(
   (definition) => definition.name,
 ) as readonly McpToolName[];
@@ -379,13 +571,29 @@ export function getToolJsonSchema(definition: Pick<ToolDefinition, "schema" | "_
   const fileParams = definition._meta?.["openai/fileParams"];
   if (Array.isArray(fileParams)) {
     // Native-file discovery reads top-level properties of the published root object.
-    const properties =
+    let properties =
       "properties" in schema
         ? (schema.properties as Record<string, unknown> | undefined)
         : undefined;
     for (const field of fileParams) {
       if (typeof field !== "string") throw new Error("File parameter names must be strings");
-      const candidate = properties?.[field];
+      let candidate = properties?.[field];
+      if (!candidate && "anyOf" in schema && Array.isArray(schema.anyOf)) {
+        for (const branch of schema.anyOf) {
+          if (!("properties" in branch)) continue;
+          const fields = branch.properties as Record<string, unknown>;
+          if (!fields[field]) continue;
+          if (candidate && JSON.stringify(candidate) !== JSON.stringify(fields[field]))
+            throw new Error(`Incompatible native file schemas: ${field}`);
+          candidate = fields[field];
+          fields[field] = {};
+        }
+        if (candidate) {
+          properties ??= {};
+          properties[field] = candidate;
+          Object.assign(schema, { properties });
+        }
+      }
       if (!candidate || typeof candidate !== "object" || !("properties" in candidate)) {
         throw new Error(`File parameter has no top-level object schema: ${field}`);
       }
@@ -443,10 +651,14 @@ export function getToolOperations(definition: AnyToolDefinition): readonly strin
   };
   const direct = schema.properties?.action?.enum;
   if (direct) return direct;
-  return [...(schema.anyOf ?? schema.oneOf ?? [])].flatMap((branch) => {
-    const action = branch.properties?.action;
-    return action?.enum ?? (action?.const ? [action.const] : []);
-  });
+  return [
+    ...new Set(
+      [...(schema.anyOf ?? schema.oneOf ?? [])].flatMap((branch) => {
+        const action = branch.properties?.action;
+        return action?.enum ?? (action?.const ? [action.const] : []);
+      }),
+    ),
+  ];
 }
 
 export function getToolReferenceModel(

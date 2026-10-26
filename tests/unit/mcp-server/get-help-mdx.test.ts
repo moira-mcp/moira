@@ -215,7 +215,7 @@ tags:
 
       // Verify workflow mapping section exists
       expect(result).toContain("## Task → Workflow Mapping");
-      expect(result).toContain("complete authorized catalog with `list()`");
+      expect(result).toContain('complete authorized catalog with `workflow({ action: "list" })`');
     });
 
     it("should include key workflow trigger mappings", () => {
@@ -263,7 +263,7 @@ tags:
       const result = getTopicList();
 
       // Verify correct start command format for non-Claude agents
-      expect(result).toContain('mcp__moira__start({ action: "prepare", workflowId:');
+      expect(result).toContain('execution({ action: "prepare", workflowId:');
       expect(result).toContain('parentExecutionId: "none"');
       expect(result).toContain('action: "execute"');
     });
@@ -366,6 +366,12 @@ tags:
           const sectionStart = `### ${presentation.label}`;
           const section = markdown.split(sectionStart)[1]?.split("\n### ")[0];
           expect(section).toBeDefined();
+          expect(section).toContain(presentation.setup);
+          expect(section).toContain(presentation.authIntro);
+          expect(section).toContain(presentation.verification);
+          expect(section).toContain(
+            `[${presentation.officialDocs.label}](${presentation.officialDocs.url})`,
+          );
           const titles = [
             presentation.primary?.title,
             presentation.auth?.title,
@@ -391,6 +397,16 @@ tags:
           }
         }
       }
+    });
+
+    it("expands ChatGPT's direct setup link and preserves replacement characters in the configured GUI URL", () => {
+      const chatgpt = mcpClients.find(({ id }) => id === "chatgpt")!;
+      const mcpUrl = "https://self.example/путь?x=a'b&value=$&";
+      const generated = renderClientSetupMarkdown("en", "{MCP_URL}", [chatgpt]);
+      const rendered = renderPortableHelpTokens(generated, { mcpUrl });
+      expect(rendered).toContain("[Open ChatGPT plugins](https://chatgpt.com/plugins)");
+      expect(rendered).toContain(`\`\`\`text\n${mcpUrl}\n\`\`\``);
+      expect(rendered).not.toContain("{{MCP_DEEPLINK:");
     });
 
     it("propagates an injected registry deeplink generator without a parser key inventory", () => {
@@ -506,7 +522,8 @@ tags:
 
       expect(direct).toBe(alias);
       expect(direct).toContain("# MCP tools");
-      expect(direct).toContain("## `reconciliation`");
+      expect(direct).toContain("## `workflow`");
+      expect(direct).toContain("reconciliation_status");
       expect(direct).toContain("`set-visibility`");
       expect(direct).toContain("### Input schema");
       expect(direct).toContain('"parentExecutionId"');

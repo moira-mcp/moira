@@ -9,17 +9,17 @@ WORKFLOW EXECUTION CYCLE:
 
      2. EXECUTE the directive fully (this is YOUR JOB as agent)
 
-     3. When completionCondition is met, call `step()` with required
+     3. When completionCondition is met, call `execution` with `action: "step"` with required
      data:
         ```
-        mcp__moira__step({ processId: "...", attemptId: "...", input: {
+        execution({ action: "step", processId: "...", attemptId: "...", input: {
      ...data from inputSchema } })
         ```
 
      4. Receive next directive → repeat
 
      THIS IS KEY: The directive is not information for the user — it's
-     YOUR INSTRUCTION. Execute it, then report back via step().
+     YOUR INSTRUCTION. Execute it, then report back via execution's step action.
 
 WHAT TO DO: directive — instruction to execute
 WHEN READY: completionCondition — success completion criteria
@@ -30,14 +30,14 @@ CRITICALLY IMPORTANT:
 - Complete the current step FULLY before moving to the next one
 - Even if it takes a long time — finish it to the end
 - completionCondition must be satisfied 100%
-- Call step() only when EVERYTHING is ready
+- Call execution's step action only when EVERYTHING is ready
 - Always use the Step attempt ID from the current presentation, even when input is empty. Never use
   an older attempt for a later presentation.
-- Starting a workflow is two-phase: call `start` with `action: "prepare"`, then call it with
+- Starting a workflow is two-phase: call `execution` with `action: "prepare"`, then call it with
   `action: "execute"` and the returned Start attempt ID. Retry that same execute call after a lost
   response; do not create a replacement preparation.
 - `ATTEMPT_OUTCOME_UNKNOWN` must not be automatically retried. Inspect its Process ID through
-  `session` and cancel only through `cancel-execution` with the current revision when recovery
+  `execution` and cancel only through `cancel-execution` with the current revision when recovery
   requires retiring it.
 - IF STEP INPUT SCHEMA REQUIRES INPUT FROM USER - GATHER THE INFO, DO NOT SIMPLY CALL STEP WITH RANDOM DATA.
 
@@ -51,7 +51,7 @@ MANDATORY:
 
 - When something is unclear, resolve it from the directive, the repository and your tools; ask the
   user only for a decision or a fact you cannot obtain yourself
-- When passing input data, pass as SERIALIZED JSON. There is currently a BUG IN CURSOR, which passes objects as [Object object]. To avoid it CONSTRUCT JSON YOURSELF. IF YOU SEE STEP FAILING DUE TO VALIDATION, LOOK AT WHATEVER YOU'RE PASSING AS INPUT.
+- Pass input values with the types declared by the tool schema. Do not stringify an object or array unless the schema requires a string. If validation fails, inspect the actual value and correct its types.
 
 SESSION ARCHIVING:
 
@@ -65,5 +65,5 @@ SESSION ARCHIVING:
 CRITICAL: Fill every required field you can produce yourself from the directive, the repository
 and your own work. Only when the directive asks for a user decision, or for a fact only the user
 has:
-→ Display the directive, wait for the user's response, THEN call step().
+→ Display the directive, wait for the user's response, THEN call execution's step action.
 → Never invent the user's answer.

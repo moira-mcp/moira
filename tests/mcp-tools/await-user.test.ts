@@ -33,7 +33,7 @@ describe("session await-user", () => {
     const authenticated = await createAuthenticatedMCPClient();
     client = authenticated.client;
     cleanup = authenticated.cleanup;
-    const creation = await callMCPToolRaw(client, "manage", {
+    const creation = await callMCPToolRaw(client, "workflow", {
       action: "create",
       overwrite: true,
       workflow: {
@@ -82,7 +82,7 @@ describe("session await-user", () => {
 
   test("a raised question shows as waiting for the person, and the presented attempt still steps", async () => {
     const { executionId, attemptId } = await start();
-    const raised = await callMCPTool<any>(client, "session", {
+    const raised = await callMCPTool<any>(client, "execution", {
       action: "await-user",
       executionId,
       question: "Which environment should the release go to?",
@@ -97,7 +97,10 @@ describe("session await-user", () => {
       },
     });
 
-    const progress = await callMCPTool<any>(client, "session", { action: "progress", executionId });
+    const progress = await callMCPTool<any>(client, "execution", {
+      action: "progress",
+      executionId,
+    });
     expect(progress).toMatchObject({
       waitingFor: "user",
       waitingForUser: {
@@ -107,39 +110,35 @@ describe("session await-user", () => {
       },
     });
 
-    const stepped = await callMCPToolRaw(client, "step", { processId: executionId, attemptId });
+    const stepped = await callMCPToolRaw(client, "execution", {
+      action: "step",
+      processId: executionId,
+      attemptId,
+    });
     expect(stepped).toContain("Finish the release");
-    const context = await callMCPTool<any>(client, "session", {
+    const context = await callMCPTool<any>(client, "execution", {
       action: "execution_context",
       executionId,
     });
     expect(context.awaitingUser).toBeNull();
   });
 
-  // Shape violations are refused by the published schema (a protocol-level tool error); the rules
-  // that span fields are refused by the handler, which answers with an `Error:` text as every
-  // session action does.
+  // Every action branch is validated before dispatch, including mutually exclusive modes.
   test.each([
-    ["a question over 500 characters", { question: "x".repeat(501) }, "schema"],
-    [
-      "more than four options",
-      { question: "Pick one", options: ["a", "b", "c", "d", "e"] },
-      "schema",
-    ],
-    ["an empty option", { question: "Pick one", options: [""] }, "schema"],
-    ["a question together with resolve", { question: "Both?", resolve: true }, "handler"],
-    ["neither a question nor resolve", {}, "handler"],
-  ])("%s is refused and leaves the run as it was", async (_case, args, refusedBy) => {
+    ["a question over 500 characters", { question: "x".repeat(501) }],
+    ["more than four options", { question: "Pick one", options: ["a", "b", "c", "d", "e"] }],
+    ["an empty option", { question: "Pick one", options: [""] }],
+    ["a question together with resolve", { question: "Both?", resolve: true }],
+    ["neither a question nor resolve", {}],
+  ])("%s is refused and leaves the run as it was", async (_case, args) => {
     const { executionId } = await start();
-    const result = await client.callTool({
-      name: "session",
-      arguments: { action: "await-user", executionId, ...args },
-    });
-    const text = (result.content as Array<{ text?: string }>)[0]?.text ?? "";
-    const refusal =
-      result.isError === true ? "schema" : text.startsWith("Error:") ? "handler" : "none";
-    expect(refusal).toBe(refusedBy);
-    const context = await callMCPTool<any>(client, "session", {
+    await expect(
+      client.callTool({
+        name: "execution",
+        arguments: { action: "await-user", executionId, ...args },
+      }),
+    ).rejects.toMatchObject({ code: 400 });
+    const context = await callMCPTool<any>(client, "execution", {
       action: "execution_context",
       executionId,
     });

@@ -439,7 +439,7 @@ function getTopicList(helpDirectory = HELP_CONTENT_DIR): string {
 
   // Workflow mapping for non-Claude agents
   result += `## Task → Workflow Mapping\n\n`;
-  result += `Use these examples only after discovering the complete authorized catalog with \`list()\`; compare every returned workflow's deliverable, evidence, cost, durability, authority, failure outcomes, and neighboring alternatives before starting one.\n\n`;
+  result += `Use these examples only after discovering the complete authorized catalog with \`workflow({ action: "list" })\`; compare every returned workflow's deliverable, evidence, cost, durability, authority, failure outcomes, and neighboring alternatives before starting one.\n\n`;
   result += `| User Request Contains | Start Workflow |\n`;
   result += `| --------------------- | -------------- |\n`;
   result += `| "develop feature", "implement", "build feature", "fix bug" | \`moira/software-development-flow\` |\n`;
@@ -466,7 +466,7 @@ function getTopicList(helpDirectory = HELP_CONTENT_DIR): string {
   result += `| configure and verify the current user's Moira Telegram notifications without exposing the bot token or full chat ID | \`moira/telegram-setup\` |\n`;
   result += `| create a reviewed visual presentation of a workflow's purpose, graph, routes, variables, and operating contract | \`moira/workflow-presentation-generator\` |\n`;
   result += `| build a verified screencast video from source-backed facts and story, local materials, a free draft, chosen narration, and permission-scoped handoff | \`moira/agentic-screencast-video\` |\n\n`;
-  result += `Start: first \`mcp__moira__start({ action: "prepare", workflowId: "moira/quick-task", parentExecutionId: "none" })\`, then call \`start\` with \`action: "execute"\` and its returned \`startAttemptId\`.`;
+  result += `Start: first \`execution({ action: "prepare", workflowId: "moira/quick-task", parentExecutionId: "none" })\`, then call \`execution({ action: "execute", startAttemptId })\` with its returned Start attempt ID.`;
 
   return result;
 }

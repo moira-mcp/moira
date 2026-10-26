@@ -22,19 +22,26 @@ reading help or calling an old tool does not bypass the check.
 
 The catalog defines accepted inputs. These topic owners explain authority, durable state and effects that a schema alone cannot establish.
 
+Choose the tool group and its exact `action` branch before constructing arguments. Fields from a
+different action are refused; an absent field, null, false and an empty value are distinct.
+`codespace_search`, `codespace_upload` and `codespace_download` have one purpose and no `action`
+field. For native input use the declared top-level `file` or `stdin_file` field, preserving the
+host's descriptor and metadata unchanged. Native-file metadata in the published schema identifies
+that field; it does not make the field optional for an action that requires it.
+
 ### User communication
 
-`communication_send` uses the authenticated user's configured channels; callers do not supply recipient credentials or arbitrary headers. Provider limits apply (ordinary Telegram text: 4096 characters).
+`communication` (`send`) uses the authenticated user's configured channels; callers do not supply recipient credentials or arbitrary headers. Provider limits apply (ordinary Telegram text: 4096 characters).
 
-For `communication_deliver`, pass the host's native file descriptor and metadata unchanged. An explicitly selected registered controller is never replaced because another is available. `communication_deliver_publication` addresses the owner through an existing immutable publication. Publication does not send a message; delivery neither consumes nor renews it. Reads remain subject to expiry and current authority.
+For `communication` (`deliver`), pass the host's native file descriptor and metadata unchanged. An explicitly selected registered controller is never replaced because another is available. `communication` (`deliver_publication`) addresses the owner through an existing immutable publication. Publication does not send a message; delivery neither consumes nor renews it. Reads remain subject to expiry and current authority.
 
-The owner retains bytes and the original receipt. Cloud Moira authorizes the channel and streams to its fixed vendor transport without retaining a native-file copy. The owner validates the complete file/text plan before staging; unsupported explicit kinds are refused, not silently changed. Collect the returned original operation with `operation_get`. If its first reply was lost, find candidates at that owner and choose the original explicitly, even for one match. Absence or an unavailable observation does not establish that delivery never happened. See [delivery recovery](/docs/integration/troubleshooting/).
+The owner retains bytes and the original receipt. Cloud Moira authorizes the channel and streams to its fixed vendor transport without retaining a native-file copy. The owner validates the complete file/text plan before staging; unsupported explicit kinds are refused, not silently changed. Collect the returned original operation with `communication` (`collect`). If its first reply was lost, find candidates at that owner and choose the original explicitly, even for one match. Absence or an unavailable observation does not establish that delivery never happened. See [delivery recovery](/docs/integration/troubleshooting/).
 
 ### Workspace purposes and references
 
 Discovery returns opaque workspace, controller, target and installation references. Copy them unchanged; an address is not authority. Lifecycle conflicts require a fresh observation and deliberate decision, including renewed confirmation for deletion.
 
-Commands use argv or script; native stdin requires `command_run_native`. Each deliberate uncontrolled call is a distinct intent: command text cannot deduplicate a lost first reply. Collect original operations/processes through their returned references. Known uncertain outcomes project as `unconfirmed`; a confirmed refusal is completed with `outcome.ok:false`. Neither permits automatic replay or changes the retained receipt. `operation_resume` continues only the original retained private-repository setup, not commands or replacement repositories.
+Commands use argv or script; native stdin requires `codespace_terminal` (`run_native`). Each deliberate uncontrolled call is a distinct intent: command text cannot deduplicate a lost first reply. Collect original operations/processes through the originating group's `collect` action and returned references; `find` discovers candidates at that owner without submitting work. Known uncertain outcomes project as `unconfirmed`; a confirmed refusal is completed with `outcome.ok:false`. Neither permits automatic replay or changes the retained receipt. `codespace` (`resume`) continues only the original retained private-repository setup, not commands or replacement repositories. Lifecycle uses `codespace` with `action: "lifecycle"` and a separate `operation` of `start`, `stop` or `resume_setup`.
 
 File reads return complete UTF-8 characters and checked references/cursors. Create requires absence; replacement checks complete expected text or an observed reference; patches match text against one original without caller-computed offsets or hashes. Upload needs a native descriptor and explicit create/checked replacement target. Download publishes the complete file, not just an observed prefix. Observation windows do not impose a command deadline. See [workspace and file troubleshooting](/docs/integration/troubleshooting/) and [workspace patterns](/docs/patterns/workspace/).
 
@@ -66,7 +73,7 @@ The Agent Guide owns [setting selectors, masking and validation](/docs/integrati
 
 ### Public artifacts and workflow files
 
-[Artifacts](/docs/concepts/artifacts/) owns public static HTML, upload grants, expiry, user quotas and ownership. Use `token` only for short-lived workflow JSON import/export grants; multipart upload uses field `workflow`. Ordinary workflow inspection and mutation use `manage`.
+[Artifacts](/docs/concepts/artifacts/) owns public static HTML, upload grants, expiry, user quotas and ownership. Use `workflow` actions `upload` and `download` for short-lived workflow JSON import/export grants; multipart upload uses field `workflow`. Ordinary workflow inspection and mutation use the other `workflow` actions.
 
 ### Development codespaces
 

@@ -11,28 +11,28 @@ sidebar:
 
 Для выполнения workflow и доставки используются:
 
-| Tool                                | Назначение                                        |
-| ----------------------------------- | ------------------------------------------------- |
-| `list`                              | Список доступных workflows                        |
-| `start`                             | Подготовка или выполнение запуска                 |
-| `step`                              | Продвижение workflow с input                      |
-| `manage`                            | CRUD операции с workflows                         |
-| `session`                           | Информация о пользователе и executions            |
-| `settings`                          | Настройки пользователя                            |
-| `communication_send`                | Текст в настроенные каналы пользователя           |
-| `communication_deliver`             | Нативное вложение через его владельца             |
-| `communication_deliver_publication` | Существующая неизменяемая публикация владельца    |
-| `operation_get`                     | Чтение исходной операции по возвращённой ссылке   |
-| `operation_find`                    | Поиск исходных операций владельца с явным выбором |
-| `token`                             | Токены для upload/download                        |
-| `help`                              | Документация                                      |
+| Tool                                    | Назначение                                        |
+| --------------------------------------- | ------------------------------------------------- |
+| `workflow` (`list`)                     | Список доступных workflows                        |
+| `execution` (`prepare`, `execute`)      | Подготовка или выполнение запуска                 |
+| `execution` (`step`)                    | Продвижение workflow с input                      |
+| `workflow`                              | CRUD операции с workflows                         |
+| `execution`                             | Информация о пользователе и executions            |
+| `settings`                              | Настройки пользователя                            |
+| `communication` (`send`)                | Текст в настроенные каналы пользователя           |
+| `communication` (`deliver`)             | Нативное вложение через его владельца             |
+| `communication` (`deliver_publication`) | Существующая неизменяемая публикация владельца    |
+| `collect` исходной группы               | Чтение исходной операции по возвращённой ссылке   |
+| `find` исходной группы                  | Поиск исходных операций владельца с явным выбором |
+| `workflow`                              | Токены для upload/download                        |
+| `help`                                  | Документация                                      |
 
 ## Базовое выполнение Workflow
 
 ### 1. Подготовка и запуск Workflow
 
 ```json
-start({ action: "prepare", workflowId: "moira/robust-task", parentExecutionId: "none" })
+execution({ action: "prepare", workflowId: "moira/robust-task", parentExecutionId: "none" })
 ```
 
 Подготовка проверяет запрос и резервирует Start attempt на 15 минут, но не создаёт execution и не
@@ -40,7 +40,7 @@ start({ action: "prepare", workflowId: "moira/robust-task", parentExecutionId: "
 настроек уведомлений и доверенной блокировки. Выполните именно эту попытку, чтобы пройти эти проверки:
 
 ```json
-start({ action: "execute", startAttemptId: "start-attempt-123" })
+execution({ action: "execute", startAttemptId: "start-attempt-123" })
 ```
 
 Успешный ответ выполнения содержит:
@@ -69,7 +69,7 @@ execution. Legacy workflow с Telegram-notification возвращает инс�
 Telegram для ноды `lock`.
 
 Если ответ `execute` потерян, повторите вызов с тем же Start attempt ID: завершённая попытка вернёт
-точно сохранённый ответ и не создаст второй execution. Новая подготовка означает намеренный запуск
+сохранённый результат с текущей общей языковой инструкцией и не создаст второй execution. Новая подготовка означает намеренный запуск
 отдельного execution.
 
 ### 2. Выполнение шага
@@ -77,8 +77,7 @@ Telegram для ноды `lock`.
 После выполнения работы описанной в `directive`:
 
 ```json
-step({
-  processId: "abc-123-def",
+execution({ action: "step", processId: "abc-123-def",
   attemptId: "attempt-456",
   input: {
     "steps": ["Шаг 1", "Шаг 2", "Шаг 3"]
@@ -90,23 +89,30 @@ step({
 
 ### 3. Продолжать до завершения
 
-Повторяйте вызовы `step()` пока workflow не вернёт завершение.
+Повторяйте вызовы `execution({ action: "step", processId, attemptId, input })` пока workflow не вернёт завершение.
 
 В каждом вызове используйте идентификатор попытки шага из текущего предъявления, в том числе для
 шага с пустым вводом. Повтор той же попытки с теми же данными возвращает сохранённый результат без
 повторного перехода. Не используйте попытку из более старого предъявления.
 
+Обычный шаг, чтение текущего шага и повторная выдача результата содержат одну общую инструкцию:
+пишите весь составляемый вами свободный текст на запрошенном или предпочитаемом языке пользователя,
+даже если директива использует другой язык. Сохраняйте ключи схемы, идентификаторы, enum, код,
+команды и точные цитаты. Представление не переписывает сохранённый ответ, ID попытки или fingerprint.
+Передавайте объекты, массивы, числа и boolean в объявленных типах; сериализуйте JSON только тогда,
+когда конкретная схема требует текст.
+
 ## Формат ответа
 
 Каждый шаг workflow возвращает:
 
-| Поле                  | Описание                                              |
-| --------------------- | ----------------------------------------------------- |
-| `processId`           | UUID выполнения, используйте во всех `step()` вызовах |
-| `attemptId`           | Идентификатор именно этого предъявления шага          |
-| `directive`           | Что делать (инструкция)                               |
-| `completionCondition` | Когда готово (критерии успеха)                        |
-| `inputSchema`         | Как структурировать ответ (JSON Schema)               |
+| Поле                  | Описание                                                                                                  |
+| --------------------- | --------------------------------------------------------------------------------------------------------- |
+| `processId`           | UUID выполнения, используйте во всех `execution({ action: "step", processId, attemptId, input })` вызовах |
+| `attemptId`           | Идентификатор именно этого предъявления шага                                                              |
+| `directive`           | Что делать (инструкция)                                                                                   |
+| `completionCondition` | Когда готово (критерии успеха)                                                                            |
+| `inputSchema`         | Как структурировать ответ (JSON Schema)                                                                   |
 
 ## Directive vs Condition
 
@@ -122,7 +128,7 @@ step({
 
 1. Выполнить директиву (запустить тесты)
 2. Проверить что completionCondition выполнено (0 ошибок)
-3. Только тогда продолжить с `step()`
+3. Только тогда продолжить с `execution({ action: "step", processId, attemptId, input })`
 
 ## Input Schema
 
@@ -162,7 +168,7 @@ step({
 ### Список executions
 
 ```json
-session({ action: "executions" })
+execution({ action: "executions" })
 ```
 
 Возвращает первую страницу активных executions текущего пользователя со статусом, workflow ID и
@@ -173,7 +179,7 @@ session({ action: "executions" })
 Возобновить workflow после прерывания:
 
 ```json
-session({ action: "current_step", executionId: "abc-123" })
+execution({ action: "current_step", executionId: "abc-123" })
 ```
 
 Возвращает текущее представление шага для агента без продвижения workflow: Process ID, Step attempt ID, directive,
@@ -183,7 +189,7 @@ success criteria и input schema при её наличии. При необхо
 ### Получить полный контекст
 
 ```json
-session({ action: "execution_context", executionId: "abc-123" })
+execution({ action: "execution_context", executionId: "abc-123" })
 ```
 
 Возвращает состояние execution, включая переменные контекста, историю, ревизию шага `revision` и
@@ -196,7 +202,7 @@ session({ action: "execution_context", executionId: "abc-123" })
 На первом шаге прочитайте контекст запуска и сохраните фактическое название до отправки результата:
 
 ```javascript
-session({
+execution({
   action: "update-task-title",
   executionId,
   taskTitle: "Реализовать авторизацию",
@@ -214,15 +220,14 @@ session({
 Отслеживайте прогресс execution с заметками:
 
 ```json
-start({ action: "prepare", workflowId: "dev-flow", note: "Фича: система авторизации", parentExecutionId: "none" })
-start({ action: "execute", startAttemptId: "start-attempt-123" })
+execution({ action: "prepare", workflowId: "dev-flow", note: "Фича: система авторизации", parentExecutionId: "none" })
+execution({ action: "execute", startAttemptId: "start-attempt-123" })
 ```
 
-Обновить заметку через `step()` input можно только когда схема этого шага объявляет `execution_note`:
+Обновить заметку через `execution({ action: "step", processId, attemptId, input })` input можно только когда схема этого шага объявляет `execution_note`:
 
 ```json
-step({
-  processId: "abc-123",
+execution({ action: "step", processId: "abc-123",
   attemptId: "attempt-456",
   input: {
     "task_result": "done",
@@ -231,10 +236,10 @@ step({
 })
 ```
 
-Или через session tool:
+Или через инструмент execution:
 
 ```json
-session({
+execution({
   action: "update-note",
   executionId: "abc-123",
   note: "Шаг 3: Интеграционные тесты"
@@ -247,7 +252,7 @@ session({
 может сделать только он, — поднимите вопрос на запуске и задайте его в чате:
 
 ```json
-session({
+execution({
   action: "await-user",
   executionId: "abc-123",
   question: "В какое окружение выкладывать релиз?",
@@ -265,10 +270,10 @@ session({
 ## Остановка Workflow
 
 Если пользователь отменил запуск или попросил продолжить вне него, прочитайте его `revision`
-через `session({ action: "execution_context", executionId })` и остановите свой запуск:
+через `execution({ action: "execution_context", executionId })` и остановите свой запуск:
 
 ```json
-session({
+execution({
   action: "stop-execution",
   executionId: "abc-123",
   expectedRevision: 4,
@@ -295,19 +300,19 @@ session({
 ### Первая страница Workflows
 
 ```json
-list()
+workflow({ action: "list" })
 ```
 
 ### Поиск по имени
 
 ```json
-list({ search: "test" })
+workflow({ action: "list", search: "test" })
 ```
 
 ### Фильтр по видимости
 
 ```json
-list({ visibility: "public", limit: 10 })
+workflow({ action: "list", visibility: "public", limit: 10 })
 ```
 
 ## Чтение и изменение определений
@@ -315,7 +320,7 @@ list({ visibility: "public", limit: 10 })
 В `list` поле `total` считает весь результат с фильтрами. Для следующей страницы используйте
 возвращённый `nextOffset`, а не длину страницы; `nextOffset: null` завершает список. Фильтры действуют совместно.
 
-`manage get` возвращает метаданные, реестр переменных, runtime-политику, прогресс и напоминания
+`workflow` (`get`) возвращает метаданные, реестр переменных, runtime-политику, прогресс и напоминания
 вместе со структурой. `includeNodes: false` исключает только определения нод, а
 `includeValidation: false` — только результаты валидации. Для точечного чтения используйте
 `list-nodes`, `get-nodes` или `analyze-variables`. Мутация проверяет весь итоговый граф до сохранения;
@@ -342,8 +347,9 @@ webhook. Структурированный JSON должен переживат
 данных. Значения расширения по умолчанию проходят те же проверки типа и схемы до принятия манифеста.
 Удаление расширения скрывает определения, но сохраняет значения пользователя для переустановки.
 
-Для импорта и экспорта JSON workflow используйте краткоживущие разрешения `token`; загрузка принимает
-multipart-поле `workflow`. Обычное чтение и изменение определения выполняется через `manage`.
+Для импорта и экспорта JSON workflow используйте действия `upload` и `download` группы `workflow`
+для краткоживущих разрешений; загрузка принимает multipart-поле `workflow`. Обычное чтение и
+изменение определения выполняется другими действиями `workflow`.
 
 ## Типичные паттерны
 
@@ -351,15 +357,15 @@ multipart-поле `workflow`. Обычное чтение и изменение
 
 ```json
 // 1. Подготовка без создания execution
-start({ action: "prepare", workflowId: "moira/verified-research", parentExecutionId: "none" })
+execution({ action: "prepare", workflowId: "moira/verified-research", parentExecutionId: "none" })
 // → { startAttemptId: "start-1", expiresAt: "..." }
 
 // 2. Выполнение именно этой подготовленной попытки
-start({ action: "execute", startAttemptId: "start-1" })
+execution({ action: "execute", startAttemptId: "start-1" })
 // → { processId: "xyz", attemptId: "attempt-1", directive: "...", ... }
 
 // 3. Выполнить работу, затем продвинуться
-step({ processId: "xyz", attemptId: "attempt-1", input: { findings: "..." } })
+execution({ action: "step", processId: "xyz", attemptId: "attempt-1", input: { findings: "..." } })
 // → { attemptId: "attempt-2", directive: "следующий шаг...", ... }
 ```
 
@@ -367,20 +373,20 @@ step({ processId: "xyz", attemptId: "attempt-1", input: { findings: "..." } })
 
 ```json
 // 1. Найти execution
-session({ action: "executions" })
+execution({ action: "executions" })
 // → страница активных исполнений; выберите точный исходный Process ID
 
 // 2. Получить текущий шаг
-session({ action: "current_step", executionId: "xyz" })
+execution({ action: "current_step", executionId: "xyz" })
 // → { attemptId: "attempt-current", directive: "...", completionCondition: "...", ... }
 
 // 3. Продолжить
-step({ processId: "xyz", attemptId: "attempt-current", input: { ... } })
+execution({ action: "step", processId: "xyz", attemptId: "attempt-current", input: { ... } })
 ```
 
 ## Ошибки валидации
 
-Если `step()` возвращает ошибку валидации, проверьте:
+Если `execution({ action: "step", processId, attemptId, input })` возвращает ошибку валидации, проверьте:
 
 1. **Имена полей** - Должны точно соответствовать схеме (регистрозависимо)
 2. **Обязательные поля** - Все required свойства должны присутствовать
@@ -389,21 +395,21 @@ step({ processId: "xyz", attemptId: "attempt-current", input: { ... } })
 
 `ATTEMPT_PROCESSING` означает, что это изменение ещё принадлежит другому вызывающему: повторите тот
 же Process ID, идентификатор попытки и ввод либо тот же Start attempt ID для
-`start({ action: "execute" })`. `ATTEMPT_STALE` отклонён до работы обработчика. Автоматически
-прочитайте `session({ action: "current_step", executionId })` и сопоставьте возвращённые узел,
+`execution({ action: "execute" })`. `ATTEMPT_STALE` отклонён до работы обработчика. Автоматически
+прочитайте `execution({ action: "current_step", executionId })` и сопоставьте возвращённые узел,
 директиву, схему и актуальное намерение перед отправкой с новой попыткой. Не переносите старый
 ввод в другой шаг и не заменяйте им более новый ответ пользователя.
 `ATTEMPT_CONFLICT` означает, что попытка уже связана с другими входными данными. Автоматически
-прочитайте `session({ action: "current_step", executionId })`, отбросьте конфликтующую попытку и
+прочитайте `execution({ action: "current_step", executionId })`, отбросьте конфликтующую попытку и
 продолжите по возвращённой директиве и входной схеме, не повторяя отклонённый ввод; решение
 пользователя нужно только тогда, когда его требует текущая директива.
 Если ошибка шага `ATTEMPT_INVALID_OR_EXPIRED` явно предписывает прочитать `current_step`, примените
 то же восстановление через актуальное состояние и не используйте недоступную попытку повторно. Для
 недоступной попытки запуска такое восстановление неприменимо.
 `ATTEMPT_OUTCOME_UNKNOWN` означает, что внешний эффект уже мог
-произойти: найдите возвращённый Process ID через `session` и не повторяйте изменение автоматически.
+произойти: найдите возвращённый Process ID через `execution` и не повторяйте изменение автоматически.
 Владелец execution может завершить заблокированное выполнение на его текущей ревизии через
-`session({ action: "cancel-execution", executionId, expectedRevision })`.
+`execution({ action: "cancel-execution", executionId, expectedRevision })`.
 
 Запись по устаревшей ревизии — напоминание, родитель, контекст или отмена, у которых
 `expectedRevision` или целевая ревизия старше сохранённой, либо сообщение со словами «reload» или
@@ -414,8 +420,8 @@ step({ processId: "xyz", attemptId: "attempt-current", input: { ... } })
 Если в ошибке есть раздел `AGENT INSTRUCTIONS`, следуйте ему. Остановиться он велит только там, где
 нужен человек: нет прав, проблема аутентификации или соединения, которую вы не можете решить, workflow не
 существует или эффект уже мог произойти. Любую другую ошибку — неверный ввод, ненайденное
-выполнение, ошибку без особых инструкций — решаете вы: разберитесь через `help`, `session`
-(`diagnose`, `current_step`, `execution_context`) и `list`, исправьте то, что входит в вашу задачу, и
+выполнение, ошибку без особых инструкций — решаете вы: разберитесь через `help`, `execution`
+(`diagnose`, `current_step`, `execution_context`) и `workflow` (`list`), исправьте то, что входит в вашу задачу, и
 спрашивайте пользователя только о решении, разрешении, учётных данных или факте, которые вы не
 можете получить сами.
 

@@ -7,7 +7,8 @@
 import { eq, sql } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { recordExecutionsDeleted } from "./execution-change.js";
-import { user } from "./schema.js";
+import { user, entityRevision, workflow } from "./schema.js";
+import { REVISION_ENTITY_TYPES } from "./repositories/revision-repository.js";
 import type * as schema from "./schema.js";
 import {
   AccountResourceRetirementRequiredError,
@@ -67,6 +68,9 @@ export function deleteUserAccount(db: BetterSQLite3Database<typeof schema>, user
       tx.run(sql`DELETE FROM codespaceLocalDevice WHERE userId=${userId}`);
       tx.run(sql`DELETE FROM codespaceConnection WHERE userId=${userId} AND status='disconnected'`);
       recordExecutionsDeleted(tx, { userId });
+      tx.run(
+        sql`DELETE FROM ${entityRevision} WHERE ${entityRevision.entityType}=${REVISION_ENTITY_TYPES.workflow} AND ${entityRevision.entityId} IN (SELECT ${workflow.id} FROM ${workflow} WHERE ${workflow.userId}=${userId})`,
+      );
       tx.delete(user).where(eq(user.id, userId)).run();
     },
     { behavior: "immediate" },

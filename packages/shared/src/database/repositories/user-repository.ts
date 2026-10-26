@@ -542,13 +542,16 @@ export class UserRepository {
    * Get user's artifact quota overrides
    * Returns null values for fields that should use global defaults
    */
-  async getArtifactQuota(
-    userId: string,
-  ): Promise<{ artifactQuotaMb: number | null; artifactMaxFiles: number | null }> {
+  async getArtifactQuota(userId: string): Promise<{
+    artifactQuotaMb: number | null;
+    artifactMaxFiles: number | null;
+    artifactMaxFileSizeMb: number | null;
+  }> {
     const [row] = await this.db
       .select({
         artifactQuotaMb: user.artifactQuotaMb,
         artifactMaxFiles: user.artifactMaxFiles,
+        artifactMaxFileSizeMb: user.artifactMaxFileSizeMb,
       })
       .from(user)
       .where(eq(user.id, userId))
@@ -557,6 +560,7 @@ export class UserRepository {
     return {
       artifactQuotaMb: row?.artifactQuotaMb ?? null,
       artifactMaxFiles: row?.artifactMaxFiles ?? null,
+      artifactMaxFileSizeMb: row?.artifactMaxFileSizeMb ?? null,
     };
   }
 
@@ -568,12 +572,14 @@ export class UserRepository {
     userId: string,
     quotaMb: number | null,
     maxFiles: number | null,
+    maxFileSizeMb: number | null,
   ): Promise<boolean> {
     const result = await this.db
       .update(user)
       .set({
         artifactQuotaMb: quotaMb,
         artifactMaxFiles: maxFiles,
+        artifactMaxFileSizeMb: maxFileSizeMb,
         updatedAt: new Date().toISOString(),
       })
       .where(eq(user.id, userId));

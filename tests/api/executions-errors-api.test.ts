@@ -78,7 +78,7 @@ describe("Executions API - Errors Array", () => {
 
     const mcp = await createAuthenticatedMCPClient(credentials);
     cleanupMcp = mcp.cleanup;
-    const created = await callMCPTool(mcp.client, "manage", {
+    const created = await callMCPTool(mcp.client, "workflow", {
       action: "create",
       workflow: buildValidationWorkflow(),
     });

@@ -314,7 +314,7 @@ const owner = "Moira";
     // agents onto the context-spending path, so the fallback must be conditional and marked
     // non-preferred, and it must appear after the command it falls back from.
     const commandAt = message.directive.indexOf("curl -sSf --");
-    const fallbackAt = message.directive.indexOf('session({ action: "materialize"');
+    const fallbackAt = message.directive.indexOf('execution({ action: "materialize"');
     expect(commandAt).toBeGreaterThan(-1);
     expect(fallbackAt).toBeGreaterThan(commandAt);
     expect(message.directive).toContain("Only if this host cannot run shell commands");

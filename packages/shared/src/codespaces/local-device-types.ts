@@ -87,7 +87,7 @@ export type LocalDeviceOwnerView =
         | { state: "unconfigured" };
       github: { resources: GitHubControllerResource[] };
     }
-  | { state: "unavailable" };
+  | { state: "unavailable"; code?: "LOCAL_UNAUTHORIZED" | "LOCAL_PROTOCOL_INVALID" };
 export interface LocalDeviceView extends LocalDeviceAuth {
   label: string;
   status: "pending" | "active" | "revoked";

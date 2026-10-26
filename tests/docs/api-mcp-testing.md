@@ -88,8 +88,10 @@ afterAll(async () => {
   await cleanup?.();
 });
 
-test("list returns workflows", async () => {
-  const result = await callMCPTool<{ workflows: unknown[] }>(client, "list", {});
+test("workflow list returns workflows", async () => {
+  const result = await callMCPTool<{ workflows: unknown[] }>(client, "workflow", {
+    action: "list",
+  });
   expect(Array.isArray(result.workflows)).toBe(true);
 });
 ```
@@ -102,6 +104,14 @@ can be supplied; prepare its admission separately where required.
 that text. Neither is a substitute for inspecting the complete SDK result when asserting `isError`,
 native image content or block identity. Use `client.callTool` for those contracts and assert the
 actual error/result shape; do not assume all application refusals throw exceptions.
+
+Discover the current typed catalog through `client.listTools()`. Each grouped tool action has its
+own strict input schema; use `workflow` for definition/list/import/export operations and
+`execution` for start, step and run inspection. Pass structured values in their declared types.
+For native-file actions preserve the host descriptor and metadata in the declared top-level
+`file` or `stdin_file` field unchanged; that field is required only by the action that consumes it.
+A catalog revision refusal requires
+reinitialization with the same valid credential, not an old tool alias or a replacement token.
 
 ## Account admission and retirement
 
@@ -145,7 +155,7 @@ boundary; text-only SDK results do not establish native delivery.
 
 ## Workflow execution
 
-Reuse `startWorkflowExecutionState(client, workflowId, options)` for public prepare/execute start.
+Reuse `startWorkflowExecutionState(client, workflowId, options)` for public `execution` prepare/execute start.
 It returns process ID, current Step attempt ID and response. Use
 `advanceWorkflowExecution(client, execution, input)` to submit the current attempt and retain any
 successor attempt identity in that execution object. Supply the actual workflow schema's input.
@@ -155,6 +165,12 @@ Do not extract only a process ID and omit the required Step attempt. Replay, con
 unknown outcomes and stale-presentation recovery need their own explicit assertions at the public
 boundary. A deliberate new start is a separate intention; collecting an uncertain original is not
 permission to resubmit an effect.
+
+Use `execution` with `current_step` for the current presentation. An incompatible saved definition
+needs explicit `diagnose` and authorized `recover` on the same execution, not a fresh start or an
+unconditional rebind. Complete earlier-definition cases in
+[catalog task identity](../integration/catalog-task-identity.test.ts) retain captured originals,
+task state and guide files while verifying compatible continuation or guarded recovery.
 
 ```bash
 npm run test:api -- --file tests/api/workflow-update.test.ts

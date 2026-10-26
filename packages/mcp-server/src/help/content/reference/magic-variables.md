@@ -80,7 +80,7 @@ agents provide a note under this node's contract; it does not require or establi
 Notes appear in session queries:
 
 ```typescript
-mcp__moira__session({ action: "executions" });
+mcp__moira__execution({ action: "executions" });
 // Returns executions with note field populated
 ```
 

@@ -48,6 +48,7 @@ import { useResource } from "../hooks/useResource";
 import { useReadOwnerGuard } from "../auth/ReadScopeBoundary";
 import { DataRegion } from "@/components/DataRegion";
 import { InlineError } from "@/components/inline-error";
+import { artifactFileSizeMbToBytes } from "@mcp-moira/shared/artifact-size-policy";
 
 interface UserDetails {
   user: {
@@ -115,8 +116,8 @@ interface OAuthConnection {
   }>;
 }
 interface ArtifactQuota {
-  overrides: { quotaMb: number | null; maxFiles: number | null };
-  effective: { storageLimit: number; countLimit: number };
+  overrides: { quotaMb: number | null; maxFiles: number | null; maxFileSizeMb: number | null };
+  effective: { storageLimit: number; countLimit: number; maxFileSizeBytes: number };
   usage: {
     totalSize: number;
     totalArtifacts: number;
@@ -178,7 +179,8 @@ const AdminUserDetailContent: React.FC<{ id: string | undefined }> = ({ id }) =>
   const [quotaForm, setQuotaForm] = useState<{
     quotaMb: string;
     maxFiles: string;
-  }>({ quotaMb: "", maxFiles: "" });
+    maxFileSizeMb: string;
+  }>({ quotaMb: "", maxFiles: "", maxFileSizeMb: "" });
   const [quotaSaving, setQuotaSaving] = useState(false);
   const [blockDialogOpen, setBlockDialogOpen] = useState(false);
   const approveButtonRef = useRef<HTMLButtonElement>(null);
@@ -212,6 +214,7 @@ const AdminUserDetailContent: React.FC<{ id: string | undefined }> = ({ id }) =>
       setQuotaForm({
         quotaMb: artifactQuota.overrides.quotaMb?.toString() ?? "",
         maxFiles: artifactQuota.overrides.maxFiles?.toString() ?? "",
+        maxFileSizeMb: artifactQuota.overrides.maxFileSizeMb?.toString() ?? "",
       });
     }
   }, [artifactQuota, quotaEditMode]);
@@ -225,6 +228,7 @@ const AdminUserDetailContent: React.FC<{ id: string | undefined }> = ({ id }) =>
     const actual = {
       quotaMb: artifactQuota.overrides.quotaMb?.toString() ?? "",
       maxFiles: artifactQuota.overrides.maxFiles?.toString() ?? "",
+      maxFileSizeMb: artifactQuota.overrides.maxFileSizeMb?.toString() ?? "",
     };
     if (
       JSON.stringify(quotaFormRef.current) === submitted.before &&
@@ -250,9 +254,20 @@ const AdminUserDetailContent: React.FC<{ id: string | undefined }> = ({ id }) =>
           throw new Error(t("admin.userDetail.artifactQuota.invalidValue"));
         return parsed;
       };
+      const parseFileSize = (value: string) => {
+        if (value === "") return null;
+        const parsed = Number(value);
+        if (artifactFileSizeMbToBytes(parsed) === null)
+          throw new Error(t("admin.userDetail.artifactQuota.invalidFileSize"));
+        return parsed;
+      };
       const values = reset
-        ? { quotaMb: null, maxFiles: null }
-        : { quotaMb: parseValue(submitted.quotaMb), maxFiles: parseValue(submitted.maxFiles) };
+        ? { quotaMb: null, maxFiles: null, maxFileSizeMb: null }
+        : {
+            quotaMb: parseValue(submitted.quotaMb),
+            maxFiles: parseValue(submitted.maxFiles),
+            maxFileSizeMb: parseFileSize(submitted.maxFileSizeMb),
+          };
       const response = await productFetch(`/api/admin/users/${id}/artifact-quota`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -273,6 +288,7 @@ const AdminUserDetailContent: React.FC<{ id: string | undefined }> = ({ id }) =>
         expected: {
           quotaMb: result.data.quotaMb?.toString() ?? "",
           maxFiles: result.data.maxFiles?.toString() ?? "",
+          maxFileSizeMb: result.data.maxFileSizeMb?.toString() ?? "",
         },
       };
       await loadArtifactQuota();
@@ -1175,7 +1191,7 @@ const AdminUserDetailContent: React.FC<{ id: string | undefined }> = ({ id }) =>
       {multiUserAdminEnabled && (
         <Card className="mb-6" data-testid="artifact-quota-card">
           <CardHeader>
-            <div className="flex justify-between items-center">
+            <div className="flex flex-wrap justify-between items-center gap-2">
               <CardTitle>{t("admin.userDetail.artifactQuota.title")}</CardTitle>
               {artifactQuota && !quotaEditMode && (
                 <Button
@@ -1244,20 +1260,39 @@ const AdminUserDetailContent: React.FC<{ id: string | undefined }> = ({ id }) =>
                     </div>
                   </div>
 
+                  <p className="mb-4 text-sm" data-testid="quota-effective-file-size">
+                    <span className="font-medium">
+                      {t("admin.userDetail.artifactQuota.maxFileSize")}
+                    </span>
+                    : {formatSize(artifactQuota.effective.maxFileSizeBytes)}
+                  </p>
+
                   {/* Override status */}
                   <div className="p-3 bg-muted/50 rounded-lg mb-4">
                     {artifactQuota.overrides.quotaMb !== null ||
-                    artifactQuota.overrides.maxFiles !== null ? (
-                      <span className="text-sm text-info">
-                        {t("admin.userDetail.artifactQuota.customQuota")}:{" "}
-                        {artifactQuota.overrides.quotaMb !== null &&
-                          `${artifactQuota.overrides.quotaMb} MB`}
-                        {artifactQuota.overrides.quotaMb !== null &&
-                          artifactQuota.overrides.maxFiles !== null &&
-                          ", "}
-                        {artifactQuota.overrides.maxFiles !== null &&
-                          `${artifactQuota.overrides.maxFiles} files`}
-                      </span>
+                    artifactQuota.overrides.maxFiles !== null ||
+                    artifactQuota.overrides.maxFileSizeMb !== null ? (
+                      <div className="space-y-1 text-sm text-info">
+                        <p>{t("admin.userDetail.artifactQuota.customQuota")}</p>
+                        {artifactQuota.overrides.quotaMb !== null && (
+                          <p>
+                            {t("admin.userDetail.artifactQuota.storage")}:{" "}
+                            {formatSize(artifactQuota.overrides.quotaMb * 1024 ** 2)}
+                          </p>
+                        )}
+                        {artifactQuota.overrides.maxFiles !== null && (
+                          <p>
+                            {t("admin.userDetail.artifactQuota.files")}:{" "}
+                            {artifactQuota.overrides.maxFiles}
+                          </p>
+                        )}
+                        {artifactQuota.overrides.maxFileSizeMb !== null && (
+                          <p>
+                            {t("admin.userDetail.artifactQuota.maxFileSize")}:{" "}
+                            {formatSize(artifactQuota.overrides.maxFileSizeMb * 1024 ** 2)}
+                          </p>
+                        )}
+                      </div>
                     ) : (
                       <span className="text-sm text-muted-foreground">
                         {t("admin.userDetail.artifactQuota.usingDefault")}
@@ -1268,12 +1303,13 @@ const AdminUserDetailContent: React.FC<{ id: string | undefined }> = ({ id }) =>
                   {/* Edit form */}
                   {quotaEditMode && (
                     <div className="space-y-4 p-4 border rounded-lg" data-testid="quota-edit-form">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
-                          <label className="text-sm font-medium mb-1 block">
+                          <label htmlFor="quota-mb" className="text-sm font-medium mb-1 block">
                             {t("admin.userDetail.artifactQuota.overrideQuotaMb")}
                           </label>
                           <Input
+                            id="quota-mb"
                             type="number"
                             min="0"
                             placeholder={
@@ -1291,10 +1327,14 @@ const AdminUserDetailContent: React.FC<{ id: string | undefined }> = ({ id }) =>
                           </p>
                         </div>
                         <div>
-                          <label className="text-sm font-medium mb-1 block">
+                          <label
+                            htmlFor="quota-max-files"
+                            className="text-sm font-medium mb-1 block"
+                          >
                             {t("admin.userDetail.artifactQuota.overrideMaxFiles")}
                           </label>
                           <Input
+                            id="quota-max-files"
                             type="number"
                             min="0"
                             placeholder={artifactQuota.effective.countLimit + " (default)"}
@@ -1309,8 +1349,38 @@ const AdminUserDetailContent: React.FC<{ id: string | undefined }> = ({ id }) =>
                             {t("admin.userDetail.artifactQuota.nullHint")}
                           </p>
                         </div>
+                        <div>
+                          <label
+                            htmlFor="quota-max-file-size"
+                            className="text-sm font-medium mb-1 block"
+                          >
+                            {t("admin.userDetail.artifactQuota.overrideMaxFileSizeMb")}
+                          </label>
+                          <Input
+                            id="quota-max-file-size"
+                            type="number"
+                            min="0"
+                            step="any"
+                            placeholder={String(
+                              artifactQuota.effective.maxFileSizeBytes / 1024 ** 2,
+                            )}
+                            value={quotaForm.maxFileSizeMb}
+                            onChange={(e) => {
+                              const maxFileSizeMb = e.currentTarget.value;
+                              setQuotaForm((prev) => ({ ...prev, maxFileSizeMb }));
+                            }}
+                            aria-describedby="quota-max-file-size-hint"
+                            data-testid="quota-max-file-size-input"
+                          />
+                          <p
+                            id="quota-max-file-size-hint"
+                            className="text-xs text-muted-foreground mt-1"
+                          >
+                            {t("admin.userDetail.artifactQuota.nullHint")}
+                          </p>
+                        </div>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
                         <Button
                           onClick={handleSaveQuota}
                           disabled={quotaSaving}
@@ -1339,6 +1409,8 @@ const AdminUserDetailContent: React.FC<{ id: string | undefined }> = ({ id }) =>
                             setQuotaForm({
                               quotaMb: artifactQuota.overrides.quotaMb?.toString() ?? "",
                               maxFiles: artifactQuota.overrides.maxFiles?.toString() ?? "",
+                              maxFileSizeMb:
+                                artifactQuota.overrides.maxFileSizeMb?.toString() ?? "",
                             });
                           }}
                           disabled={quotaSaving}

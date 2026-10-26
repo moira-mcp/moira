@@ -4,6 +4,7 @@ import {
   WORKSPACE_REQUEST_ID_PATTERN,
 } from "../../shared/src/codespaces/workspace-request-id.ts";
 import { scopedCredentialActionSchema } from "../../shared/src/codespaces/scoped-credential-types.ts";
+import { localSetupContextSchema } from "../../shared/src/codespaces/local-setup-types.ts";
 
 const recordSchema = z
   .object({
@@ -21,9 +22,16 @@ const recordSchema = z
       "absent",
     ]),
     credentialId: z.string().uuid().optional(),
+    parentRequestId: z.string().regex(WORKSPACE_REQUEST_ID_PATTERN).optional(),
+    localSetup: localSetupContextSchema.optional(),
   })
   .strict()
   .superRefine((record, context) => {
+    if (Boolean(record.parentRequestId) !== Boolean(record.localSetup))
+      context.addIssue({
+        code: "custom",
+        message: "Setup correlation requires its exact parent and context",
+      });
     if (["live", "dispose_pending"].includes(record.state) && !record.credentialId)
       context.addIssue({
         code: "custom",
@@ -49,6 +57,29 @@ export async function inspectCredentialRequest(store, requestId) {
   const parsed = recordSchema.parse(record);
   if (parsed.requestId !== requestId) throw new Error("Security request identity changed");
   return parsed;
+}
+
+/** Exact stored parent association, not a guess from age, resource or pending state. */
+export async function findCredentialRequests(store, parentRequestId) {
+  if (!WORKSPACE_REQUEST_ID_PATTERN.test(parentRequestId) || !store.requestIds)
+    throw new Error("Exact credential parent lookup is unavailable");
+  const records = [];
+  for (const requestId of await store.requestIds()) {
+    const value = await store.read(requestId);
+    if (value === null) continue;
+    // Select by the real durable association before decoding another owner's
+    // credential state. A foreign historical shape is not this parent's proof.
+    const association = z
+      .object({ parentRequestId: z.string().regex(WORKSPACE_REQUEST_ID_PATTERN).optional() })
+      .passthrough()
+      .parse(value);
+    if (association.parentRequestId !== parentRequestId) continue;
+    const record = await inspectCredentialRequest(store, requestId);
+    if (!record || record.parentRequestId !== parentRequestId)
+      throw new Error("Security parent changed during exact lookup");
+    records.push(record);
+  }
+  return records;
 }
 export async function updateCredentialRequest(store, requestId, state, credentialId) {
   const previous = await inspectCredentialRequest(store, requestId);

@@ -54,7 +54,7 @@ describe("User Lock Management API - Permission Checks", () => {
     const authenticated = await createAuthenticatedMCPClient();
     humanMcpClient = authenticated.client;
     cleanupHumanMcp = authenticated.cleanup;
-    const workflow = await callMCPTool(humanMcpClient, "manage", {
+    const workflow = await callMCPTool(humanMcpClient, "workflow", {
       action: "create",
       workflow: {
         metadata: {

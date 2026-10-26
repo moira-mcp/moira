@@ -17,6 +17,7 @@ import {
   canonicalJson,
   codespaceObservationErrorCode,
   controllerOperationSchema,
+  controllerWorkspaceResolutionSchema,
   type CodespaceSummaryView,
   type CodespaceUnavailableResourceView,
   type CodespaceDiscoveryView,
@@ -42,6 +43,7 @@ import type { WorkspaceClient } from "./workspace-router.js";
 import { getLocalRepositoryAdmissionService } from "./local-repository-admission-factory.js";
 import { getLocalPrivateRepositoryCreationService } from "./local-private-repository-creation-factory.js";
 import { LocalCodespaceResourceService } from "./local-codespace-resource-service.js";
+import { CodespaceEffectObservationError } from "./codespace-effect-observation-error.js";
 
 type Input = Record<string, unknown>;
 export interface ResolvedWorkspace {
@@ -63,17 +65,6 @@ export interface WorkspaceSemanticDependencies {
   repositories: ReturnType<typeof getLocalRepositoryAdmissionService>;
   repositoryCreation: ReturnType<typeof getLocalPrivateRepositoryCreationService>;
 }
-const resolvedLocalSchema = z
-  .object({
-    resourceId: z.string().uuid(),
-    resourceGeneration: z.number().int().positive().safe(),
-    routeGeneration: z.number().int().positive().safe(),
-    repositoryId: z.string().uuid(),
-    localSpaceId: z.string().uuid(),
-    localGeneration: z.number().int().positive().safe(),
-    operationMarker: z.string().regex(/^moira-[a-f0-9]{24}$/),
-  })
-  .strict();
 const discoveryCursorSchema = z
   .string()
   .transform((value, context) => {
@@ -142,7 +133,7 @@ export function createWorkspaceSemanticServices(dependencies: WorkspaceSemanticD
     selector: { resourceId: string } | { spaceId: string; operationMarker: string },
   ): Promise<ResolvedWorkspace> => {
     const selected = controllerIdentity(userId, deviceId);
-    const retained = resolvedLocalSchema.parse(
+    const retained = controllerWorkspaceResolutionSchema.parse(
       await checkedControllerRead(userId, selected, "/v1/controller/workspaces/resolve", {
         deviceId,
         ...selector,
@@ -317,10 +308,10 @@ export function createWorkspaceSemanticServices(dependencies: WorkspaceSemanticD
   const projectRepository = (result: RepositoryResult, controller: ControllerReference) => {
     const instruction =
       result.status === "applied"
-        ? "Use the returned target with workspace_create and the chosen branch."
+        ? "Use the returned target with codespace action create and the chosen branch."
         : result.status === "rejected"
           ? "Inspect this original refusal before deciding on another repository operation. If the repository was already created, repair its access in Moira Settings without creating a replacement."
-          : "Restore the selected GitHub and computer permissions in Moira Settings, then inspect this original operation. A retained private-repository setup can be continued explicitly with operation_resume; an absent record cannot be resumed.";
+          : "Restore the selected GitHub and computer permissions in Moira Settings, then inspect this original operation. A retained private-repository setup can be continued explicitly with codespace action resume; an absent record cannot be resumed.";
     return {
       status: result.status,
       instruction,
@@ -357,6 +348,7 @@ export function createWorkspaceSemanticServices(dependencies: WorkspaceSemanticD
     };
   };
   const effect = async (
+    userId: string,
     owner: OwnerSelector,
     requestId: string,
     kind: OperationKind,
@@ -366,6 +358,7 @@ export function createWorkspaceSemanticServices(dependencies: WorkspaceSemanticD
     const operation = operationReference(owner, requestId, kind, journal);
     try {
       const result = await action();
+      if (owner.kind === "controller") authorizeController(userId, owner);
       const observed = result && typeof result === "object" ? (result as Input) : {};
       if (observed.status === "rejected")
         return {
@@ -403,6 +396,18 @@ export function createWorkspaceSemanticServices(dependencies: WorkspaceSemanticD
         ...(state === "completed" ? { outcome: { ok: true, result } } : { original: result }),
       };
     } catch (error) {
+      // A private completed effect never substitutes for current permission to disclose it.
+      // A refusal here escapes this catch rather than becoming an observation diagnostic.
+      if (owner.kind === "controller") authorizeController(userId, owner);
+      if (error instanceof CodespaceEffectObservationError)
+        return {
+          operation,
+          kind,
+          description: "Original owner operation",
+          state: "completed",
+          outcome: { ok: true, result: null },
+          observation_error: { code: error.code },
+        };
       const known =
         error instanceof CodespaceResourceError ||
         error instanceof LocalDeviceError ||
@@ -470,6 +475,62 @@ export function createWorkspaceSemanticServices(dependencies: WorkspaceSemanticD
           ? {}
           : { original: { ...phase, ...(result.outcome ? { outcome: result.outcome } : {}) } }),
     };
+  };
+  const collectedControllerView = async (
+    userId: string,
+    reference: string,
+    result: Awaited<ReturnType<LocalDeviceService["getOperation"]>>,
+  ) => {
+    const view = controllerView(reference, result);
+    const original = decodeReference(reference, "operation");
+    if (
+      view.state !== "completed" ||
+      !result.outcome?.ok ||
+      (original.kind !== "lifecycle" && original.kind !== "unknown")
+    )
+      return view;
+    if (
+      original.kind === "unknown" &&
+      (!result.outcome.result ||
+        typeof result.outcome.result !== "object" ||
+        !("resourceId" in result.outcome.result))
+    )
+      return view;
+    if (original.owner.kind !== "controller") invalid("The original owner is not a controller.");
+    let captured: CodespaceSummaryView | undefined;
+    let observationError: unknown;
+    try {
+      const { resourceId } = z
+        .object({ resourceId: z.string().uuid() })
+        .parse(result.outcome.result);
+      const provider = dependencies.select(userId, { codespaceId: resourceId });
+      if (!provider.resource) unavailable("The original resource projection is unavailable.");
+      const snapshot = await provider.resource.projectRetainedSnapshot(
+        userId,
+        result.outcome.result,
+      );
+      if (snapshot.device_id !== original.owner.deviceId)
+        invalid("The retained resource belongs to a different controller.");
+      captured = snapshot;
+    } catch (error) {
+      // Collection already proved the effect. A missing historical projection is a
+      // separate observation failure, never permission to resubmit that effect.
+      observationError = error;
+    }
+    // Check current account/device authority on both projection paths, outside the
+    // catch that preserves known effect completion for unavailable observations.
+    authorizeController(userId, original.owner);
+    return captured
+      ? {
+          ...view,
+          kind: "lifecycle" as const,
+          outcome: { ok: true, result: project(userId, captured) },
+        }
+      : {
+          ...view,
+          outcome: { ok: true, result: null },
+          observation_error: { code: codespaceObservationErrorCode(observationError) },
+        };
   };
   const invoke = async (
     userId: string,
@@ -727,7 +788,7 @@ export function createWorkspaceSemanticServices(dependencies: WorkspaceSemanticD
           ? `ws1-${original.requestId}`
           : original.requestId,
       );
-      return controllerView(String(input.reference), result);
+      return collectedControllerView(userId, String(input.reference), result);
     }
     if (tool === "operation_resume") {
       const reference = String(input.reference);
@@ -753,6 +814,7 @@ export function createWorkspaceSemanticServices(dependencies: WorkspaceSemanticD
         connectionId: original.owner.connectionId,
       };
       return effect(
+        userId,
         original.owner,
         original.requestId,
         "repository",
@@ -846,6 +908,7 @@ export function createWorkspaceSemanticServices(dependencies: WorkspaceSemanticD
         invalid("The repository target has no matching provider.");
       const requestId = suppliedRequestId ?? createWorkspaceRequestId();
       return effect(
+        userId,
         { kind: "controller", ...target.controller },
         requestId,
         "lifecycle",
@@ -889,7 +952,7 @@ export function createWorkspaceSemanticServices(dependencies: WorkspaceSemanticD
       const owner = { kind: "controller" as const, ...controller };
       const resource = provider.resource;
       const requestId = suppliedRequestId ?? createWorkspaceRequestId();
-      return effect(owner, requestId, "lifecycle", async () => {
+      return effect(userId, owner, requestId, "lifecycle", async () => {
         if (tool === "workspace_adopt") {
           if (!("adopt" in resource))
             invalid("Adoption applies to an existing GitHub environment.");
@@ -952,6 +1015,7 @@ export function createWorkspaceSemanticServices(dependencies: WorkspaceSemanticD
       authorizeController(userId, selected);
       const requestId = (suppliedRequestId ?? createWorkspaceRequestId()).replace(/^ws1-/, "");
       return effect(
+        userId,
         { kind: "controller", ...selected },
         requestId,
         "repository",
@@ -988,18 +1052,30 @@ export function createWorkspaceSemanticServices(dependencies: WorkspaceSemanticD
       if (!resource || !("registerExisting" in resource) || !("adopt" in resource))
         unavailable("GitHub environment adoption is unavailable.");
       const requestId = suppliedRequestId ?? createWorkspaceRequestId();
-      return effect({ kind: "controller", ...selected }, requestId, "lifecycle", async () => {
-        const registered = await resource.registerExisting(userId, String(input.name), {
-          requestId,
-          deviceId: selected.deviceId,
-        });
-        return project(
-          userId,
-          await resource.adopt(userId, registered.codespace_id, requestId, registered.generation, {
+      return effect(
+        userId,
+        { kind: "controller", ...selected },
+        requestId,
+        "lifecycle",
+        async () => {
+          const registered = await resource.registerExisting(userId, String(input.name), {
+            requestId,
             deviceId: selected.deviceId,
-          }),
-        );
-      });
+          });
+          return project(
+            userId,
+            await resource.adopt(
+              userId,
+              registered.codespace_id,
+              requestId,
+              registered.generation,
+              {
+                deviceId: selected.deviceId,
+              },
+            ),
+          );
+        },
+      );
     }
     invalid("This purpose is not a controller operation.");
   };

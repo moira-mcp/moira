@@ -7,10 +7,10 @@ description: How to modify existing workflows safely
 
 ### Via MCP Tools
 
-Use the `manage` tool with edit action:
+Use the `workflow` tool with edit action:
 
 ```typescript
-mcp__moira__manage({
+mcp__moira__workflow({
   action: "edit",
   workflowId: "my-workflow",
   changes: {
@@ -24,12 +24,12 @@ mcp__moira__manage({
 Start the management workflow:
 
 ```typescript
-mcp__moira__start({
+mcp__moira__execution({
   action: "prepare",
   workflowId: "moira/workflow-management-flow",
   parentExecutionId: "none",
 });
-mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" });
+mcp__moira__execution({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" });
 ```
 
 Select "edit" when prompted for action.
@@ -226,7 +226,7 @@ creates or changes the workflow and uses Moira's official validator.
 ### Update Metadata
 
 ```typescript
-mcp__moira__manage({
+mcp__moira__workflow({
   action: "edit",
   workflowId: "my-workflow",
   changes: {
@@ -241,7 +241,7 @@ mcp__moira__manage({
 ### Update Node Content
 
 ```typescript
-mcp__moira__manage({
+mcp__moira__workflow({
   action: "edit",
   workflowId: "my-workflow",
   changes: {
@@ -261,7 +261,7 @@ mcp__moira__manage({
 ### Add Nodes
 
 ```typescript
-mcp__moira__manage({
+mcp__moira__workflow({
   action: "edit",
   workflowId: "my-workflow",
   changes: {
@@ -281,7 +281,7 @@ mcp__moira__manage({
 ### Remove Nodes
 
 ```typescript
-mcp__moira__manage({
+mcp__moira__workflow({
   action: "edit",
   workflowId: "my-workflow",
   changes: {
@@ -300,7 +300,7 @@ CLI's `delete` does this with you: it refuses until every incoming edge is retar
 1. **Load the complete baseline**
 
    ```typescript
-   mcp__moira__manage({
+   mcp__moira__workflow({
      action: "get",
      workflowId: "my-workflow",
      includeNodes: true,
@@ -317,7 +317,7 @@ CLI's `delete` does this with you: it refuses until every incoming edge is retar
 2. **Find nodes to edit**
 
    ```typescript
-   mcp__moira__manage({
+   mcp__moira__workflow({
      action: "search-nodes",
      workflowId: "my-workflow",
      query: "search term",
@@ -327,7 +327,7 @@ CLI's `delete` does this with you: it refuses until every incoming edge is retar
 3. **Get node details**
 
    ```typescript
-   mcp__moira__manage({
+   mcp__moira__workflow({
      action: "get-node",
      workflowId: "my-workflow",
      nodeId: "node-id",
@@ -340,7 +340,7 @@ CLI's `delete` does this with you: it refuses until every incoming edge is retar
    definition and reconcile the intended change; do not overwrite a newer graph blindly.
 
    ```typescript
-   mcp__moira__manage({
+   mcp__moira__workflow({
      action: "edit",
      workflowId: "my-workflow",
      expectedRevision: baselineRevision,
@@ -348,14 +348,21 @@ CLI's `delete` does this with you: it refuses until every incoming edge is retar
    });
    ```
 
-5. **Validate**
+5. **Check the saved definition**
 
    ```typescript
-   mcp__moira__manage({
-     action: "validate",
+   mcp__moira__workflow({
+     action: "get",
      workflowId: "my-workflow",
+     includeNodes: true,
+     includeValidation: true,
    });
    ```
+
+   Read the returned `validation` alongside the complete saved definition. To validate an authored
+   definition before saving, call `workflow({ action: "validate", workflow: completeWorkflow })`.
+   Here `completeWorkflow` is the complete authored workflow JSON, not a workflow ID, structure
+   summary or the response envelope from `get`. Preserve its graph and extension fields.
 
 ## Editing Without Extra Machinery
 
@@ -373,7 +380,7 @@ assuming they match.
 
 ```bash
 # Fetch the served definition through a one-time download token
-mcp__moira__token({ action: "download", workflowId: "moira/quick-task" })
+mcp__moira__workflow({ action: "download", workflowId: "moira/quick-task" })
 ```
 
 When the two differ, decide the baseline deliberately: which definition the requested change actually
@@ -480,9 +487,76 @@ under «Via the Workflow CLI» above.
 
 ## Version Control
 
+### Definition versions and saved history
+
+Three values describe different things:
+
+- `metadata.version` is the author's semantic version, such as `1.1.0`.
+- `revision` from `workflow` (`get`) is the current write token. Pass it as `expectedRevision` when
+  applying a guarded edit or rollback; it is not a historical snapshot number.
+- `revision` in `workflow` (`history`) identifies an immutable snapshot of the complete saved definition.
+  Separate saves retain separate snapshots even when their semantic versions are equal.
+
+History compresses complete definitions and reuses identical content within a workflow. Each save
+still retains its own history number, author and time; storage reuse does not discard revisions.
+Reading or restoring a snapshot does not require replaying earlier changes, and JSON is returned
+in a readable format.
+
+Reading, comparing or restoring history requires editing authority: ownership or an explicit
+`edit` grant, directly or through a group. Public visibility or a `use` grant alone does not expose
+past private definitions. History records definition
+writes, including catalog synchronization and stored-schema upgrades. When a definition has no
+recorded history, its actual current content becomes the baseline before its next content write;
+earlier unrecorded saves cannot be recovered. CLI file backups are separate from server history.
+
+List the available snapshots, then read a selected snapshot or compare two returned numbers:
+
+```typescript
+mcp__moira__workflow({ action: "history", workflowId: "my-workflow" });
+mcp__moira__workflow({ action: "get-revision", workflowId: "my-workflow", revision: 1 });
+mcp__moira__workflow({
+  action: "compare-revisions",
+  workflowId: "my-workflow",
+  fromRevision: 1,
+  toRevision: 2,
+});
+```
+
+Replace `1` and `2` with snapshot numbers returned by history. An absent snapshot is an error,
+not an empty comparison. The snapshot contains the full graph, including registry, runtime policy
+and process presentation, rather than only the fields visible in the browser editor.
+
+Before restoring, read the current definition with `workflow` (`get`) and retain its write token.
+After inspecting the selected content, pass that token to rollback:
+
+```typescript
+mcp__moira__workflow({
+  action: "rollback",
+  workflowId: "my-workflow",
+  revision: 1,
+  expectedRevision: currentWriteRevision,
+});
+```
+
+Here `currentWriteRevision` is the `revision` from that current read, and `1` is the chosen history
+number. Rollback validates and migrates the selected definition, preserves the existing workflow's
+ID, owner and current sharing, and appends a new snapshot. The result returns the new write
+`revision`, new `historyRevision` and `restoredFrom`. A stale token produces
+`WORKFLOW_REVISION_CONFLICT` without changing the graph or history: reload and reassess the intended
+restoration before retrying. Soft deletion retains history; permanent deletion removes it.
+Content rollback is separate from an administrator restoring a deleted workflow.
+
+Restoration changes the saved definition, not the state of an existing run. Runs read the current
+definition; compatible paused steps can continue normally, while changed step semantics require
+inspection with `execution` (`diagnose`) and an authorized `execution` (`recover`) decision. Do not replay an
+old attempt, skip unfinished work or repeat an uncertain effect. See
+[stale presentation diagnosis and recovery](/docs/integration/troubleshooting/#current_presentation_stale).
+For browser inspection and guarded restoration, see the
+[flow page](/docs/guides/flow-page/#version-history).
+
 ### Increment Version
 
-Always update version when making changes:
+Use semantic version changes to communicate the meaning of an authored change:
 
 ```typescript
 {
@@ -500,8 +574,10 @@ Version semantics:
 
 ### Compare Versions
 
+To compare two different workflow definitions, rather than snapshots of one workflow, use `diff`:
+
 ```typescript
-mcp__moira__manage({
+mcp__moira__workflow({
   action: "diff",
   workflowId: "my-workflow",
   compareWorkflowId: "my-workflow-old",

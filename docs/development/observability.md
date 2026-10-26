@@ -48,7 +48,7 @@ Email failures preserve provider/error classification and masked recipient diagn
 
 The detached service owns `~/.local/state/moira/workspace-service/daemon.log`, `.log.1` and `.log.2` in the guest, each bounded to 1 MiB. [daemon-diagnostics.mjs](../../packages/workspace-service/src/daemon-diagnostics.mjs) rotates synchronously and bounds oversized existing files on restart; stdout/stderr/Node warnings share that sink. It verifies inherited kernel lock/descriptor identity before opening private ordinary owned files; symlink/hard-link substitution or writer failure refuses service instead of using unbounded inherited output.
 
-These are service diagnostics, not command stdout/stderr or custody journals. Retrieve process output through `process_output` or:
+These are service diagnostics, not command stdout/stderr or custody journals. Retrieve process output through `codespace_terminal` (`output`) or:
 
 ```bash
 moira-workspace output "$PROCESS_REF" --stream stdout

@@ -45,6 +45,10 @@ export const MANAGE_WORKFLOW_ACTIONS = [
   "list-invites",
   "revoke-access",
   "revoke-invite",
+  "history",
+  "get-revision",
+  "compare-revisions",
+  "rollback",
 ] as const;
 
 export const manageWorkflowSchema = z.object({
@@ -150,8 +154,28 @@ export const manageWorkflowSchema = z.object({
     .min(0)
     .optional()
     .describe(
-      "edit only: the workflow revision the changes were prepared against (from get); the edit is refused when the stored revision differs",
+      "edit or rollback: the current definition revision from get; required for rollback; a stale value refuses the write",
     ),
+  revision: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      "Immutable content-history revision for get-revision or rollback; distinct from metadata.version and expectedRevision",
+    ),
+  fromRevision: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Older content-history revision for compare-revisions"),
+  toRevision: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Newer content-history revision for compare-revisions"),
   includeNodes: z.boolean().optional().describe("Include full node definitions in get response"),
   includeValidation: z.boolean().optional().describe("Include validation results in response"),
   offset: z.number().optional().describe("Pagination offset for node listing"),
@@ -442,14 +466,17 @@ export const managePlaybooksSchema = z.object({
 
 export const manageArtifactsSchema = z.object({
   action: z
-    .enum(["upload", "update", "delete", "list", "stats", "token"])
-    .describe("Action to perform on artifacts"),
+    .enum(["token", "upload", "update", "delete", "list", "stats"])
+    .describe("Prefer token then HTTP file upload for creation; upload is the no-HTTP fallback"),
   name: z.string().optional().describe("Artifact name (required for upload action)"),
-  content: z.string().optional().describe("HTML content (required for upload and update actions)"),
+  content: z
+    .string()
+    .optional()
+    .describe("Inline HTML for update or no-HTTP upload fallback; prefer token plus a local file"),
   executionId: z
     .string()
     .optional()
-    .describe("Link artifact to workflow execution (optional for upload)"),
+    .describe("Link inline upload to an execution; for HTTP upload send executionId in the body"),
   uuid: z.string().optional().describe("Artifact UUID (required for update and delete actions)"),
   limit: z
     .number()

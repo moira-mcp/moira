@@ -15,6 +15,9 @@
 import type Database from "better-sqlite3";
 import { migrateWorkflowGraph } from "@mcp-moira/workflow-engine/migration";
 import { createLogger } from "../logging/logger.js";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import * as schema from "../database/schema.js";
+import { recordWorkflowRevision } from "../database/workflow-history.js";
 
 export interface StoredDefinitionUpgradeResult {
   workflows: number;
@@ -55,7 +58,13 @@ export function upgradeStoredWorkflowDefinitions(
       }
       const migration = migrateWorkflowGraph(parsed as AnyRecord);
       if (!migration.changed) continue;
-      updateWorkflow.run(JSON.stringify(migration.graph), row.id);
+      const graph = JSON.stringify(migration.graph);
+      updateWorkflow.run(graph, row.id);
+      recordWorkflowRevision(drizzle(sqlite, { schema }), {
+        id: row.id,
+        graph,
+        previousGraph: row.graph,
+      });
       result.workflows += 1;
     }
 

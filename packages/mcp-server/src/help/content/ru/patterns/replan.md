@@ -31,7 +31,7 @@ flowchart TD
 
 ## 1. Teleport в любой момент выполнения
 
-Нода `teleport` достижима вызовом `step({ processId, attemptId, teleportTo: "teleport-replan" })` с
+Нода `teleport` достижима вызовом `execution({ action: "step", processId, attemptId, teleportTo: "teleport-replan" })` с
 идентификатором попытки из текущего предъявления. У неё нет
 входящих связей — она исключена из предупреждений о недостижимых нодах и не может быть достигнута
 обычной маршрутизацией. Её `hint` доходит до агента на каждом шаге, поэтому в нём названы и законный

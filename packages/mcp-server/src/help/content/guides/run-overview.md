@@ -12,7 +12,7 @@ showing what it waits for and how far it got. Only your own runs are shown, also
 Each card starts with the run's status:
 
 - **Waiting for you** — the run stands on a step its workflow marks as waiting for a person's
-  decision (`humanGate`), or the agent said it cannot go on without you (`session await-user`). The
+  decision (`humanGate`), or the agent said it cannot go on without you (`execution` (`await-user`)). The
   card shows what you are asked — the step's label, or «Agent asks: …» with the question — and a line
   saying whether you were notified. Answer the agent in the chat, where it waits; the overview takes no
   answers, and the status clears by itself once the agent goes on.
@@ -21,7 +21,7 @@ Each card starts with the run's status:
 - **Completed** — the run ended without an explicit stop, including a failed run or a retired
   blocked start.
 - **Stopped** — the owner permanently ended the run with a recorded reason, through the web
-  control or `session stop-execution`. The card and detail show that reason; it does not mean the task was completed.
+  control or `execution` (`stop-execution`). The card and detail show that reason; it does not mean the task was completed.
 
 The activity order puts the latest UTC hour first. Within an hour, creation time and run identity
 keep the order stable; waiting status does not override the chosen order.

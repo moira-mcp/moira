@@ -28,6 +28,14 @@ import {
   AuditAction,
 } from "@mcp-moira/shared";
 import { cpuTimeMs } from "../../utils/cpu-time.js";
+import { UserRepository } from "../../../packages/shared/src/database/repositories/user-repository.js";
+import { GlobalSettingsRepository } from "../../../packages/shared/src/database/repositories/global-settings-repository.js";
+import { RevisionRepository } from "../../../packages/shared/src/database/repositories/revision-repository.js";
+import { GlobalSettingsService } from "../../../packages/shared/src/services/global-settings-service.js";
+import {
+  artifactFileSizeMbToBytes,
+  getArtifactJsonBodyLimit,
+} from "@mcp-moira/shared/artifact-size-policy";
 
 const MIGRATIONS_PATH = path.join(process.cwd(), "packages/web-backend/drizzle");
 
@@ -118,6 +126,104 @@ describe("ArtifactService", () => {
   });
 
   // ===== Validation Function Tests =====
+
+  describe("effective per-file policy", () => {
+    function configuredService() {
+      const users = new UserRepository(db);
+      const globals = new GlobalSettingsService(
+        new GlobalSettingsRepository(db),
+        auditRepo,
+        new RevisionRepository(db),
+      );
+      const service = new ArtifactService(artifactRepo, auditRepo, undefined, globals, {
+        getUserQuota: (id) => users.getArtifactQuota(id),
+      });
+      return { users, globals, service };
+    }
+
+    it("persists a fractional override, isolates owners and resets through global to default", async () => {
+      const { users, globals, service } = configuredService();
+      await globals.setValue("artifacts.max_file_size_mb", "2.5", TEST_USER_ID);
+      await users.updateArtifactQuota(TEST_USER_ID, 100, 50, 7.5);
+      expect((await users.getArtifactQuota(TEST_USER_ID)).artifactMaxFileSizeMb).toBe(7.5);
+      expect(await service.getMaxFileSize(TEST_USER_ID)).toBe(7_864_320);
+      expect(await service.getMaxFileSize(TEST_USER_ID_2)).toBe(2_621_440);
+      expect((await service.getStats(TEST_USER_ID)).maxFileSizeBytes).toBe(7_864_320);
+      await users.updateArtifactQuota(TEST_USER_ID, 100, 50, null);
+      expect(await service.getMaxFileSize(TEST_USER_ID)).toBe(2_621_440);
+      await globals.setValue("artifacts.max_file_size_mb", null, TEST_USER_ID);
+      expect(await service.getMaxFileSize(TEST_USER_ID)).toBe(MAX_ARTIFACT_SIZE);
+    });
+
+    it("accepts exact UTF-8 bytes, rejects one extra byte on update and preserves a rejected token", async () => {
+      const { users, service } = configuredService();
+      const content = "<p>Я</p>";
+      await users.updateArtifactQuota(TEST_USER_ID, 100, 50, 9 / (1024 * 1024));
+      const created = await service.create(TEST_USER_ID, { name: "Exact", content });
+      expect(created.size).toBe(9);
+      await expect(
+        service.update(TEST_USER_ID, created.uuid, { content: content + " " }),
+      ).rejects.toMatchObject({ size: 10, limit: 9 });
+      expect((await service.get(TEST_USER_ID, created.uuid)).content).toBe(content);
+      const token = await service.createUploadToken(TEST_USER_ID);
+      await expect(
+        service.createWithToken(token, { name: "Too big", content: content + " " }),
+      ).rejects.toThrow(ArtifactSizeExceededError);
+      const uploaded = await service.createWithToken(token, { name: "Exact token", content });
+      expect((await service.get(TEST_USER_ID, uploaded.uuid)).content).toBe(content);
+      await expect(service.validateToken(token)).rejects.toThrow(InvalidArtifactTokenError);
+    });
+
+    it("uses a raised owner's limit for create and update instead of the old global ceiling", async () => {
+      const { users, service } = configuredService();
+      await users.updateArtifactQuota(TEST_USER_ID, 100, 50, 7);
+      const content = "<p>" + "x".repeat(6 * 1024 * 1024) + "</p>";
+      const created = await service.create(TEST_USER_ID, { name: "Large", content });
+      await expect(
+        service.create(TEST_USER_ID_2, { name: "Default user", content }),
+      ).rejects.toThrow(ArtifactSizeExceededError);
+      const updated = content + "Я";
+      await service.update(TEST_USER_ID, created.uuid, { content: updated });
+      expect((await service.get(TEST_USER_ID, created.uuid)).content).toBe(updated);
+    });
+
+    it("does not let malformed persisted policy bypass the fallback size limit", async () => {
+      const { service } = configuredService();
+      sqlite.prepare("UPDATE user SET artifactMaxFileSizeMb=? WHERE id=?").run(-1, TEST_USER_ID);
+      sqlite
+        .prepare("UPDATE globalSetting SET value=? WHERE key=?")
+        .run("not-a-number", "artifacts.max_file_size_mb");
+      expect(await service.getMaxFileSize(TEST_USER_ID)).toBe(MAX_ARTIFACT_SIZE);
+      await expect(
+        service.create(TEST_USER_ID, {
+          name: "Still bounded",
+          content: "<p>" + "x".repeat(MAX_ARTIFACT_SIZE) + "</p>",
+        }),
+      ).rejects.toThrow(ArtifactSizeExceededError);
+    });
+  });
+
+  describe("content and JSON frame conversion", () => {
+    it("keeps fractional MiB and whole byte precision without truncation", () => {
+      expect(artifactFileSizeMbToBytes("1.5")).toBe(1_572_864);
+      expect(artifactFileSizeMbToBytes(1 / (1024 * 1024))).toBe(1);
+      expect(getArtifactJsonBodyLimit(1)).toBe(65_542);
+      expect(getArtifactJsonBodyLimit(1024)).toBeGreaterThan(
+        Buffer.byteLength(JSON.stringify({ name: "Example", content: "\u0000".repeat(1024) })),
+      );
+    });
+
+    it.each([0, -1, NaN, Infinity, Number.MAX_SAFE_INTEGER, "", "1.5junk", 0.1, null, true])(
+      "rejects an invalid or unrepresentable MiB policy %p",
+      (value) => {
+        expect(artifactFileSizeMbToBytes(value)).toBeNull();
+      },
+    );
+
+    it("refuses unsafe JSON arithmetic rather than returning an unbounded frame", () => {
+      expect(() => getArtifactJsonBodyLimit(Number.MAX_SAFE_INTEGER)).toThrow(RangeError);
+    });
+  });
 
   describe("validateHtmlContent", () => {
     it("accepts valid HTML with doctype", () => {
