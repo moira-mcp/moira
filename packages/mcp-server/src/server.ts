@@ -47,6 +47,7 @@ import {
 } from "@mcp-moira/shared";
 import {
   getCodespaceObservabilityService,
+  getLocalDeviceService,
   initializeCommunicationFileOwner,
   CommunicationOwnerTransport,
   authenticateCommunicationOwner,
@@ -497,6 +498,13 @@ app.get(
   createWorkspacePublicationHandler({
     authorize: authorizeControllerPublication,
     workspace: getControllerClient(),
+    endpointIdentity: (userId, resourceId) => {
+      const identity = getLocalDeviceService().getDeviceIdentity(userId, resourceId);
+      return {
+        deviceGeneration: identity.deviceGeneration,
+        connectionId: identity.connectionId,
+      };
+    },
   }),
 );
 app.get(

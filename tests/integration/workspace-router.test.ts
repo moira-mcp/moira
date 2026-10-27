@@ -809,6 +809,7 @@ test("controller routes use device authority without guest readiness and replace
               deviceId: request.headers["x-moira-device-id"],
               generation: request.headers["x-moira-device-generation"],
               connectionId: request.headers["x-moira-connection-id"],
+              endpointIdentity: request.headers["x-moira-endpoint-identity"],
             },
       ),
     );
@@ -849,6 +850,7 @@ test("controller routes use device authority without guest readiness and replace
     deviceId: binding.resourceId,
     generation: "7",
     connectionId: binding.connectionId,
+    endpointIdentity: binding.connectionId,
   });
   await expect(
     f.client.json(binding.userId, binding.resourceId, {

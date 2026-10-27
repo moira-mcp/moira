@@ -45,7 +45,7 @@ export interface LocalControllerClient {
   json(
     userId: string,
     deviceId: string,
-    input: { method: string; path: string; body?: unknown },
+    input: { method: string; path: string; body?: unknown; headers?: Record<string, string> },
     signal?: AbortSignal,
   ): Promise<Record<string, unknown>>;
 }
@@ -338,6 +338,11 @@ export class LocalDeviceService {
       value = await this.controller.json(userId, deviceId, {
         method: "GET",
         path,
+        headers: {
+          "x-moira-device-id": identity.deviceId,
+          "x-moira-device-generation": String(identity.deviceGeneration),
+          "x-moira-connection-id": identity.connectionId,
+        },
       });
     } catch {
       throw new LocalDeviceError("LOCAL_UNAVAILABLE", "The device owner is unavailable.");
@@ -857,6 +862,11 @@ export class LocalDeviceService {
         method: "POST",
         path: "/v1/controller/workspaces/resolve",
         body: { deviceId: auth.deviceId, resourceId },
+        headers: {
+          "x-moira-device-id": auth.deviceId,
+          "x-moira-device-generation": String(auth.deviceGeneration),
+          "x-moira-connection-id": auth.connectionId,
+        },
       }),
     );
     // Both owner reads can yield. Neither a cached policy response nor a resolver
