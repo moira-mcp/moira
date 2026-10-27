@@ -1133,7 +1133,7 @@ export class HttpGitHubCodespaceClient
     } catch {
       throw new GitHubCodespaceClientError("Scoped credential disposal unconfirmed", 502);
     }
-    if (response.status !== 204)
+    if (response.status !== 204 && response.status !== 404)
       throw new GitHubCodespaceClientError(
         "Scoped credential disposal unconfirmed",
         response.status,

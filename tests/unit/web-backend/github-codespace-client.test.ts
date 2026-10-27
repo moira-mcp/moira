@@ -232,15 +232,19 @@ describe("HttpGitHubCodespaceClient", () => {
     });
     expect(String(url)).not.toContain("ghu_parent");
   });
-  test("scoped disposal requires confirmed204 and sanitizes provider or transport errors", async () => {
+  test("scoped disposal accepts confirmed token absence and preserves other unconfirmed failures", async () => {
     const fetchImpl = jest
       .fn<typeof fetch>()
       .mockResolvedValue(
         new Response(JSON.stringify({ message: "ghu_child-secret" }), { status: 404 }),
       );
     const client = new HttpGitHubCodespaceClient(config, fetchImpl);
+    await expect(client.revokeScopedToken("ghu_child-secret")).resolves.toBeUndefined();
+    fetchImpl.mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: "ghu_child-secret" }), { status: 500 }),
+    );
     await expect(client.revokeScopedToken("ghu_child-secret")).rejects.toMatchObject({
-      status: 404,
+      status: 500,
       message: "Scoped credential disposal unconfirmed",
     });
     fetchImpl.mockRejectedValueOnce(new Error("ghu_child-secret"));
