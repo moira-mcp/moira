@@ -835,6 +835,11 @@ describe("semantic workspace backend", () => {
       method: "POST",
       path: "/v1/controller/workspaces/resolve",
       body: { deviceId: DEVICE, spaceId: SPACE, operationMarker: original.operationMarker },
+      headers: {
+        "x-moira-device-id": DEVICE,
+        "x-moira-device-generation": "1",
+        "x-moira-connection-id": CONNECTION,
+      },
     });
     expect(f.resource.getCodespace).not.toHaveBeenCalled();
     f.transport.json.mockResolvedValue({ ...f.localBinding, localSpaceId: RESOURCE });

@@ -9,6 +9,10 @@ const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 export function createWorkspacePublicationHandler(dependencies: {
   authorize: (resourceId: string) => string | Promise<string>;
   workspace: Pick<WorkspaceClient, "request">;
+  endpointIdentity?: (
+    userId: string,
+    resourceId: string,
+  ) => { deviceGeneration: number; connectionId: string };
 }): RequestHandler {
   return async (req, res) => {
     const resourceId = String(req.params.resourceId),
@@ -27,7 +31,20 @@ export function createWorkspacePublicationHandler(dependencies: {
       source = await dependencies.workspace.request(
         userId,
         resourceId,
-        { method: "GET", path: `/v1/publications/${token}` },
+        {
+          method: "GET",
+          path: `/v1/publications/${token}`,
+          headers: (() => {
+            const identity = dependencies.endpointIdentity?.(userId, resourceId);
+            return identity
+              ? {
+                  "x-moira-device-id": resourceId,
+                  "x-moira-device-generation": String(identity.deviceGeneration),
+                  "x-moira-connection-id": identity.connectionId,
+                }
+              : undefined;
+          })(),
+        },
         cancellation.signal,
       );
       if (source.statusCode !== 200) throw new Error("Publication owner refused");

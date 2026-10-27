@@ -116,6 +116,11 @@ export function createWorkspaceSemanticServices(dependencies: WorkspaceSemanticD
       method: "POST",
       path,
       body,
+      headers: {
+        "x-moira-device-id": selected.deviceId,
+        "x-moira-device-generation": String(before.deviceGeneration),
+        "x-moira-connection-id": selected.connectionId,
+      },
     });
     if (
       canonicalJson(devices.getDeviceIdentity(userId, selected.deviceId)) !== canonicalJson(before)

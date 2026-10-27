@@ -424,6 +424,7 @@ export class WorkspaceRouter extends EventEmitter {
       headers["x-moira-device-id"] = binding.resourceId;
       headers["x-moira-device-generation"] = String(binding.resourceGeneration);
       headers["x-moira-connection-id"] = binding.connectionId;
+      headers["x-moira-endpoint-identity"] = binding.connectionId;
     }
     return sendHttp({ ...input, headers }, signal, (ready) => ready(null, socket));
   }

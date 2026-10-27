@@ -290,7 +290,7 @@ describe("Local cloud facade routes to the authoritative owner", () => {
     async (path) => {
       const created = await create(),
         original = owner!.client.json;
-      const calls: Array<{ method: string; path: string; body?: unknown }> = [];
+      const calls: Array<{ method: string; path: string; body?: unknown; headers?: unknown }> = [];
       owner!.client.json = async (...args) => {
         calls.push(args[2]);
         const result = await original(...args);
@@ -303,7 +303,16 @@ describe("Local cloud facade routes to the authoritative owner", () => {
       await expect(
         devices.authorizeOwnedGitHubOperation("owner", created.codespace_id, "fetch"),
       ).rejects.toMatchObject({ code: "LOCAL_UNAUTHORIZED" });
-      const metadataCall = { method: "GET", path: "/v1/controller/management" };
+      const identity = devices.getDeviceIdentity("owner", deviceId);
+      const metadataCall = {
+        method: "GET",
+        path: "/v1/controller/management",
+        headers: {
+          "x-moira-device-id": deviceId,
+          "x-moira-device-generation": String(identity.deviceGeneration),
+          "x-moira-connection-id": identity.connectionId,
+        },
+      };
       expect(calls).toEqual(
         path === "/v1/controller/management"
           ? [metadataCall]
@@ -313,6 +322,11 @@ describe("Local cloud facade routes to the authoritative owner", () => {
                 method: "POST",
                 path: "/v1/controller/workspaces/resolve",
                 body: { deviceId, resourceId: created.codespace_id },
+                headers: {
+                  "x-moira-device-id": deviceId,
+                  "x-moira-device-generation": String(identity.deviceGeneration),
+                  "x-moira-connection-id": identity.connectionId,
+                },
               },
             ],
       );

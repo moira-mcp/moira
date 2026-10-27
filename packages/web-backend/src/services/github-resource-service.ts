@@ -472,6 +472,11 @@ export class GitHubResourceService {
           method: "POST",
           path: `/v1/controller/github/resources/${resource.id}`,
           body: input,
+          headers: {
+            "x-moira-device-id": resource.deviceId,
+            "x-moira-device-generation": String(resource.deviceGeneration),
+            "x-moira-connection-id": resource.deviceConnectionId!,
+          },
         }),
       );
     } catch (error) {
