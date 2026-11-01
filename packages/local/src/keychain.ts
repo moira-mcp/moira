@@ -13,14 +13,34 @@ const refusal = () =>
     "The private Docker credential store is unavailable or does not belong to this device.",
   );
 
+const preparations = new Map<string, Promise<void>>();
+
 /** Own encrypted Keychain discovery belongs to the private HOME, never the user's login store. */
-export async function prepareKeychain(
+export function prepareKeychain(
   home: string,
   deviceId: string,
   helper: string,
   run: RunProcess,
   environment: Readonly<Record<string, string>>,
   options: { newStore?: boolean } = {},
+): Promise<void> {
+  const previous = preparations.get(home) ?? Promise.resolve();
+  const current = previous
+    .catch(() => undefined)
+    .then(() => prepareKeychainExclusive(home, deviceId, helper, run, environment, options));
+  preparations.set(home, current);
+  return current.finally(() => {
+    if (preparations.get(home) === current) preparations.delete(home);
+  });
+}
+
+async function prepareKeychainExclusive(
+  home: string,
+  deviceId: string,
+  helper: string,
+  run: RunProcess,
+  environment: Readonly<Record<string, string>>,
+  options: { newStore?: boolean },
 ): Promise<void> {
   const privateHome = await PrivateState.open(home);
   const helperMetadata = await lstat(helper);
