@@ -248,6 +248,13 @@ test("a later SDK boundary cannot reuse preparation success after its owned stor
   }
 });
 
+test("concurrent preparation shares one owned store without refusing a parallel workspace", async () => {
+  await Promise.all([prepare(), prepare()]);
+  expect(passwords.size).toBe(1);
+  await prepare();
+  expect(passwords.size).toBe(1);
+});
+
 test("restarting preparation unlocks the original owned store without replacing its password", async () => {
   await prepare();
   const owner = await currentOwner();
