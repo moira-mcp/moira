@@ -285,6 +285,9 @@ export class LocalWebControl {
         settings: view.settings,
       });
       await manager.stopWork();
+      for (const space of await this.records.list())
+        if (space.phase !== "deleted" && space.desiredState === "running")
+          await manager.stop(space.id, space.generation);
       await manager.holdRunnerLock();
       const policy = await this.records.policy();
       if (

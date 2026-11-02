@@ -14,6 +14,89 @@ function deferred() {
   return { promise, resolve };
 }
 
+test("disabled open preserves cleanup admission instead of retiring it with a work-owner failure", async () => {
+  const root = await realpath(await mkdtemp("/tmp/moira-disabled-cleanup-"));
+  const local = await localFixture(await PrivateState.open(root));
+  local.policy.enabled = false;
+  await local.records.state.write("policy.json", local.policy);
+  const modes: string[] = [];
+  const manager = new LocalManager(local.records, {
+    storage: async () => {},
+    brokerPorts: { http: 0, tunnel: 0 },
+    guard: async (_root, mode) => {
+      modes.push(mode ?? "work");
+      return {
+        active: true,
+        observe: async () => [],
+        stop: async () => {},
+        release: async () => {},
+        retire: async () => {},
+        remove: async () => {
+          const space = (await local.records.get(local.space.id))!;
+          space.phase = "deleted";
+          space.desiredState = "deleted";
+          await local.records.put(space);
+        },
+        space: async () => {
+          throw new Error("Cleanup must not admit guest work");
+        },
+      };
+    },
+  });
+  try {
+    await manager.open();
+    await manager.remove(local.space.id, local.space.generation, true);
+    expect(modes).toEqual(["cleanup"]);
+    expect(await local.records.get(local.space.id)).toMatchObject({ phase: "deleted" });
+  } finally {
+    await manager.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("disabled stop-work does not retire an in-progress cleanup owner", async () => {
+  const root = await realpath(await mkdtemp("/tmp/moira-cleanup-stop-work-"));
+  const local = await localFixture(await PrivateState.open(root));
+  local.policy.enabled = false;
+  await local.records.state.write("policy.json", local.policy);
+  const entered = deferred(),
+    release = deferred();
+  const manager = new LocalManager(local.records, {
+    guard: async () => {
+      entered.resolve();
+      await release.promise;
+      return {
+        active: true,
+        observe: async () => [],
+        stop: async () => {},
+        release: async () => {},
+        retire: async () => {},
+        remove: async () => {
+          const space = (await local.records.get(local.space.id))!;
+          space.phase = "deleted";
+          space.desiredState = "deleted";
+          await local.records.put(space);
+        },
+        space: async () => {
+          throw new Error("Cleanup must not admit guest work");
+        },
+      };
+    },
+  });
+  try {
+    const removing = manager.remove(local.space.id, local.space.generation, true);
+    await entered.promise;
+    const stopping = manager.stopWork();
+    release.resolve();
+    await Promise.all([removing, stopping]);
+    expect(await local.records.get(local.space.id)).toMatchObject({ phase: "deleted" });
+  } finally {
+    release.resolve();
+    await manager.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("one held VM enrollment neither duplicates its request nor blocks a peer retry or shutdown", async () => {
   const root = await realpath(await mkdtemp("/tmp/moira-enrollment-scheduling-"));
   const local = await localFixture(await PrivateState.open(root));

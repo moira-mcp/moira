@@ -612,6 +612,48 @@ describe("Locally pinned owner web control", () => {
       await manager.close();
     }
   });
+  test("stopped physical control settles retained running records after their guards are gone", async () => {
+    const f = await fixture();
+    f.policy.enabled = false;
+    await f.state.write("policy.json", f.policy);
+    const manager = new LocalManager(f.records);
+    manager.stopWork = async () => undefined;
+    const stop = jest.spyOn(manager, "stop").mockImplementation(async (id) => {
+      const space = (await f.records.get(id))!;
+      space.desiredState = "stopped";
+      space.phase = "stopped";
+      await f.records.put(space);
+      return space;
+    });
+    const control = new LocalWebControl(f.records, {
+      resize: async () => undefined,
+      replacePolicy: async (records, next) => {
+        await records.state.write("policy.json", next);
+      },
+    });
+    await control.optIn(f.connection, f.ceiling, true);
+    try {
+      expect(
+        await control.apply(
+          {
+            optedIn: true,
+            revision: 1,
+            appliedRevision: 0,
+            status: "pending",
+            settings: { ...controlSettings(f.policy), storageBytes: 50 * GiB },
+            ceiling: f.ceiling,
+            error: null,
+          },
+          manager,
+        ),
+      ).toBe(true);
+      expect(stop).toHaveBeenCalledWith(f.space.id, f.space.generation);
+      expect(await f.records.get(f.space.id)).toMatchObject({ desiredState: "stopped" });
+      expect((await f.records.policy()).runtime.maxStorageBytes).toBe(50 * GiB);
+    } finally {
+      await manager.close();
+    }
+  });
   test("invalid ceiling and failed storage effects never acknowledge or enable work", async () => {
     const f = await fixture();
     f.space.desiredState = "stopped";

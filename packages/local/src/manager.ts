@@ -194,7 +194,7 @@ export class LocalManager {
         if (this.dependencies.storage) await this.dependencies.storage(policy);
         else await ensureStorageMounted(this.records.state, policy);
         this.requireOwnerLife(epoch);
-        await this.owner();
+        if (policy.enabled) await this.owner();
         this.requireOwnerLife(epoch);
         if (this.dependencies.runtime) await this.runtime(policy).boundary.verifyConfiguration();
         this.requireOwnerLife(epoch);
@@ -291,6 +291,7 @@ export class LocalManager {
   }
 
   async stopWork(): Promise<void> {
+    if (this.openingOwner || this.cleanupOnlyOwner) return;
     await this.closeResources(true);
   }
   /** Restore only saved, known VM intent after the owner and its egress are ready. */
@@ -726,7 +727,9 @@ export class LocalManager {
           "Refresh this codespace before stopping its exact generation.",
         );
       if (!this.dependencies.runtime) {
-        await (await this.owner()).retire(space.id, generation);
+        await (
+          await this.owner(!(await this.records.policy()).enabled)
+        ).retire(space.id, generation);
         this.guards.delete(id);
         return this.require(id);
       }
