@@ -9,6 +9,6 @@
     "./engine": "./src/engine.mjs"
   },
   "dependencies": {
-    "stream-json": "3.7.0"
+    "stream-json": "3.8.0"
   }
 }
