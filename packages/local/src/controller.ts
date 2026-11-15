@@ -354,7 +354,8 @@ export class LocalController {
   }
 
   async findOperations(input: unknown) {
-    this.requireAdmission();
+    // Discovery addresses retained originals, including the provisioning custody
+    // that may be blocking maintenance; it never admits replacement work.
     const selection = controllerOperationFindSchema.parse(input);
     const [controller, communication] = await Promise.all([
       this.state.find(this.identity, selection),

@@ -286,6 +286,133 @@ test("a Local startup prerequisite failure retains controller exclusion until ex
   }
 });
 
+test("a pre-stop custody refusal preserves the owner and permits only the original maintenance after repair", async () => {
+  const f = await fixture(),
+    id = requestId();
+  const identity = {
+    userId: "owner",
+    deviceId: f.policy.deviceId,
+    deviceGeneration: 1,
+    connectionId: randomUUID(),
+  };
+  const originalId = requestId(),
+    resourceId = randomUUID(),
+    securityId = requestId(),
+    nonce = "c".repeat(64);
+  let custodySettled = false,
+    collections = 0;
+  class RecoveryRelay extends LocalRelay {
+    override async collectProvisionCredential(
+      ...args: Parameters<LocalRelay["collectProvisionCredential"]>
+    ) {
+      collections++;
+      expect(args[0]).toBe(securityId);
+      if (!custodySettled)
+        throw new LocalRefusal("LOCAL_CUSTODY_UNCONFIRMED", "Controlled native proof is pending.");
+      return {
+        requestId: securityId,
+        resourceId,
+        resourceGeneration: 2,
+        action: "codespaces_provision" as const,
+        state: "disposed" as const,
+      };
+    }
+  }
+  const controller = new LocalController(f.manager, identity, undefined, undefined, {
+    relay: new RecoveryRelay(f.records),
+    provision: async () => {
+      throw new Error("Provisioning must never be replayed");
+    },
+    readiness: async () => {
+      throw new Error("Recovery must not provision");
+    },
+  });
+  // Substitute the external custody boundary while retaining the real controller,
+  // journal, HTTP discovery/collection and service maintenance state machine.
+  controller.stopProvisioning = () =>
+    controller.state.requireGitHubCustodySettled(resourceId, new Set());
+  f.daemon.prepareMaintenance = () => controller.prepareMaintenance();
+  const endpoint = await startLocalController(controller);
+  await controller.state.run(originalId, identity, { resourceId, action: "create" }, async () => {
+    await controller.state.recordPhase(originalId, identity, {
+      name: "provision",
+      resourceGeneration: 2,
+    });
+    await controller.state.recordCustody(
+      originalId,
+      identity,
+      {
+        version: 1,
+        path: `${f.state.root}/.custody-${nonce}`,
+        nonce,
+        device: "1",
+        inode: "2",
+      },
+      securityId,
+    );
+    throw new LocalRefusal("LOCAL_CUSTODY_UNCONFIRMED", "Original provisioning is unsettled.");
+  });
+  const input = { requestId: id, release, action: "pause" };
+  try {
+    await serviceRequest(f.state, "POST", "/v1/service/maintenance", input);
+    while (!(await collectServiceMaintenance(f.state, id))?.error) await nextTurn();
+    expect(await collectServiceMaintenance(f.state, id)).toMatchObject({
+      phase: "accepted",
+      error: "LOCAL_CUSTODY_UNCONFIRMED",
+      running: [],
+    });
+    expect(await f.observe()).toMatchObject({ ready: false, release });
+    expect(await f.records.get(f.space.id)).toEqual(f.space);
+    await expect(f.state.lock({ recoverStale: true })).rejects.toMatchObject({
+      code: "LOCAL_ALREADY_RUNNING",
+    });
+    await expect(
+      serviceRequest(f.state, "POST", "/v1/service/maintenance", {
+        ...input,
+        requestId: requestId(),
+      }),
+    ).rejects.toMatchObject({ code: "LOCAL_MAINTENANCE_PENDING" });
+
+    await expect(controller.settings({})).rejects.toMatchObject({
+      code: "LOCAL_CONTROLLER_STOPPING",
+    });
+    const found = (await controllerRequest(
+      endpoint.socketPath,
+      "POST",
+      "/v1/controller/operations/find",
+      { kind: "lifecycle" },
+    )) as { operations: Array<{ requestId: string }> };
+    expect(found.operations.map((operation) => operation.requestId)).toEqual([originalId]);
+    const path = `/v1/controller/operations/${found.operations[0].requestId}`;
+    expect(await controllerRequest(endpoint.socketPath, "GET", path)).toMatchObject({
+      outcome: { ok: false, error: { code: "LOCAL_CUSTODY_UNCONFIRMED" } },
+    });
+    custodySettled = true;
+    expect(await controllerRequest(endpoint.socketPath, "GET", path)).toMatchObject({
+      outcome: { ok: false, error: { code: "GITHUB_PROVISIONING_INCOMPLETE" } },
+    });
+    expect(collections).toBe(2);
+    await serviceRequest(f.state, "POST", "/v1/service/maintenance", input);
+    while ((await collectServiceMaintenance(f.state, id))?.phase !== "paused") await nextTurn();
+    const receipt = await collectServiceMaintenance(f.state, id);
+    expect(receipt).toMatchObject({ requestId: id, phase: "paused", priorCommandsReplayed: false });
+    expect(receipt).not.toHaveProperty("error");
+    expect(f.active).toBe(release);
+    expect(await f.records.get(f.space.id)).toMatchObject({
+      runtimeId: f.space.runtimeId,
+      desiredState: "stopped",
+      generation: 2,
+    });
+    const unlock = await f.state.lock({ recoverStale: true });
+    await unlock();
+  } finally {
+    custodySettled = true;
+    await controller.collectOperation(originalId);
+    await endpoint.close();
+    await f.close();
+  }
+});
+
 test("explicit maintenance retains its original identity, restores same-VM running intent and promotes only after settlement", async () => {
   const f = await fixture();
   const id = requestId();

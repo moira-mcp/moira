@@ -642,6 +642,16 @@ release and declares physical interruption. Use `run` if needed to start the sel
 then check `service-status` and the original receipt. Keep the same `--state PATH` throughout;
 do not edit locks or sockets, replace pairing, or replay interrupted commands.
 
+If maintenance remains `accepted` with `LOCAL_CUSTODY_UNCONFIRMED`, the controller has not yet
+confirmed closure of an earlier provisioning process. It keeps original-operation discovery and
+collection available while refusing new work. Use the retained controller reference with
+`npm run local -- operations CONTROLLER_REF --kind lifecycle`, inspect the candidates, then run
+`npm run local -- collect OPERATION_REF` with the selected returned operation reference.
+Once collection confirms closure, continue the same maintenance action and ID; for an original
+pause use `npm run local -- maintenance --pause --request-id ORIGINAL_MAINTENANCE_ID --confirm`.
+Keep the same `--state PATH`. Do not replace the request ID or run login until the original reports
+`paused`; an accepted request with an error does not prove physical shutdown.
+
 For `LOCAL_DOCKER_LOGIN_REQUIRED`, the saved authentication refusal blocks native startup before
 credential access. Installing or restarting the owner preserves it; communication does not
 require repairing Docker sign-in. To restore native work, use an explicit maintenance pause and

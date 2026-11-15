@@ -339,6 +339,7 @@ export async function runLocalService(
         priorCommandsReplayed: false,
         ...(action === "pause" ? { pause: true as const } : {}),
       };
+      delete receipt.error;
       await records.state.write(key, receipt);
       maintenance = (async () => {
         try {
@@ -408,6 +409,13 @@ export async function runLocalService(
           receipt.error =
             error instanceof LocalRefusal ? error.code : "LOCAL_MAINTENANCE_UNCONFIRMED";
           await records.state.write(key, receipt);
+          if (receipt.phase === "accepted" && !physicalStop) {
+            // Provisioning custody may need original-operation collection before
+            // physical maintenance can begin. Keep that owner and its recovery
+            // endpoint alive so the same maintenance can continue after repair.
+            ready = false;
+            return;
+          }
           failure = error;
           controller.abort();
         }
