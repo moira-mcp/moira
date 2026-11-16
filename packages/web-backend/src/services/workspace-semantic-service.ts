@@ -10,6 +10,7 @@ import {
   scopedCredentialFailureOutcome,
   providerFailureSchema,
   LocalDeviceError,
+  ControllerOperationPending,
   parseLocalRepositoryTargetId,
   localRepositoryTargetId,
   repositoryAdmissionProof,
@@ -404,6 +405,11 @@ export function createWorkspaceSemanticServices(dependencies: WorkspaceSemanticD
       // A private completed effect never substitutes for current permission to disclose it.
       // A refusal here escapes this catch rather than becoming an observation diagnostic.
       if (owner.kind === "controller") authorizeController(userId, owner);
+      if (error instanceof ControllerOperationPending) {
+        if (error.operation.requestId !== requestId)
+          invalid("The owner returned a different original operation.");
+        return controllerView(operation, error.operation);
+      }
       if (error instanceof CodespaceEffectObservationError)
         return {
           operation,
@@ -472,8 +478,18 @@ export function createWorkspaceSemanticServices(dependencies: WorkspaceSemanticD
     return {
       operation: reference,
       kind: original.kind,
-      description: "Original controller operation",
+      description: result.descriptor?.description ?? "Original controller operation",
+      ...(result.descriptor ? { descriptor: result.descriptor } : {}),
       state,
+      ...(state === "pending" || state === "unconfirmed"
+        ? {
+            instruction:
+              state === "pending"
+                ? "The owner durably accepted this operation and has not reported completion. Collect this same operation to see its result; do not submit a replacement."
+                : "The original outcome is not confirmed. Collect this same operation before choosing another action; do not submit a replacement.",
+            next: { purpose: "operation_get", reference },
+          }
+        : {}),
       ...(state === "completed"
         ? { outcome: result.outcome }
         : state === "absent"
@@ -510,10 +526,14 @@ export function createWorkspaceSemanticServices(dependencies: WorkspaceSemanticD
         .parse(result.outcome.result);
       const provider = dependencies.select(userId, { codespaceId: resourceId });
       if (!provider.resource) unavailable("The original resource projection is unavailable.");
-      const snapshot = await provider.resource.projectRetainedSnapshot(
-        userId,
-        result.outcome.result,
-      );
+      const snapshot =
+        provider.resource instanceof LocalCodespaceResourceService
+          ? await provider.resource.projectRetainedSnapshot(
+              userId,
+              result.outcome.result,
+              original.requestId,
+            )
+          : await provider.resource.projectRetainedSnapshot(userId, result.outcome.result);
       if (snapshot.device_id !== original.owner.deviceId)
         invalid("The retained resource belongs to a different controller.");
       captured = snapshot;
@@ -525,6 +545,22 @@ export function createWorkspaceSemanticServices(dependencies: WorkspaceSemanticD
     // Check current account/device authority on both projection paths, outside the
     // catch that preserves known effect completion for unavailable observations.
     authorizeController(userId, original.owner);
+    if (observationError instanceof ScopedCredentialError)
+      return {
+        operation: reference,
+        kind: original.kind,
+        description: view.description,
+        state: "unconfirmed",
+        original: {
+          outcome: result.outcome,
+          error: {
+            code: observationError.code,
+            message:
+              "Credential retirement is not confirmed. Collect this same original operation before choosing another action.",
+          },
+        },
+        next: { purpose: "operation_get", reference },
+      };
     return captured
       ? {
           ...view,

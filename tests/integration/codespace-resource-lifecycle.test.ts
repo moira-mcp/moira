@@ -14,6 +14,7 @@ import {
   LocalDeviceRepository,
   LocalDeviceService,
   LocalDeviceError,
+  ControllerOperationPending,
   type CodespaceConnectionService,
   type CodespaceGitHubConfigStatus,
   type LocalControllerClient,
@@ -62,6 +63,14 @@ const preparedCreate = {
   idleTimeoutMinutes: 30,
   retentionMinutes: 30 * 24 * 60,
 };
+async function expectPending(operation: Promise<unknown>, requestId: string) {
+  const error = await operation.then(
+    () => null,
+    (failure: unknown) => failure,
+  );
+  expect(error).toBeInstanceOf(ControllerOperationPending);
+  expect((error as ControllerOperationPending).operation).toEqual({ requestId, state: "accepted" });
+}
 function fixture() {
   const sqlite = new Database(":memory:");
   sqlite.pragma("foreign_keys=ON");
@@ -563,11 +572,7 @@ describe("GitHub cloud identity and fixed provider broker", () => {
         requestId,
         deviceId: value.deviceId,
       });
-      await expect(value.service.create("owner", "201", "main", peerRequest)).rejects.toMatchObject(
-        {
-          code: "WORKSPACE_OUTCOME_UNCONFIRMED",
-        },
-      );
+      await expectPending(value.service.create("owner", "201", "main", peerRequest), peerRequest);
       const identities = value.identities.listOwned("owner");
       value.setProviderResponse(async () => {
         throw new Error("private-provider-token-and-URL");
@@ -758,9 +763,7 @@ describe("GitHub cloud identity and fixed provider broker", () => {
       requestId = "ws1-" + randomUUID(),
       id = requestId.slice(4);
     try {
-      await expect(value.service.create("owner", "201", "main", requestId)).rejects.toMatchObject({
-        requestId,
-      });
+      await expectPending(value.service.create("owner", "201", "main", requestId), requestId);
       await value.service.advanceAuthority(value.auth, id, {
         requestId,
         resourceGeneration: 2,
@@ -881,24 +884,29 @@ describe("GitHub cloud identity and fixed provider broker", () => {
             { status: 201, headers: { "x-github-request-id": "AB12:CD34" } },
           ),
         );
-        await expect(pending).rejects.toMatchObject({
-          code: "WORKSPACE_OUTCOME_UNCONFIRMED",
-          requestId,
-          deviceId: value.deviceId,
-          providerFailure: {
-            kind: "authority_changed",
-            phase: "publication",
-            status: 201,
-            githubRequestId: "AB12:CD34",
-            resource: {
-              name: "late-created",
-              repositoryId: "201",
-              repositoryFullName: "person/project",
-              ownerId: "101",
-              billableOwnerId: "101",
+        if (fence === "revocation") {
+          const refusal = await pending.catch((error: unknown) => error);
+          expect(refusal).toMatchObject({ code: "CODESPACE_AUTHORIZATION_REQUIRED" });
+          expect(refusal).toMatchObject({ providerFailure: undefined, requestId: undefined });
+        } else
+          await expect(pending).rejects.toMatchObject({
+            code: "WORKSPACE_OUTCOME_UNCONFIRMED",
+            requestId,
+            deviceId: value.deviceId,
+            providerFailure: {
+              kind: "authority_changed",
+              phase: "publication",
+              status: 201,
+              githubRequestId: "AB12:CD34",
+              resource: {
+                name: "late-created",
+                repositoryId: "201",
+                repositoryFullName: "person/project",
+                ownerId: "101",
+                billableOwnerId: "101",
+              },
             },
-          },
-        });
+          });
         expect(value.identities.getOwned("owner", id)).toEqual(fenced);
         const receipt = await request(boundary.app).get(
           `/api/integrations/local/devices/${value.deviceId}/operations/${requestId}`,
@@ -913,8 +921,16 @@ describe("GitHub cloud identity and fixed provider broker", () => {
               code: "WORKSPACE_OUTCOME_UNCONFIRMED",
               providerFailure: {
                 kind: "authority_changed",
+                phase: "publication",
                 status: 201,
-                resource: { name: "late-created" },
+                githubRequestId: "AB12:CD34",
+                resource: {
+                  name: "late-created",
+                  repositoryId: "201",
+                  repositoryFullName: "person/project",
+                  ownerId: "101",
+                  billableOwnerId: "101",
+                },
               },
             },
           },
@@ -942,9 +958,7 @@ describe("GitHub cloud identity and fixed provider broker", () => {
       requestId = "ws1-" + randomUUID(),
       id = requestId.slice(4);
     try {
-      await expect(value.service.create("owner", "201", "main", requestId)).rejects.toMatchObject({
-        requestId,
-      });
+      await expectPending(value.service.create("owner", "201", "main", requestId), requestId);
       await value.service.advanceAuthority(value.auth, id, {
         requestId,
         resourceGeneration: 2,
@@ -996,9 +1010,7 @@ describe("GitHub cloud identity and fixed provider broker", () => {
     const value = fixture(),
       creationId = "ws1-" + randomUUID(),
       id = creationId.slice(4);
-    await expect(value.service.create("owner", "201", "main", creationId)).rejects.toMatchObject({
-      requestId: creationId,
-    });
+    await expectPending(value.service.create("owner", "201", "main", creationId), creationId);
     const resource = value.identities.getOwned("owner", id)!;
     value.identities.markCreationSubmitted("owner", id, 1);
     value.identities.observeCreation("owner", id, 1, {
@@ -1242,9 +1254,10 @@ describe("GitHub cloud identity and fixed provider broker", () => {
       value.sqlite
         .prepare("UPDATE codespaceConnectionRepository SET fullName=? WHERE connectionId=?")
         .run(fullName, value.githubConnectionId);
-      await expect(
+      await expectPending(
         value.service.adopt("owner", value.id, requestId, 1, { deviceId: value.deviceId }),
-      ).rejects.toMatchObject({ code: "WORKSPACE_OUTCOME_UNCONFIRMED", requestId });
+        requestId,
+      );
       expect(value.identities.getOwned("owner", value.id)).toMatchObject({
         authorizationGeneration: 1,
         generation: 1,
@@ -1292,9 +1305,10 @@ describe("GitHub cloud identity and fixed provider broker", () => {
         generation: 1,
       });
       const laterRequest = "ws1-" + randomUUID();
-      await expect(
+      await expectPending(
         value.service.adopt("owner", value.id, laterRequest, 2, { deviceId: value.deviceId }),
-      ).rejects.toMatchObject({ code: "WORKSPACE_OUTCOME_UNCONFIRMED", requestId: laterRequest });
+        laterRequest,
+      );
       pending = false;
       await value.service.advanceAuthority(value.auth, value.id, {
         requestId: laterRequest,
@@ -1432,9 +1446,7 @@ describe("GitHub cloud identity and fixed provider broker", () => {
         requestId = "ws1-" + randomUUID(),
         id = requestId.slice(4);
       try {
-        await expect(value.service.create("owner", "201", "main", requestId)).rejects.toMatchObject(
-          { requestId },
-        );
+        await expectPending(value.service.create("owner", "201", "main", requestId), requestId);
         await value.service.advanceAuthority(value.auth, id, {
           requestId,
           resourceGeneration: 2,
@@ -1569,9 +1581,10 @@ describe("GitHub cloud identity and fixed provider broker", () => {
       value.sqlite
         .prepare("UPDATE codespaceConnection SET authorityGeneration=2 WHERE id=?")
         .run(value.githubConnectionId);
-      await expect(
+      await expectPending(
         value.service.deleteCodespace("owner", value.id, 1, { requestId }),
-      ).rejects.toMatchObject({ code: "WORKSPACE_OUTCOME_UNCONFIRMED", requestId });
+        requestId,
+      );
       expect(value.identities.getOwned("owner", value.id)).toMatchObject({
         authorizationGeneration: 1,
         generation: 1,
@@ -1624,9 +1637,7 @@ describe("GitHub cloud identity and fixed provider broker", () => {
       requestId = "ws1-" + randomUUID(),
       id = requestId.slice(4);
     try {
-      await expect(value.service.create("owner", "201", "main", requestId)).rejects.toMatchObject({
-        requestId,
-      });
+      await expectPending(value.service.create("owner", "201", "main", requestId), requestId);
       const resource = value.identities.getOwned("owner", id)!;
       value.identities.markCreationSubmitted("owner", id, 1);
       value.identities.observeCreation("owner", id, 1, {
@@ -1751,12 +1762,7 @@ describe("GitHub cloud identity and fixed provider broker", () => {
     const value = fixture(),
       requestId = "ws1-" + randomUUID();
     try {
-      await expect(value.service.create("owner", "201", "main", requestId)).rejects.toMatchObject({
-        code: "WORKSPACE_OUTCOME_UNCONFIRMED",
-        requestId,
-        deviceId: value.deviceId,
-        resourceId: requestId.slice(4),
-      });
+      await expectPending(value.service.create("owner", "201", "main", requestId), requestId);
       expect(value.requests).toEqual([]);
       expect(value.identities.getOwned("owner", requestId.slice(4))).toMatchObject({
         repositoryId: "201",
@@ -1792,9 +1798,7 @@ describe("GitHub cloud identity and fixed provider broker", () => {
       id = creationId.slice(4),
       requestId = "ws1-" + randomUUID();
     try {
-      await expect(value.service.create("owner", "201", "main", creationId)).rejects.toMatchObject({
-        requestId: creationId,
-      });
+      await expectPending(value.service.create("owner", "201", "main", creationId), creationId);
       const resource = value.identities.getOwned("owner", id)!;
       value.identities.markCreationSubmitted("owner", id, 1);
       value.identities.observeCreation("owner", id, 1, {
@@ -1853,9 +1857,7 @@ describe("GitHub cloud identity and fixed provider broker", () => {
       requestId = "ws1-" + randomUUID(),
       id = requestId.slice(4);
     try {
-      await expect(value.service.create("owner", "201", "main", requestId)).rejects.toMatchObject({
-        requestId,
-      });
+      await expectPending(value.service.create("owner", "201", "main", requestId), requestId);
       await value.service.advanceAuthority(value.auth, id, {
         requestId,
         resourceGeneration: 2,
@@ -1905,9 +1907,7 @@ describe("GitHub cloud identity and fixed provider broker", () => {
       value.setCreateResponse(async () =>
         Response.json({ message: "Ref is invalid" }, { status: 422 }),
       );
-      await expect(value.service.create("owner", "201", "main", requestId)).rejects.toMatchObject({
-        requestId,
-      });
+      await expectPending(value.service.create("owner", "201", "main", requestId), requestId);
       const connections = new CodespaceConnectionRepository(value.sqlite);
       expect(() => connections.assertAccountResourcesRetired("owner")).not.toThrow();
       await value.service.advanceAuthority(value.auth, id, {
@@ -1936,9 +1936,7 @@ describe("GitHub cloud identity and fixed provider broker", () => {
       requestId = "ws1-" + randomUUID(),
       id = requestId.slice(4);
     try {
-      await expect(value.service.create("owner", "201", "main", requestId)).rejects.toMatchObject({
-        requestId,
-      });
+      await expectPending(value.service.create("owner", "201", "main", requestId), requestId);
       const connections = new CodespaceConnectionRepository(value.sqlite),
         envelope = {
           envelopeVersion: 2 as const,

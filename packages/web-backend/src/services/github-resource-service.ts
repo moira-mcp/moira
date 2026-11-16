@@ -7,6 +7,7 @@ import {
   controllerRequestIdSchema,
   controllerGitHubLifecycleSchema,
   controllerOperationSchema,
+  ControllerOperationPending,
   githubAssignmentSchema,
   githubCreationSettingsSchema,
   githubCreatePreflightSchema,
@@ -492,6 +493,17 @@ export class GitHubResourceService {
         "CODESPACE_GENERATION_CONFLICT",
         "Owner returned another request identity",
       );
+    // A valid receipt cannot disclose an operation after its caller/device authority changed.
+    this.account(userId);
+    const currentDevice = this.devices.getDeviceIdentity(userId, resource.deviceId);
+    this.assigned(resource, currentDevice);
+    if (currentDevice.status !== "active")
+      throw new CodespaceResourceError(
+        "CODESPACE_AUTHORIZATION_REQUIRED",
+        "Assigned controller authority changed",
+      );
+    if (!rebindPurpose) this.authority(userId, resource.id, true);
+    if (receipt.state === "accepted") throw new ControllerOperationPending(receipt);
     if (receipt.state === "completed" && receipt.outcome?.ok === false) {
       const failure = receipt.outcome.error,
         scopeOutcome = scopedCredentialFailureOutcome(failure.code);

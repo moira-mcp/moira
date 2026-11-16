@@ -201,10 +201,32 @@ export const controllerRepositorySchema = z
   })
   .strict();
 
+/** Last durable owner stage, not a fresh observation of the physical environment. */
+export const controllerOperationPhaseSchema = z
+  .object({
+    name: z.enum([
+      "provider_prepare",
+      "provider_create",
+      "provider_start",
+      "provider_stop",
+      "provider_delete",
+      "provision",
+      "local_create",
+      "local_start",
+      "local_stop",
+      "local_delete",
+      "local_setup",
+    ]),
+    resourceGeneration: generation,
+  })
+  .strict();
+
 export const controllerOperationSchema = z
   .object({
     requestId: controllerRequestIdSchema,
     state: z.enum(["absent", "accepted", "completed", "unconfirmed"]),
+    phase: controllerOperationPhaseSchema.optional(),
+    descriptor: controllerOperationDescriptorSchema.optional(),
     outcome: z
       .discriminatedUnion("ok", [
         z.object({ ok: z.literal(true), result: z.unknown() }).strict(),

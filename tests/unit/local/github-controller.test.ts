@@ -39,7 +39,8 @@ jest.unstable_mockModule("../../../packages/workspace-service/src/bootstrap.mjs"
 }));
 const { githubProvisioningReadiness } =
   await import("../../../packages/local/src/github-provisioner.js");
-const { LocalController } = await import("../../../packages/local/src/controller.js");
+const { LocalController, startLocalController, controllerRequest } =
+  await import("../../../packages/local/src/controller.js");
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -336,6 +337,81 @@ async function fixture() {
     },
   };
 }
+
+test("HTTP GitHub admission returns before readiness and provisioning, retaining one original across collection", async () => {
+  const f = await fixture();
+  let releaseReadiness!: () => void,
+    enterReadiness!: () => void,
+    releaseProvision!: () => void,
+    enterProvision!: () => void,
+    preparations = 0;
+  const heldReadiness = new Promise<void>((resolve) => {
+    releaseReadiness = resolve;
+  });
+  const readinessEntered = new Promise<void>((resolve) => {
+    enterReadiness = resolve;
+  });
+  const heldProvision = new Promise<void>((resolve) => {
+    releaseProvision = resolve;
+  });
+  const provisionEntered = new Promise<void>((resolve) => {
+    enterProvision = resolve;
+  });
+  const controller = f.make(
+    async (target, dependencies) => {
+      enterProvision();
+      await heldProvision;
+      return f.immediate(target, dependencies);
+    },
+    async () => {
+      preparations++;
+      enterReadiness();
+      await heldReadiness;
+      return { state: "available" as const };
+    },
+  );
+  f.manager.holdRunnerLock = async () => undefined;
+  f.manager.stopWork = async () => undefined;
+  const endpoint = await startLocalController(controller);
+  const path = `/v1/controller/github/resources/${f.resourceId}`;
+  const collect = () =>
+    controllerRequest(endpoint.socketPath, "GET", `/v1/controller/operations/${f.requestId}`);
+  try {
+    expect(await controllerRequest(endpoint.socketPath, "POST", path, f.create)).toMatchObject({
+      requestId: f.requestId,
+      state: "accepted",
+    });
+    await readinessEntered;
+    const pending = await collect();
+    expect(pending).toMatchObject({
+      state: "accepted",
+      phase: { name: "provider_prepare", resourceGeneration: 1 },
+    });
+    expect(await controllerRequest(endpoint.socketPath, "POST", path, f.create)).toEqual(pending);
+    expect(preparations).toBe(1);
+    expect(f.calls).toEqual([]);
+    releaseReadiness();
+    await provisionEntered;
+    expect(await collect()).toMatchObject({
+      state: "accepted",
+      phase: { name: "provision", resourceGeneration: 2 },
+    });
+    expect(await controllerRequest(endpoint.socketPath, "POST", path, f.create)).toMatchObject({
+      state: "accepted",
+    });
+    releaseProvision();
+    const completed = await controller.state.waitForOperation(f.requestId, f.identity);
+    expect(completed).toMatchObject({ state: "completed", outcome: { ok: true } });
+    expect(await collect()).toEqual(completed);
+    expect(await controllerRequest(endpoint.socketPath, "POST", path, f.create)).toEqual(completed);
+    expect(f.calls.filter((call) => call.action === "create")).toHaveLength(1);
+  } finally {
+    releaseReadiness();
+    releaseProvision();
+    await controller.state.waitForOperation(f.requestId, f.identity);
+    await endpoint.close();
+  }
+});
 
 test("lost GitHub creation keeps its original owner receipt and cannot create again after restart", async () => {
   const f = await fixture();

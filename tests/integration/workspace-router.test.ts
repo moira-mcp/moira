@@ -22,6 +22,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { watch } from "node:fs";
+import { createInterface } from "node:readline";
+import type { Duplex } from "node:stream";
+import { connect } from "node:net";
 import {
   WorkspaceRouter,
   WORKSPACE_UPGRADE,
@@ -301,6 +304,123 @@ async function bytes(body: AsyncIterable<Uint8Array>) {
   for await (const chunk of body) chunks.push(Buffer.from(chunk));
   return Buffer.concat(chunks);
 }
+
+test.each(["deadline", "abort"])(
+  "a live control peer cannot retain a %s-retired data rendezvous or dispatch it late",
+  async (retirement) => {
+    const f = await fixture();
+    await disconnect(f.child);
+    const ca = await readFile(f.ca);
+    const upgrade = (path: string, controlId?: string) =>
+      new Promise<{ socket: Duplex; head: Buffer } | number>((done, reject) => {
+        const request = httpsRequest({
+          hostname: "127.0.0.1",
+          port: 3100,
+          path,
+          ca,
+          headers: {
+            authorization: `Bearer ${f.credential}`,
+            connection: "Upgrade",
+            upgrade: WORKSPACE_UPGRADE,
+            "x-moira-endpoint-kind": "workspace",
+            "x-moira-endpoint-identity": f.binding.environmentIdentity,
+            ...(controlId ? { "x-moira-control-id": controlId } : {}),
+          },
+        });
+        request.once("upgrade", (_response, socket, head) => done({ socket, head }));
+        request.once("response", (response) => {
+          response.resume();
+          done(response.statusCode!);
+        });
+        request.once("error", reject);
+        request.end();
+      });
+    jest.useFakeTimers({ doNotFake: ["nextTick", "setImmediate", "queueMicrotask"] });
+    let control: Duplex | undefined;
+    const abort = new AbortController();
+    try {
+      const connected = await upgrade("/api/workspaces/connect");
+      if (typeof connected === "number") throw new Error(`Control refused: ${connected}`);
+      control = connected.socket;
+      const lines = createInterface({ input: control });
+      const incoming = lines[Symbol.asyncIterator]();
+      if (connected.head.length) control.unshift(connected.head);
+      const { connectionId } = JSON.parse((await incoming.next()).value!);
+      let settled = false;
+      const outcome = f.router
+        .request(
+          f.binding.userId,
+          f.binding.resourceId,
+          {
+            method: "POST",
+            path: "/v1/exec",
+            body: Buffer.from(
+              JSON.stringify({ requestId: createWorkspaceRequestId(), argv: ["/bin/false"] }),
+            ),
+          },
+          abort.signal,
+        )
+        .then(
+          (value) => {
+            settled = true;
+            return value;
+          },
+          (error) => {
+            settled = true;
+            return error;
+          },
+        );
+      const { callId } = JSON.parse((await incoming.next()).value!);
+      control.write('{"ping":true}\n');
+      expect(JSON.parse((await incoming.next()).value!)).toEqual({ pong: true });
+      await jest.advanceTimersByTimeAsync(10_000);
+      const independent = f.client.json(f.binding.userId, f.binding.resourceId, {
+        method: "GET",
+        path: "/v1/health",
+      });
+      const independentCall = JSON.parse((await incoming.next()).value!);
+      if (retirement === "abort") {
+        abort.abort();
+        await jest.advanceTimersByTimeAsync(0);
+      } else await jest.advanceTimersByTimeAsync(10_000);
+      expect(settled).toBe(true);
+      expect(await outcome).toMatchObject({
+        code: "CODESPACE_PROVIDER_UNAVAILABLE",
+        confirmedRefusal: true,
+      });
+      expect(f.router.isConnected(f.binding)).toBe(true);
+      expect(await upgrade(`/api/workspaces/calls/${callId}`, connectionId)).toBe(403);
+      control.write('{"ping":true}\n');
+      expect(JSON.parse((await incoming.next()).value!)).toEqual({ pong: true });
+      const accepted = await upgrade(
+        `/api/workspaces/calls/${independentCall.callId}`,
+        connectionId,
+      );
+      if (typeof accepted === "number") throw new Error(`Independent DATA refused: ${accepted}`);
+      const local = connect({ path: join(f.root, "service.sock") });
+      accepted.socket.once("close", () => local.destroy());
+      local.once("close", () => accepted.socket.destroy());
+      if (accepted.head.length) accepted.socket.unshift(accepted.head);
+      accepted.socket.pipe(local).pipe(accepted.socket);
+      expect(await independent).toMatchObject({ version: 1 });
+      const refusedThroughClient = f.client
+        .json(f.binding.userId, f.binding.resourceId, { method: "GET", path: "/v1/health" })
+        .catch((error) => error);
+      await incoming.next();
+      await jest.advanceTimersByTimeAsync(20_000);
+      expect(await refusedThroughClient).toMatchObject({
+        code: "CODESPACE_PROVIDER_UNAVAILABLE",
+        confirmedRefusal: true,
+      });
+      expect(await readdir(join(f.root, "state", "requests"))).toEqual([]);
+      lines.close();
+    } finally {
+      abort.abort();
+      control?.destroy();
+      jest.useRealTimers();
+    }
+  },
+);
 async function disconnect(child: ChildProcess) {
   const ended = once(child.stdout!, "data");
   child.stdin!.write("disconnect\n");

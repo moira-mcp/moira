@@ -12,11 +12,13 @@ export function workspaceResult(data) {
 
 /** Bounded owner errors preserve recovery references, never source input or credentials. */
 export function workspaceFailure(error, requestId) {
+  const fileReason =
+    error?.fileReason ?? (["ELOOP", "ENOTDIR"].includes(error?.code) ? "unsafe_access" : undefined);
   const candidate = error?.details?.error ?? {
     code:
       error?.publicCode ??
-      (error?.code === "ENOENT" ? "NOT_FOUND" : error?.fileReason ? "FILE_REJECTED" : undefined),
-    reason: error?.fileReason,
+      (error?.code === "ENOENT" ? "NOT_FOUND" : fileReason ? "FILE_REJECTED" : undefined),
+    reason: fileReason,
   };
   const scopedOutcome = scopedCredentialFailureOutcome(candidate.code);
   const known =
@@ -31,11 +33,13 @@ export function workspaceFailure(error, requestId) {
           ? "WORKSPACE_OUTCOME_UNCONFIRMED"
           : "WORKSPACE_UNAVAILABLE",
       message:
-        scopedOutcome === "unconfirmed"
-          ? "Scoped credential outcome is unconfirmed. Inspect the original operation."
-          : error.operation
-            ? "The owner could not complete this request. Inspect its original operation before another action."
-            : "The workspace refused or could not observe this request.",
+        candidate.reason === "unsafe_access"
+          ? "File access was refused. Use a path relative to the selected workspace repository, such as 'moira-ws/task/file.md', without absolute paths or '..'. File tools do not follow symlinks or accept unsupported file types. If an operation reference is returned, inspect that original before retrying a mutation."
+          : scopedOutcome === "unconfirmed"
+            ? "Scoped credential outcome is unconfirmed. Inspect the original operation."
+            : error.operation
+              ? "The owner could not complete this request. Inspect its original operation before another action."
+              : "The workspace refused or could not observe this request.",
       ...(["unsafe_access", "concurrent_change", "precondition"].includes(candidate.reason)
         ? { reason: candidate.reason }
         : {}),

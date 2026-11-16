@@ -309,6 +309,19 @@ recovery use the guest's confined atomic transactions; recovery never overwrites
 
 ### Large files and rejected file operations
 
+For `COMMAND_CWD_OUTSIDE_WORKSPACE`, use `cwd: "."` for the selected repository root or an
+existing directory inside it, such as `moira-ws/task`. `COMMAND_CWD_NOT_FOUND` requires creating
+that directory from `cwd: "."` first; `COMMAND_CWD_NOT_DIRECTORY` requires selecting a directory
+instead of a file. For `COMMAND_CWD_UNAVAILABLE`, check its access permissions. These responses
+confirm that the command did not start; its returned operation remains collectable.
+
+`FILE_REJECTED` with `reason: "unsafe_access"` requires a repository-relative file path without
+an absolute prefix or `..`. File tools refuse symlinks and unsupported file types. A directory
+created elsewhere in the VM is outside this boundary. Use commands from `cwd: "."` to create
+`moira-ws/task`, then address its files as `moira-ws/task/file.md`. For `precondition` or
+`concurrent_change`, reread the file and reconcile the intended edit. If a mutation returned an
+operation reference, inspect that original before choosing another action.
+
 Use `codespace_read` (`stat`) for metadata and `codespace_read` (`read`) with line windows or its returned cursor for text.
 Continuation preserves complete UTF-8 characters; Cyrillic or emoji split across an internal
 byte boundary is not a binary file. Use `codespace_download` for complete binary bytes. Name and MIME
@@ -371,6 +384,16 @@ Later enrollment or renewal attaches to the same running Unix owner without repl
 A cold restart can interrupt processes and does not promise uninterrupted command execution.
 
 ## Local codespaces
+
+Local and GitHub lifecycle requests can return `pending` while the controller continues startup,
+setup or shutdown. This confirms durable acceptance, not completion. Retain `operation` and use
+`codespace({ action: "collect", reference: operation })` or host `collect OPERATION_REF`.
+The response includes collection guidance and, when recorded, `original.phase` with the last
+owner stage; this is not a progress percentage or a fresh VM observation. Do not submit another
+create/start/stop/delete to check progress. A lost reply or unavailable live owner can instead
+leave the outcome `unconfirmed`: collect the same original, or use `codespace` (`find`) at the
+selected controller if its reference was lost. Neither a timeout nor an absent result proves
+that the effect did not happen.
 
 Use `codespace_terminal` (`run`) or `codespace_terminal` (`run_native`) with the returned workspace reference.
 The adapter creates internal request identity; do not manufacture UUIDs or process IDs.

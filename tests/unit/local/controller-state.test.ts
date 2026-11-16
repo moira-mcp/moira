@@ -25,6 +25,53 @@ const identity = () => ({
 });
 
 describe("Controller owns lifecycle admission and original result", () => {
+  test("fast admission and duplicate return the durable original while completion remains owned", async () => {
+    const records = new LocalRecords(await PrivateState.open(directory)),
+      journal = new ControllerState(records),
+      owner = identity(),
+      requestId = createWorkspaceRequestId(),
+      input = { action: "start", resourceId: randomUUID() };
+    let finish!: () => void,
+      entered!: () => void,
+      effects = 0;
+    const held = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const action = async () => {
+      effects++;
+      await journal.recordPhase(requestId, owner, { name: "local_start", resourceGeneration: 2 });
+      entered();
+      await held;
+      return { started: true };
+    };
+    try {
+      expect(
+        await journal.run(requestId, owner, input, action, { waitForCompletion: false }),
+      ).toMatchObject({ requestId, state: "accepted" });
+      await started;
+      const original = await journal.inspect(requestId, owner);
+      expect(original).toMatchObject({ phase: { name: "local_start", resourceGeneration: 2 } });
+      expect(
+        await journal.run(requestId, owner, input, action, { waitForCompletion: false }),
+      ).toEqual(original);
+      expect(
+        await new ControllerState(records).run(requestId, owner, input, action, {
+          waitForCompletion: false,
+        }),
+      ).toMatchObject({ requestId, state: "unconfirmed", phase: original.phase });
+      expect(effects).toBe(1);
+    } finally {
+      finish();
+      await journal.waitForOperation(requestId, owner);
+    }
+    expect(await journal.inspect(requestId, owner)).toMatchObject({
+      state: "completed",
+      outcome: { ok: true, result: { started: true } },
+    });
+  });
   test("routine pending and custody reads exclude terminal history while originals remain collectable and nonreplayable", async () => {
     const state = await PrivateState.open(directory),
       records = new LocalRecords(state),
@@ -421,7 +468,7 @@ describe("Controller owns lifecycle admission and original result", () => {
     };
     const first = journal.run(requestId, owner, input, action);
     await admitted;
-    expect(await journal.inspect(requestId, owner)).toEqual({ requestId, state: "accepted" });
+    expect(await journal.inspect(requestId, owner)).toMatchObject({ requestId, state: "accepted" });
     const replay = journal.run(requestId, owner, input, async () => {
       throw new Error("A repeat must not execute");
     });
@@ -458,12 +505,15 @@ describe("Controller owns lifecycle admission and original result", () => {
     await admitted;
     const restarted = new ControllerState(records);
     expect((await restarted.pendingResources(owner)).get(input.resourceId)).toEqual([requestId]);
-    expect(await restarted.inspect(requestId, owner)).toEqual({ requestId, state: "unconfirmed" });
+    expect(await restarted.inspect(requestId, owner)).toMatchObject({
+      requestId,
+      state: "unconfirmed",
+    });
     expect(
       await restarted.run(requestId, owner, input, async () => {
         throw new Error("Must never redispatch after restart");
       }),
-    ).toEqual({ requestId, state: "unconfirmed" });
+    ).toMatchObject({ requestId, state: "unconfirmed" });
     await expect(
       restarted.run(requestId, owner, { action: "start" }, async () => ({})),
     ).rejects.toMatchObject({ code: "LOCAL_REPLAY_CONFLICT" });

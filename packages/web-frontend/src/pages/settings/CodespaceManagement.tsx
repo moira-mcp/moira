@@ -16,7 +16,12 @@ import {
 import { toast } from "sonner";
 import type { LocalDeviceView } from "@mcp-moira/shared";
 import { parseLocalRepositoryTargetId } from "@mcp-moira/shared/local-device-types";
-import { decodeReference, isReference } from "@mcp-moira/shared/workspace-references";
+import {
+  decodeReference,
+  encodeReference,
+  isReference,
+} from "@mcp-moira/shared/workspace-references";
+import { controllerOperationPhaseSchema } from "@mcp-moira/shared/local-controller-protocol";
 import { apiClient } from "@/services/api-client";
 import type { ManagedWorkspaceView, WorkspaceOperationView } from "@/types/api-types";
 import { cn } from "@/lib/utils";
@@ -80,10 +85,20 @@ export type CodespaceManagementScope =
 type ResourceRequestError = { message: string; origin: ManagedWorkspaceView };
 type RetainedOperation = {
   operation?: string;
+  operations?: string[];
   owner: string;
   query?: string;
-  action: "create" | "start" | "resume_setup" | "stop" | "delete" | "adopt";
+  action?: "create" | "start" | "resume_setup" | "stop" | "delete" | "adopt";
+  receipt?: WorkspaceOperationView;
 };
+
+function retainedPhase(receipt?: WorkspaceOperationView) {
+  const original = receipt?.original;
+  const parsed = controllerOperationPhaseSchema.safeParse(
+    original && typeof original === "object" && "phase" in original ? original.phase : undefined,
+  );
+  return parsed.success ? parsed.data.name : undefined;
+}
 
 function errorStillCurrent(error: ResourceRequestError | undefined, current: ManagedWorkspaceView) {
   if (!error) return false;
@@ -207,6 +222,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
   const pendingOperationIds = (target: string): string[] => [
     ...new Set([
       ...(retainedRef.current[target]?.operation ? [retainedRef.current[target].operation!] : []),
+      ...(retainedRef.current[target]?.operations ?? []),
       ...(confirmedOperations[target] ? [confirmedOperations[target].operation] : []),
       ...(view?.codespaces.find((entry) => entry.codespace_id === target)?.pending_operations ??
         []),
@@ -261,7 +277,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
   };
   const collectOperation = async (target: string, cursor?: string) => {
     const owned = guard(false);
-    const retained = retainedRef.current[target];
+    let retained = retainedRef.current[target];
     const references = pendingOperationIds(target);
     if (!references.length) {
       if (!retained) return;
@@ -281,21 +297,58 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
       }));
       return;
     }
+    if (!owned()) return;
+    const selected = decodeReference(references[0], "operation");
+    if (selected.owner.kind !== "controller") throw new Error(t("localDevices.editor.unconfirmed"));
+    // Capture the entire selection before I/O. A partial read failure followed by
+    // inventory refresh must not discard the originals that still need collection.
+    retained = {
+      ...retained,
+      owner:
+        retained?.owner ??
+        encodeReference("controller", {
+          deviceId: selected.owner.deviceId,
+          connectionId: selected.owner.connectionId,
+        }),
+      operation: retained?.operation ?? references[0],
+      operations: references,
+    };
+    retainOperation(target, retained);
     let refused = false;
+    const unfinished: WorkspaceOperationView[] = [];
     let observation: ManagedWorkspaceView | undefined;
     let confirmed: WorkspaceOperationView | undefined;
     for (const reference of references) {
       const receipt = await apiClient.getWorkspaceOperation(reference);
       if (!owned() || retainedRef.current[target] !== retained) return;
-      if (receipt.operation !== reference || !receiptConfirmed(receipt))
+      if (receipt.operation !== reference || receipt.state === "absent")
         throw new Error(t("localDevices.editor.unconfirmed"));
+      if (!receiptConfirmed(receipt)) {
+        const original = decodeReference(reference, "operation");
+        if (original.owner.kind !== "controller")
+          throw new Error(t("localDevices.editor.unconfirmed"));
+        unfinished.push(receipt);
+        continue;
+      }
       if (receiptError(receipt)) refused = true;
       else confirmed = receipt;
       const result = receipt.outcome?.ok ? receipt.outcome.result : receipt.original;
       if (isWorkspaceObservation(result)) observation = result;
     }
-    if (observation || !confirmed) clearOperation(target);
-    else retainConfirmation(target, confirmed);
+    if (unfinished.length) {
+      const receipt = unfinished[0];
+      retainOperation(target, {
+        ...retained,
+        operation: receipt.operation,
+        // Keep completed originals too until this entire set settles. A refreshed
+        // inventory may omit them, but their captured outcomes still need projection.
+        operations: references,
+        receipt,
+      });
+    } else {
+      if (observation || !confirmed) clearOperation(target);
+      else retainConfirmation(target, confirmed);
+    }
     setActionErrors((previous) => {
       const next = { ...previous };
       delete next[target];
@@ -303,6 +356,15 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
     });
     if (target === "create") setCreateError(null);
     if (target === "adopt") setAdoptError(null);
+    if (unfinished.length) {
+      setCheckErrors((previous) => {
+        const next = { ...previous };
+        delete next[target];
+        return next;
+      });
+      if (refused) toast.error(t("localDevices.provisioning.failed"));
+      return;
+    }
     if (observation) {
       const completed = { ...observation, pending_operations: [] };
       replaceCodespace(completed);
@@ -373,10 +435,17 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
       retainOperation(target, { ...retained, operation: receipt.operation });
       retainConfirmation(target, receipt);
     } else if (receiptConfirmed(receipt)) clearOperation(target);
-    else retainOperation(target, { ...retained, operation: receipt.operation });
+    else retainOperation(target, { ...retained, operation: receipt.operation, receipt });
     const error = receiptError(receipt);
     if (error) throw Object.assign(new Error(error.message), { code: error.code });
-    if (!receiptConfirmed(receipt)) toast(t("localDevices.codespaces.requestAccepted"));
+    if (!receiptConfirmed(receipt))
+      toast(
+        t(
+          receipt.state === "pending" || receipt.state === "accepted"
+            ? "localDevices.codespaces.requestAccepted"
+            : "localDevices.editor.unconfirmed",
+        ),
+      );
   };
   const [checkingCodespaces, setCheckingCodespaces] = useState<Set<string>>(new Set());
   const [checkErrors, setCheckErrors] = useState<Record<string, ResourceRequestError>>({});
@@ -1054,7 +1123,10 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                 {t(
                   confirmedOperations[target]
                     ? "localDevices.codespaces.originalCompletedTitle"
-                    : "localDevices.codespaces.originalTitle",
+                    : unconfirmedOperations[target]?.receipt?.state === "pending" ||
+                        unconfirmedOperations[target]?.receipt?.state === "accepted"
+                      ? "localDevices.codespaces.originalPendingTitle"
+                      : "localDevices.codespaces.originalTitle",
                 )}
               </AlertTitle>
               <AlertDescription>
@@ -1062,11 +1134,26 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                   {t(
                     confirmedOperations[target]
                       ? "localDevices.codespaces.originalCompletedHint"
-                      : retained.operation
-                        ? "localDevices.editor.unconfirmed"
-                        : "localDevices.codespaces.findOriginalHint",
+                      : unconfirmedOperations[target]?.receipt?.state === "pending" ||
+                          unconfirmedOperations[target]?.receipt?.state === "accepted"
+                        ? "localDevices.codespaces.originalPendingHint"
+                        : retained.operation
+                          ? "localDevices.editor.unconfirmed"
+                          : "localDevices.codespaces.findOriginalHint",
                   )}
                 </p>
+                {unconfirmedOperations[target]?.receipt?.descriptor?.description && (
+                  <p>{unconfirmedOperations[target].receipt!.descriptor!.description}</p>
+                )}
+                {retainedPhase(unconfirmedOperations[target]?.receipt) && (
+                  <p>
+                    {t("localDevices.codespaces.lastStage", {
+                      stage: t(
+                        `localDevices.codespaces.stages.${retainedPhase(unconfirmedOperations[target]?.receipt)}`,
+                      ),
+                    })}
+                  </p>
+                )}
                 {confirmedOperations[target]?.observation_error && (
                   <InlineError
                     title={t("localDevices.codespaces.observationFailed")}

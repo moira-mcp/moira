@@ -35,6 +35,20 @@ const kinds = {
   communication: "delivery",
   "security-acquisition": "unknown",
 };
+const commandRefusalMessages = {
+  COMMAND_CWD_OUTSIDE_WORKSPACE:
+    "The command did not start: cwd is outside the selected workspace repository. Use '.' for its root or a directory inside it, such as 'moira-ws/task'. A directory created elsewhere in the VM is not accessible through workspace file tools.",
+  COMMAND_CWD_NOT_FOUND:
+    "The command did not start: cwd does not exist. Create the directory from cwd '.' inside this workspace first, then use its repository-relative path.",
+  COMMAND_CWD_NOT_DIRECTORY:
+    "The command did not start: cwd must identify a directory inside the selected workspace, not a file. Use '.' for the repository root.",
+  COMMAND_CWD_UNAVAILABLE:
+    "The command did not start: cwd could not be accessed. Check that the directory exists and is readable and searchable inside the selected workspace.",
+  COMMAND_START_REJECTED:
+    "The command did not start. Check the executable, the workspace repository binding and cwd. Use '.' for the selected repository root; collect this original operation rather than assuming the command ran.",
+  SESSION_UNAVAILABLE:
+    "The command did not start: the named session is absent or belongs to an earlier workspace runtime. Open a new session explicitly; do not assume its previous cwd or environment survived.",
+};
 const commandFields = (data) =>
   Object.fromEntries(
     [
@@ -211,7 +225,9 @@ export function createSemanticOwner({
                     ok: false,
                     error: data.error ?? {
                       code: data.reason ?? "OWNER_OPERATION_REFUSED",
-                      message: "The original owner operation did not succeed.",
+                      message:
+                        commandRefusalMessages[data.reason] ??
+                        "The original owner operation did not succeed.",
                     },
                     result,
                   }),

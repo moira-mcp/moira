@@ -30,6 +30,7 @@ let db: Database.Database,
   resource: LocalCodespaceResourceService;
 let owner: Awaited<ReturnType<typeof controllerFixture>> | undefined;
 let deviceId: string, target: string, lostReply: boolean, credential: string;
+let ownerOptions: { waitForCompletion: boolean };
 beforeEach(async () => {
   directory = await realpath(await mkdtemp("/tmp/moira-local-facade-"));
   db = new Database(":memory:");
@@ -64,7 +65,12 @@ beforeEach(async () => {
     label: "Fixture owner",
   });
   await devices.confirmEnrollment("owner", pair.pairingId, 2);
-  owner = await controllerFixture(join(directory, "owner"), devices.authenticateDevice(credential));
+  ownerOptions = { waitForCompletion: true };
+  owner = await controllerFixture(
+    join(directory, "owner"),
+    devices.authenticateDevice(credential),
+    ownerOptions,
+  );
   const repository = new LocalResourceRepository(db);
   resource = new LocalCodespaceResourceService(
     repository,
@@ -84,6 +90,294 @@ async function create(requestId = createWorkspaceRequestId()) {
 }
 
 describe("Local cloud facade routes to the authoritative owner", () => {
+  test.each([
+    ["stop", "created"],
+    ["stop", "absent"],
+    ["delete", "absent"],
+  ] as const)(
+    "collecting completed %s with native %s retires credentials despite retained setup failure",
+    async (action, nativeState) => {
+      const created = await create();
+      const binding = (await owner!.controller.state.binding(
+        created.codespace_id,
+        owner!.identity,
+      ))!;
+      const space = (await owner!.records.get(binding.localSpaceId!))!;
+      await owner!.records.put({
+        ...space,
+        phase: "failed",
+        failure: "LOCAL_SETUP_INCOMPLETE",
+        lastStartedAt: null,
+      });
+      const snapshot = owner!.manager.snapshot.bind(owner!.manager);
+      owner!.manager.snapshot = async (...args) => {
+        const result = await snapshot(...args);
+        return {
+          ...result,
+          spaces: result.spaces.map((entry) =>
+            entry.id === space.id
+              ? {
+                  ...entry,
+                  state: nativeState,
+                  nativeStopConfirmed: false,
+                }
+              : entry,
+          ),
+        };
+      };
+      let effects = 0;
+      const method = action === "delete" ? "remove" : "stop";
+      const effect = owner!.manager[method].bind(owner!.manager);
+      owner!.manager[method] = (async (...args: unknown[]) => {
+        effects++;
+        return (effect as (...values: unknown[]) => Promise<unknown>)(...args);
+      }) as never;
+      const retired: unknown[] = [];
+      devices.retireResourceCredentials = async (...args) => {
+        retired.push(args);
+      };
+      const requestId = createWorkspaceRequestId();
+      lostReply = true;
+      await expect(
+        action === "stop"
+          ? resource.stopCodespace("owner", created.codespace_id, requestId, created.generation)
+          : resource.deleteCodespace("owner", created.codespace_id, created.generation, {
+              requestId,
+              ownerConfirmed: true,
+            }),
+      ).rejects.toMatchObject({ code: "CODESPACE_LOCAL_CREATION_UNKNOWN" });
+      expect(retired).toEqual([]);
+      const receipt = await devices.getOperation("owner", deviceId, requestId);
+      expect(receipt).toMatchObject({
+        state: "completed",
+        outcome: {
+          ok: true,
+          result: {
+            lifecycleAction: action,
+            spaces: [
+              expect.objectContaining({ failure: "LOCAL_SETUP_INCOMPLETE", state: nativeState }),
+            ],
+          },
+        },
+      });
+      const local = {
+        ...createLocalCodespaceServices({ sqlite: db, controller: owner!.client }),
+        resource,
+        provider: "local-sandboxes" as const,
+        guidance: () => ({
+          provider: "local-sandboxes",
+          situation: "ready" as const,
+          instruction: null,
+          links: [],
+        }),
+      };
+      const semantic = createWorkspaceSemanticServices({
+        providers: [local],
+        select: () => local,
+        devices,
+        workspace: owner!.client,
+        controller: owner!.client,
+        repositories: {} as never,
+        repositoryCreation: {} as never,
+      });
+      const reference = encodeReference("operation", {
+        owner: { kind: "controller", deviceId, connectionId: owner!.identity.connectionId },
+        requestId,
+        kind: "lifecycle",
+      });
+      const first = await semantic.invoke("owner", "operation_get", { reference });
+      expect(first).toMatchObject({ state: "completed", outcome: { ok: true } });
+      expect(retired).toEqual([["owner", deviceId, created.codespace_id, 2]]);
+      expect(await semantic.invoke("owner", "operation_get", { reference })).toEqual(first);
+      expect(retired).toEqual(
+        Array(action === "delete" ? 1 : 2).fill(["owner", deviceId, created.codespace_id, 2]),
+      );
+      expect(effects).toBe(1);
+      expect(await devices.getOperation("owner", deviceId, requestId)).toEqual(receipt);
+    },
+  );
+  test("account revocation while durable acceptance returns refuses disclosure without replay", async () => {
+    ownerOptions.waitForCompletion = false;
+    const original = owner!.client.json;
+    const requestId = createWorkspaceRequestId();
+    owner!.client.json = async (...args) => {
+      const receipt = await original(...args);
+      if (args[2].method === "POST") db.prepare("UPDATE user SET blocked=1 WHERE id='owner'").run();
+      return receipt;
+    };
+    try {
+      await expect(create(requestId)).rejects.toMatchObject({
+        code: "CODESPACE_AUTHORIZATION_REQUIRED",
+      });
+      await owner!.controller.state.waitForOperation(requestId, owner!.identity);
+      expect(await owner!.state.keys("controller-operation-")).toHaveLength(1);
+    } finally {
+      db.prepare("UPDATE user SET blocked=0 WHERE id='owner'").run();
+    }
+  });
+  test.each(["start", "stop", "resume_setup", "delete"] as const)(
+    "REST returns pending during held %s and collects the original completion",
+    async (action) => {
+      const created = await create();
+      ownerOptions.waitForCompletion = false;
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let effects = 0;
+      const method =
+        action === "delete" ? "remove" : action === "resume_setup" ? "resumeSetup" : action;
+      const original = (
+        action === "resume_setup" ? owner!.manager.start : owner!.manager[method]
+      ).bind(owner!.manager);
+      owner!.manager[method] = (async (...args: unknown[]) => {
+        effects++;
+        await held;
+        return (original as (...values: unknown[]) => Promise<unknown>)(...args);
+      }) as never;
+      const local = {
+        ...createLocalCodespaceServices({ sqlite: db, controller: owner!.client }),
+        resource,
+        provider: "local-sandboxes" as const,
+        guidance: () => ({
+          provider: "local-sandboxes",
+          situation: "ready" as const,
+          instruction: null,
+          links: [],
+        }),
+      };
+      const semantic = createWorkspaceSemanticServices({
+        providers: [local],
+        select: () => local,
+        devices,
+        workspace: owner!.client,
+        controller: owner!.client,
+        repositories: {} as never,
+        repositoryCreation: {} as never,
+      });
+      const app = express();
+      app.use(express.json(), (req, _res, next) => {
+        Object.assign(req, { userId: "owner" });
+        next();
+      });
+      app.use(createCodespaceManagementRoutes({ ...local, semantic }));
+      const workspace = encodeReference("workspace", {
+        resourceId: created.codespace_id,
+        provider: "local-sandboxes",
+        deviceId,
+        generation: created.generation,
+      });
+      let requestId: string | undefined;
+      try {
+        const response = await request(app)
+          .post("/operations/" + (action === "delete" ? "workspace_delete" : "workspace_lifecycle"))
+          .send(action === "delete" ? { workspace, confirm_delete: true } : { workspace, action });
+        expect(response.status).toBe(200);
+        expect(response.body).toMatchObject({
+          success: true,
+          data: { state: "pending", instruction: expect.any(String) },
+        });
+        const reference = response.body.data.operation;
+        requestId = decodeReference(reference, "operation").requestId;
+        expect(
+          (await request(app).post("/operations/operation_get").send({ reference })).body.data
+            .state,
+        ).toBe("pending");
+        release();
+        const receipt = await owner!.controller.state.waitForOperation(requestId, owner!.identity);
+        const completed = await request(app).post("/operations/operation_get").send({ reference });
+        expect(completed.body.data).toMatchObject({ state: "completed", outcome: { ok: true } });
+        if (action === "delete") {
+          expect(completed.body.data.outcome.result.state).toBe("deleted");
+          expect(devices.getBinding("owner", created.codespace_id)).toBeNull();
+          expect(
+            resource.repository.getOwned("owner", created.codespace_id)?.retiredRequestId,
+          ).toBe(requestId);
+          expect(
+            (await request(app).post("/operations/operation_get").send({ reference })).body.data,
+          ).toEqual(completed.body.data);
+        }
+        expect(await devices.getOperation("owner", deviceId, requestId)).toEqual(receipt);
+        expect(effects).toBe(1);
+      } finally {
+        release();
+        if (requestId) await owner!.controller.state.waitForOperation(requestId, owner!.identity);
+      }
+    },
+  );
+  test("real HTTP returns durable pending before held creation, and collection never resubmits", async () => {
+    ownerOptions.waitForCompletion = false;
+    const originalCreate = owner!.manager.create.bind(owner!.manager);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let creations = 0;
+    owner!.manager.create = async (...args) => {
+      creations++;
+      await held;
+      return originalCreate(...args);
+    };
+    const local = {
+      ...createLocalCodespaceServices({ sqlite: db, controller: owner!.client }),
+      resource,
+      provider: "local-sandboxes" as const,
+      guidance: () => ({
+        provider: "local-sandboxes",
+        situation: "ready" as const,
+        instruction: null,
+        links: [],
+      }),
+    };
+    const semantic = createWorkspaceSemanticServices({
+      providers: [local],
+      select: () => local,
+      devices,
+      workspace: owner!.client,
+      controller: owner!.client,
+      repositories: {} as never,
+      repositoryCreation: {} as never,
+    });
+    const requestId = createWorkspaceRequestId();
+    const targetReference = encodeReference("target", {
+      provider: "local-sandboxes",
+      repositoryId: target,
+      controller: { deviceId, connectionId: owner!.identity.connectionId },
+    });
+    try {
+      const pending = (await semantic.invoke(
+        "owner",
+        "workspace_create",
+        { target: targetReference, branch: "main" },
+        requestId,
+      )) as { operation: string };
+      expect(pending).toMatchObject({
+        state: "pending",
+        next: { purpose: "operation_get", reference: pending.operation },
+      });
+      expect(pending).not.toHaveProperty("outcome");
+      expect(
+        await semantic.invoke("owner", "operation_get", { reference: pending.operation }),
+      ).toMatchObject({ state: "pending" });
+      expect(
+        await semantic.invoke(
+          "owner",
+          "workspace_create",
+          { target: targetReference, branch: "main" },
+          requestId,
+        ),
+      ).toMatchObject({ state: "pending", operation: pending.operation });
+      release();
+      await owner!.controller.state.waitForOperation(requestId, owner!.identity);
+      expect(
+        await semantic.invoke("owner", "operation_get", { reference: pending.operation }),
+      ).toMatchObject({ state: "completed", outcome: { ok: true, result: { state: "usable" } } });
+      expect(creations).toBe(1);
+    } finally {
+      release();
+      await owner!.controller.state.waitForOperation(requestId, owner!.identity);
+    }
+  });
   test("collecting a lost create and an older stop projects the real receipt while inventory and fresh observation are unavailable", async () => {
     const requestId = createWorkspaceRequestId();
     lostReply = true;

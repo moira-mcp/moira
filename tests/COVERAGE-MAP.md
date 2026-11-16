@@ -217,6 +217,16 @@ fixture does not traverse GuestProxy. [Native source](unit/workspace-service/nat
 and [Git/PR owner](unit/workspace-service/github-owner.test.cjs) exercise direct Node entry paths
 and distinguish absent PR dispatch from a lost reply; packaged builds alone do not cover raw imports.
 
+[Workspace diagnostics](unit/workspace-service/diagnostics.test.cjs) exercises precise cwd
+no-start results and original collection through the owner HTTP tools, repository-relative
+command/file success, and safe file-containment refusals without outside paths or content.
+[State JSON snapshots](unit/workspace-service/state-json.test.cjs) reads complete versions while
+a separate process atomically publishes replacements, and refuses symlinks, hardlinks,
+directories, FIFOs, missing files and malformed JSON.
+[Pending operation UI](unit/web-frontend/codespace-pending-operation.test.tsx) distinguishes
+accepted work from unknown outcomes in EN/RU and retains every unfinished original across
+collection and inventory refreshes without resubmitting lifecycle work.
+
 | Level                        | Boundary and suite                                                                                                                                                                                                                                                                                                                                                                                       |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Unit                         | Local policy, durable controller receipts, exact generation/grant authority, runtime observation and custody: [Local](unit/local/). Common Unix owner, semantic references, exact bytes, retained input/output and physical reader settlement: [workspace service](unit/workspace-service/).                                                                                                             |

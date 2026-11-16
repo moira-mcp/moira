@@ -994,9 +994,17 @@ export async function createWorkspaceOwner({
           } catch (error) {
             // All adapters receive the same owner refusal. Accepted effects are
             // already fenced by journalOutcome and retain their uncertainty.
-            if (!error.publicCode && !error.fileReason)
+            if (!error.publicCode) {
+              if (["ELOOP", "ENOTDIR"].includes(error.code)) error.fileReason = "unsafe_access";
               error.publicCode =
-                error.code === "ENOENT" ? "NOT_FOUND" : "WORKSPACE_OPERATION_ERROR";
+                error.code === "ENOENT"
+                  ? "NOT_FOUND"
+                  : ["unsafe_access", "concurrent_change", "precondition"].includes(
+                        error.fileReason,
+                      )
+                    ? "FILE_REJECTED"
+                    : "WORKSPACE_OPERATION_ERROR";
+            }
             throw error;
           }
         })();
