@@ -249,7 +249,7 @@ describe("semantic MCP tools with the actual workspace owner", () => {
     });
     expect(refused.structuredContent).toMatchObject({
       state: "completed",
-      outcome: { ok: false, result: { reason: "COMMAND_START_REJECTED" } },
+      outcome: { ok: false, result: { reason: "COMMAND_CWD_OUTSIDE_WORKSPACE" } },
       operation: expect.any(String),
     });
     const result = await value.execute("command_run", {

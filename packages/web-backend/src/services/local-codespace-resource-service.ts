@@ -5,6 +5,7 @@ import {
   CODESPACE_PROVIDER_LOCAL,
   CodespaceResourceError,
   LocalDeviceError,
+  ScopedCredentialError,
   LocalResourceRepository,
   controllerRequestIdSchema,
   localResourceSnapshotSchema,
@@ -127,11 +128,135 @@ export class LocalCodespaceResourceService {
     return this.observeCodespace(userId, resourceId);
   }
   /** A retained owner result is historical evidence, never a new native observation. */
-  async projectRetainedSnapshot(userId: string, value: unknown): Promise<CodespaceSummaryView> {
+  async projectRetainedSnapshot(
+    userId: string,
+    value: unknown,
+    requestId?: string,
+  ): Promise<CodespaceSummaryView> {
     try {
-      const { resourceId } = z.object({ resourceId: z.string().uuid() }).parse(value);
-      return await this.observeCodespace(userId, resourceId, undefined, value);
+      const captured = localResourceSnapshotSchema
+        .extend({
+          resourceId: z.string().uuid(),
+          resourceGeneration: z.number().int().positive().safe(),
+          lifecycleAction: z.enum(["create", "start", "resume_setup", "stop", "delete"]).optional(),
+        })
+        .parse(value);
+      const { resourceId, resourceGeneration } = captured;
+      const resource = this.repository.getOwned(userId, resourceId);
+      if (
+        requestId &&
+        resource &&
+        resource.retiredAt !== null &&
+        resource.retiredRequestId === requestId &&
+        resource.retiredGeneration === resourceGeneration
+      )
+        return this.getCodespace(userId, resourceId);
+      // Validate the complete retained identity before applying cloud retirement bookkeeping.
+      const observed = await this.observeCodespace(userId, resourceId, undefined, value);
+      const space = captured.spaces.find(
+        (entry) =>
+          entry.id ===
+          (captured.creation.state === "manifest" ? captured.creation.spaceId : undefined),
+      );
+      if (
+        requestId &&
+        space &&
+        // A successful lifecycle receipt proves its action even when setup failed
+        // earlier or the stopped native instance is already absent. Older receipts
+        // use their explicit native settlement/absence witness instead.
+        (captured.lifecycleAction === "stop" ||
+          captured.lifecycleAction === "delete" ||
+          (captured.lifecycleAction === undefined &&
+            ((space.desiredState === "stopped" && space.nativeStopConfirmed) ||
+              (space.desiredState === "deleted" &&
+                space.phase === "deleted" &&
+                space.state === "absent"))))
+      ) {
+        const originalId = this.requestIdentity(requestId);
+        const binding = this.devices.getBinding(userId, resourceId);
+        if (!binding)
+          throw new CodespaceResourceError(
+            "CODESPACE_AUTHORIZATION_REQUIRED",
+            "Local resource binding is missing.",
+          );
+        const device = this.devices.getDeviceIdentity(userId, binding.deviceId);
+        if (
+          !resource ||
+          resource.connectionId !== binding.connectionId ||
+          resource.routeGeneration > resourceGeneration ||
+          device.status !== "active" ||
+          device.connectionId !== binding.connectionId ||
+          device.deviceGeneration !== binding.deviceGeneration
+        )
+          throw new CodespaceResourceError(
+            "CODESPACE_AUTHORIZATION_REQUIRED",
+            "The retained retirement does not match current route authority.",
+          );
+        await this.devices.retireResourceCredentials(
+          userId,
+          binding.deviceId,
+          resourceId,
+          resourceGeneration,
+        );
+        if (
+          captured.lifecycleAction === "delete" ||
+          (captured.lifecycleAction === undefined && space.desiredState === "deleted")
+        ) {
+          this.sqlite
+            .transaction(() => {
+              const active = this.devices.repository.getActiveDevice(userId, binding.deviceId);
+              if (
+                active.deviceGeneration !== device.deviceGeneration ||
+                active.connectionId !== device.connectionId
+              )
+                throw new CodespaceResourceError(
+                  "CODESPACE_AUTHORIZATION_REQUIRED",
+                  "Controller authority changed during retirement.",
+                );
+              const route = this.repository.getOwned(userId, resourceId);
+              if (
+                route?.retiredRequestId === originalId &&
+                route.retiredGeneration === resourceGeneration
+              )
+                return;
+              const current = this.devices.getBinding(userId, resourceId);
+              if (
+                !route ||
+                route.retiredAt !== null ||
+                route.connectionId !== resource.connectionId ||
+                route.routeGeneration !== resource.routeGeneration ||
+                !current ||
+                current.deviceId !== binding.deviceId ||
+                current.repositoryId !== binding.repositoryId ||
+                current.profileId !== binding.profileId ||
+                current.connectionId !== binding.connectionId ||
+                current.deviceGeneration !== binding.deviceGeneration
+              )
+                throw new CodespaceResourceError(
+                  "CODESPACE_AUTHORIZATION_REQUIRED",
+                  "Local resource authority changed during retirement.",
+                );
+              this.sqlite
+                .prepare(
+                  "UPDATE codespaceLocalResourceBinding SET revokedAt=? WHERE resourceId=? AND userId=? AND revokedAt IS NULL",
+                )
+                .run(this.now(), resourceId, userId);
+              this.sqlite
+                .prepare("DELETE FROM workspaceAgentCredential WHERE resourceId=? AND userId=?")
+                .run(resourceId, userId);
+              this.repository.retire(userId, resourceId, {
+                requestId: originalId,
+                resourceGeneration,
+                retiredAt: this.now(),
+              });
+            })
+            .immediate();
+          return this.getCodespace(userId, resourceId);
+        }
+      }
+      return observed;
     } catch (error) {
+      if (error instanceof ScopedCredentialError) throw error;
       throw new CodespaceEffectObservationError(error);
     }
   }
@@ -147,6 +272,7 @@ export class LocalCodespaceResourceService {
     if (resource.retiredAt !== null && receipt === undefined)
       return this.summary(resource, {
         state: "deleted",
+        device_id: parseLocalRepositoryTargetId(resource.repositoryId).deviceId,
         desired_state: "deleted",
         observed_state: "absent",
         generation: resource.retiredGeneration!,
@@ -302,7 +428,7 @@ export class LocalCodespaceResourceService {
         );
       try {
         const operation = await this.devices.getOperation(userId, device.deviceId, operationId);
-        if (operation.state === "completed") {
+        if (operation.state === "completed" || operation.state === "accepted") {
           return this.projectRetainedSnapshot(
             userId,
             this.devices.resourceOperationResult(operation),
@@ -482,39 +608,7 @@ export class LocalCodespaceResourceService {
         resourceId,
         action === "delete" ? { ...common, action, ownerConfirmed } : { ...common, action },
       );
-      let deletedGeneration: number | undefined;
-      if (action === "delete") {
-        const completed = z
-          .object({
-            resourceId: z.literal(resourceId),
-            resourceGeneration: z.number().int().positive().safe(),
-          })
-          .passthrough()
-          .parse(result);
-        deletedGeneration = completed.resourceGeneration;
-        this.sqlite
-          .transaction(() => {
-            this.sqlite
-              .prepare(
-                "UPDATE codespaceLocalResourceBinding SET revokedAt=? WHERE resourceId=? AND userId=? AND revokedAt IS NULL",
-              )
-              .run(this.now(), resourceId, userId);
-            this.sqlite
-              .prepare("DELETE FROM workspaceAgentCredential WHERE resourceId=? AND userId=?")
-              .run(resourceId, userId);
-            this.repository.retire(userId, resourceId, {
-              requestId: operationId,
-              resourceGeneration: completed.resourceGeneration,
-              retiredAt: this.now(),
-            });
-          })
-          .immediate();
-      }
-      const observed =
-        action === "delete"
-          ? await this.getCodespace(userId, resourceId)
-          : await this.projectRetainedSnapshot(userId, result);
-      return deletedGeneration ? { ...observed, generation: deletedGeneration } : observed;
+      return await this.projectRetainedSnapshot(userId, result, operationId);
     } catch (error) {
       this.failure(error, { requestId: operationId, deviceId: binding.deviceId, resourceId });
     }

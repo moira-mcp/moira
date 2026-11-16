@@ -12,9 +12,13 @@ import { connect as connectUnix } from "node:net";
 import { once, EventEmitter } from "node:events";
 import { dirname } from "node:path";
 import type { Duplex, Readable } from "node:stream";
-import { CodespaceResourceError } from "@mcp-moira/shared/codespace-resource-types";
+import {
+  CodespaceResourceError,
+  codespaceLifecycleErrorCode,
+} from "@mcp-moira/shared/codespace-resource-types";
 import {
   WORKSPACE_HEARTBEAT_INTERVAL_MS,
+  WORKSPACE_RENDEZVOUS_TIMEOUT_MS,
   WORKSPACE_UPGRADE,
   type WorkspaceEndpointKind,
 } from "@mcp-moira/shared/workspace-transport";
@@ -360,26 +364,35 @@ export class WorkspaceRouter extends EventEmitter {
       );
     const callId = randomUUID();
     const socket = await new Promise<Duplex>((resolve, reject) => {
-      const abort = () => {
-        this.pending.delete(callId);
-        reject(
-          signal?.reason instanceof Error
-            ? signal.reason
-            : new Error("Workspace call cancelled before dispatch"),
+      const clean = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", abort);
+        if (this.pending.get(callId) === pending) this.pending.delete(callId);
+      };
+      const refuseAdmission = (message: string) => {
+        if (this.pending.get(callId) !== pending) return;
+        pending.reject(
+          new CodespaceResourceError("CODESPACE_PROVIDER_UNAVAILABLE", message, undefined, true),
         );
       };
+      const abort = () => refuseAdmission("Workspace call cancelled before dispatch");
       const pending: Pending = {
         connection,
         resolve: (value) => {
-          signal?.removeEventListener("abort", abort);
+          clean();
           resolve(value);
         },
         reject: (error) => {
-          signal?.removeEventListener("abort", abort);
+          clean();
           reject(error);
         },
       };
       this.pending.set(callId, pending);
+      const timer = setTimeout(
+        () => refuseAdmission("Workspace data channel did not open before dispatch"),
+        WORKSPACE_RENDEZVOUS_TIMEOUT_MS,
+      );
+      timer.unref();
       signal?.addEventListener("abort", abort, { once: true });
       if (signal?.aborted) return abort();
       connection.socket.write(`${JSON.stringify({ callId })}\n`, (error) => {
@@ -535,6 +548,9 @@ export class WorkspaceRouter extends EventEmitter {
                   error instanceof CodespaceResourceError
                     ? error.code
                     : "WORKSPACE_OUTCOME_UNKNOWN",
+                ...(error instanceof CodespaceResourceError && error.confirmedRefusal
+                  ? { confirmedRefusal: true }
+                  : {}),
               },
             }),
           );
@@ -629,6 +645,19 @@ export async function jsonResponse(response: WorkspaceResponse): Promise<Record<
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error("Invalid workspace metadata reply");
   if (response.statusCode >= 400) {
+    const refusal = (value as { error?: { code?: unknown; confirmedRefusal?: unknown } }).error;
+    const code =
+      typeof refusal?.code === "string" ? codespaceLifecycleErrorCode(refusal.code) : null;
+    if (refusal?.confirmedRefusal === true && code)
+      throw Object.assign(
+        new CodespaceResourceError(
+          code,
+          "Workspace request refused before dispatch",
+          undefined,
+          true,
+        ),
+        { statusCode: response.statusCode, details: value },
+      );
     const error = new Error(`Workspace request refused (${response.statusCode})`);
     Object.assign(error, { statusCode: response.statusCode, details: value });
     throw error;

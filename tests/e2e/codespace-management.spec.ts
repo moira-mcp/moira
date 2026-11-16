@@ -948,6 +948,99 @@ test("a lost completed start reply is explicitly recovered without another start
 });
 
 for (const language of ["en", "ru"] as const) {
+  test(`accepted lifecycle remains collectable and distinguishes unknown outcome (${language})`, async ({
+    page,
+  }, testInfo) => {
+    await loginAsAdmin(page);
+    const labels =
+      language === "en"
+        ? {
+            pending: "Operation accepted; completion is pending",
+            unknown: "Original operation result is not confirmed",
+            stage: "stopping the GitHub environment",
+            collect: "Check original result",
+          }
+        : {
+            pending: "Операция принята, ожидается завершение",
+            unknown: "Результат исходной операции не подтверждён",
+            stage: "остановка среды GitHub",
+            collect: "Проверить исходный результат",
+          };
+    let submissions = 0;
+    let collections = 0;
+    const current = codespace();
+    const pending = {
+      operation: originalOperation,
+      state: "pending",
+      descriptor: { kind: "lifecycle", description: "Stop example/project" },
+      original: { phase: { name: "provider_stop", resourceGeneration: 4 } },
+    };
+    await page.route("**/api/integrations/github", (route) =>
+      route.fulfill({ json: { success: true, data: connection } }),
+    );
+    await page.route("**/api/integrations/github/codespaces**", async (route) => {
+      if (await fulfillAuxiliaryRead(route)) return;
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      if (request.method() === "POST" && path.endsWith("/workspace_lifecycle")) {
+        expect(request.postDataJSON()).toEqual({ workspace: current.workspace, action: "stop" });
+        submissions++;
+        await route.fulfill({ json: { success: true, data: pending } });
+        return;
+      }
+      if (request.method() === "POST" && path.endsWith("/operation_get")) {
+        expect(request.postDataJSON()).toEqual({ reference: originalOperation });
+        collections++;
+        await route.fulfill({
+          json: {
+            success: true,
+            data:
+              collections === 1 ? pending : { operation: originalOperation, state: "unconfirmed" },
+          },
+        });
+        return;
+      }
+      if (request.method() === "GET" && path.endsWith("/codespaces")) {
+        await route.fulfill({
+          json: {
+            success: true,
+            data: { ...managementMetadata, provider: "github-codespaces", codespaces: [current] },
+          },
+        });
+        return;
+      }
+      await route.fulfill({ status: 404, json: { success: false } });
+    });
+    await page.goto(`${baseUrl}/settings?lang=${language}#development-environments`);
+    const stop = page.getByTestId(`github-codespace-stop-${CODESPACE_ID}`);
+    await stop.click();
+    const original = page.getByTestId(`workspace-original-${CODESPACE_ID}`);
+    await expect(original).toContainText(labels.pending);
+    await expect(original).toContainText(labels.stage);
+    await expect(original).toContainText("Stop example/project");
+    await expect(original).not.toContainText(labels.unknown);
+    await expect(stop).toBeDisabled();
+    await original.getByRole("button", { name: labels.collect, exact: true }).click();
+    await expect.poll(() => collections).toBe(1);
+    await expect(original).toContainText(labels.pending);
+    await testInfo.attach(`lifecycle-pending-${language}`, {
+      body: await original.screenshot(),
+      contentType: "image/png",
+    });
+    await original.getByRole("button", { name: labels.collect, exact: true }).click();
+    await expect(original).toContainText(labels.unknown);
+    await expect(original).not.toContainText(labels.pending);
+    await expect(original).not.toContainText(labels.stage);
+    await expect(stop).toBeDisabled();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await testInfo.attach(`lifecycle-unknown-narrow-${language}`, {
+      body: await original.screenshot(),
+      contentType: "image/png",
+    });
+    expect(collections).toBe(2);
+    expect(submissions).toBe(1);
+  });
+
   test(`targets stay usable under held inventory and an exact card refusal is isolated (${language})`, async ({
     page,
   }, testInfo) => {

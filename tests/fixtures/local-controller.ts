@@ -14,7 +14,11 @@ import { localFixture } from "../integration/local/fixtures.js";
 import { randomUUID } from "node:crypto";
 
 /** Actual owner records/settings/journal/HTTP; only physical VM operations are controlled. */
-export async function controllerFixture(directory: string, identity: ControllerIdentity) {
+export async function controllerFixture(
+  directory: string,
+  identity: ControllerIdentity,
+  options: { waitForCompletion?: boolean } = {},
+) {
   const state = await PrivateState.open(directory),
     local = await localFixture(state);
   local.policy.deviceId = identity.deviceId;
@@ -169,7 +173,7 @@ export async function controllerFixture(directory: string, identity: ControllerI
       input: { method: string; path: string; body?: unknown },
     ) {
       const bytes = input.body === undefined ? undefined : Buffer.from(JSON.stringify(input.body));
-      return jsonResponse(
+      const result = await jsonResponse(
         await wire.request(userId, deviceId, {
           method: input.method,
           path: input.path,
@@ -182,6 +186,15 @@ export async function controllerFixture(directory: string, identity: ControllerI
           body: bytes,
         }),
       );
+      // Completion-focused tests collect the same admitted original, never resubmit it.
+      // Pending/HTTP contract tests explicitly disable this convenience.
+      if (
+        options.waitForCompletion !== false &&
+        result.state === "accepted" &&
+        typeof result.requestId === "string"
+      )
+        return controller.state.waitForOperation(result.requestId, identity);
+      return result;
     },
   };
   return {

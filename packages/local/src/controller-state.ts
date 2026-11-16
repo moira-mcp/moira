@@ -7,6 +7,7 @@ import {
   controllerOperationDescriptorSchema,
   controllerOperationFindSchema,
   controllerOperationSchema,
+  controllerOperationPhaseSchema,
   githubControllerResourceSchema,
   githubPreparedCreateSchema,
   githubProvisionProofSchema,
@@ -70,19 +71,7 @@ const operationSchema = z
       })
       .strict()
       .optional(),
-    phase: z
-      .object({
-        name: z.enum([
-          "provider_create",
-          "provider_start",
-          "provider_stop",
-          "provider_delete",
-          "provision",
-        ]),
-        resourceGeneration: z.number().int().positive(),
-      })
-      .strict()
-      .optional(),
+    phase: controllerOperationPhaseSchema.optional(),
   })
   .strict();
 type OperationRecord = z.infer<typeof operationSchema>;
@@ -90,6 +79,11 @@ const sameIdentity = (left: ControllerIdentity, right: ControllerIdentity) =>
   (["userId", "deviceId", "deviceGeneration", "connectionId"] as const).every(
     (key) => left[key] === right[key],
   );
+
+export interface ControllerRunOptions {
+  /** Return the durable original admission without waiting for its physical effect. */
+  waitForCompletion?: boolean;
+}
 
 /** New controller records never execute an archived relay request. */
 export class ControllerState {
@@ -371,6 +365,8 @@ export class ControllerState {
             ? "accepted"
             : "unconfirmed",
       ...(entry.outcome ? { outcome: entry.outcome as ControllerOperation["outcome"] } : {}),
+      ...(entry.state === "accepted" && entry.phase ? { phase: entry.phase } : {}),
+      ...(entry.state === "accepted" && entry.descriptor ? { descriptor: entry.descriptor } : {}),
     };
   }
 
@@ -671,6 +667,7 @@ export class ControllerState {
     identity: ControllerIdentity,
     input: unknown,
     action: () => Promise<unknown>,
+    options: ControllerRunOptions = {},
   ): Promise<ControllerOperation> {
     controllerRequestIdSchema.parse(requestId);
     const digest = createHash("sha256").update(canonicalJson(input)).digest("hex");
@@ -822,7 +819,7 @@ export class ControllerState {
       this.pending.set(requestId, work);
       void work.catch(() => undefined);
     });
-    return work!;
+    return options.waitForCompletion === false ? this.inspect(requestId, identity) : work!;
   }
   async drain(): Promise<void> {
     await Promise.allSettled([...this.pending.values()]);

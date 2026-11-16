@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   CodespaceResourceError,
   LocalDeviceError,
+  ControllerOperationPending,
   ScopedCredentialError,
   type CodespaceSummaryView,
 } from "@mcp-moira/shared";
@@ -196,6 +197,89 @@ function fixture(provider = "github-codespaces") {
 }
 
 describe("semantic workspace backend", () => {
+  test("completed lifecycle collection preserves credential disposal uncertainty", async () => {
+    const f = fixture();
+    const receipt = {
+      requestId: REQUEST,
+      state: "completed",
+      outcome: { ok: true, result: { resourceId: RESOURCE } },
+    };
+    f.devices.getOperation.mockResolvedValue(receipt as never);
+    f.resource.projectRetainedSnapshot.mockRejectedValue(
+      new ScopedCredentialError("SCOPED_CREDENTIAL_DISPOSAL_PENDING", 503),
+    );
+    const reference = encodeReference("operation", {
+      owner: { kind: "controller", ...owner },
+      requestId: REQUEST,
+      kind: "lifecycle",
+    });
+    expect(await f.service.invoke(USER, "operation_get", { reference })).toMatchObject({
+      state: "unconfirmed",
+      original: { outcome: receipt.outcome, error: { code: "SCOPED_CREDENTIAL_DISPOSAL_PENDING" } },
+    });
+    expect(f.resource.stopCodespace).not.toHaveBeenCalled();
+    expect(receipt.state).toBe("completed");
+  });
+  test.each(["local-sandboxes", "github-codespaces"])(
+    "%s durable acceptance stays pending with the original reference and factual stage",
+    async (provider) => {
+      const f = fixture(provider);
+      const receipt = {
+        requestId: REQUEST,
+        state: "accepted" as const,
+        phase: { name: "provider_prepare" as const, resourceGeneration: 1 },
+        descriptor: {
+          kind: "lifecycle" as const,
+          description: "Create owner/repository at main",
+          createdAt: 10,
+        },
+      };
+      f.resource.create.mockRejectedValue(new ControllerOperationPending(receipt));
+      const target = encodeReference("target", {
+        provider: provider as "local-sandboxes" | "github-codespaces",
+        repositoryId: "42",
+        controller: owner,
+      });
+      const admitted = (await f.service.invoke(
+        USER,
+        "workspace_create",
+        { target, branch: "main" },
+        REQUEST,
+      )) as { operation: string };
+      expect(admitted).toMatchObject({
+        state: "pending",
+        description: receipt.descriptor.description,
+        original: { phase: receipt.phase },
+        next: { purpose: "operation_get", reference: admitted.operation },
+      });
+      expect(admitted).not.toHaveProperty("outcome");
+      expect(admitted).not.toHaveProperty("workspace");
+      expect(decodeReference(admitted.operation, "operation").requestId).toBe(REQUEST);
+      f.devices.getOperation.mockResolvedValue(receipt as never);
+      expect(
+        await f.service.invoke(USER, "operation_get", { reference: admitted.operation }),
+      ).toEqual(admitted);
+      expect(f.resource.create).toHaveBeenCalledTimes(1);
+      expect(f.resource.getCodespace).not.toHaveBeenCalled();
+    },
+  );
+  test("account revocation before an accepted reply prevents pending disclosure", async () => {
+    const f = fixture();
+    f.resource.create.mockImplementation(async () => {
+      f.devices.repository.getActiveDevice.mockImplementation(() => {
+        throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Account revoked");
+      });
+      throw new ControllerOperationPending({ requestId: REQUEST, state: "accepted" });
+    });
+    const target = encodeReference("target", {
+      provider: "github-codespaces",
+      repositoryId: "42",
+      controller: owner,
+    });
+    await expect(
+      f.service.invoke(USER, "workspace_create", { target, branch: "main" }, REQUEST),
+    ).rejects.toMatchObject({ code: "LOCAL_UNAUTHORIZED" });
+  });
   test.each([
     ["device", false],
     ["device", true],
@@ -415,6 +499,22 @@ describe("semantic workspace backend", () => {
         observed_at: 123,
       });
       expect(forbidden).not.toHaveBeenCalled();
+      ownerReply = {
+        requestId: REQUEST,
+        state: "accepted",
+        phase: { name: "provider_prepare", resourceGeneration: 5 },
+      };
+      for (const action of ["startCodespace", "stopCodespace", "resumeSetup"] as const)
+        await expect(actual[action](USER, RESOURCE, REQUEST, 5)).rejects.toBeInstanceOf(
+          ControllerOperationPending,
+        );
+      await expect(
+        actual.deleteCodespace(USER, RESOURCE, 5, { requestId: REQUEST }),
+      ).rejects.toBeInstanceOf(ControllerOperationPending);
+      ownerReply = { requestId: REQUEST, state: "unconfirmed" };
+      await expect(actual.startCodespace(USER, RESOURCE, REQUEST, 5)).rejects.toMatchObject({
+        code: "WORKSPACE_OUTCOME_UNCONFIRMED",
+      });
       ownerReply = { ...retained, outcome: { ok: true, result: { resourceId: RESOURCE } } };
       f.resource.startCodespace.mockImplementation((userId, id, requestId, generation) =>
         actual.startCodespace(String(userId), String(id), String(requestId), Number(generation)),

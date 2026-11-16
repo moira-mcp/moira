@@ -36,7 +36,11 @@ import {
 } from "../../shared/src/codespaces/local-management-types.js";
 import { LocalManager } from "./manager.js";
 import { LocalRelay } from "./relay.js";
-import { ControllerState, type ControllerBinding } from "./controller-state.js";
+import {
+  ControllerState,
+  type ControllerBinding,
+  type ControllerRunOptions,
+} from "./controller-state.js";
 import { canonicalJson } from "../../shared/src/utils/canonical-json.js";
 import { CODESPACE_IDLE_TIMEOUT_MINUTES } from "../../shared/src/codespaces/resource-types.js";
 import { workspaceRemoteObservationSchema } from "../../shared/src/codespaces/local-protocol.js";
@@ -443,7 +447,7 @@ export class LocalController {
         "The physical owner is retiring; no new work is admitted.",
       );
   }
-  async githubLifecycle(resourceId: string, input: unknown) {
+  async githubLifecycle(resourceId: string, input: unknown, options: ControllerRunOptions = {}) {
     this.requireAdmission();
     z.string().uuid().parse(resourceId);
     const value = controllerGitHubLifecycleSchema.parse(input);
@@ -454,43 +458,62 @@ export class LocalController {
       );
     const original = await this.state.inspect(value.requestId, this.identity);
     if (original.state !== "absent")
-      return this.state.run(value.requestId, this.identity, { resourceId, ...value }, async () => {
-        throw new LocalRefusal("LOCAL_REPLAY_CONFLICT", "Original owner work cannot be replayed.");
-      });
-    if (value.action === "resume_setup") return this.resumeGitHubSetup(resourceId, value);
-    let rebindPurpose: "adopt" | "retire" | undefined;
-    if (value.action === "adopt") rebindPurpose = "adopt";
-    else if (value.action === "delete") {
-      try {
-        await this.github.relay.githubAssignment(resourceId);
-      } catch (error) {
-        if (!(error instanceof LocalRefusal) || error.code !== "CODESPACE_AUTHORIZATION_REQUIRED")
-          throw error;
-        rebindPurpose = "retire";
-      }
-    }
-    if (rebindPurpose) {
-      const preview = await this.github.relay.githubAssignment(
-        resourceId,
-        undefined,
-        rebindPurpose,
+      return this.state.run(
+        value.requestId,
+        this.identity,
+        { resourceId, ...value },
+        async () => {
+          throw new LocalRefusal(
+            "LOCAL_REPLAY_CONFLICT",
+            "Original owner work cannot be replayed.",
+          );
+        },
+        options,
       );
-      const prior = await this.state.githubBindingForAdoption(resourceId, this.identity);
-      if (
-        preview.resourceId !== resourceId ||
-        (prior ? prior.resourceGeneration : preview.resourceGeneration) !==
-          value.expectedGeneration ||
-        (prior && preview.resourceGeneration > prior.resourceGeneration)
-      )
-        throw new LocalRefusal(
-          "LOCAL_GENERATION_CONFLICT",
-          "Explicit reauthorization requires the current observed owner generation.",
+    if (value.action === "resume_setup") return this.resumeGitHubSetup(resourceId, value, options);
+    let rebindPurpose: "adopt" | "retire" | undefined;
+    const prepare = async () => {
+      if (value.action === "adopt") rebindPurpose = "adopt";
+      else if (value.action === "delete") {
+        try {
+          await this.github.relay.githubAssignment(resourceId);
+        } catch (error) {
+          if (!(error instanceof LocalRefusal) || error.code !== "CODESPACE_AUTHORIZATION_REQUIRED")
+            throw error;
+          rebindPurpose = "retire";
+        }
+      }
+      if (rebindPurpose) {
+        const preview = await this.github.relay.githubAssignment(
+          resourceId,
+          undefined,
+          rebindPurpose,
         );
-      await this.drainGitHubForReauthorization(resourceId);
-    }
-    await this.requireGitHubCustodySettled(resourceId);
-    if (["create", "start", "adopt"].includes(value.action)) await this.requireGitHubReadiness();
-    return this.state.run(value.requestId, this.identity, { resourceId, ...value }, async () => {
+        const prior = await this.state.githubBindingForAdoption(resourceId, this.identity);
+        if (
+          preview.resourceId !== resourceId ||
+          (prior ? prior.resourceGeneration : preview.resourceGeneration) !==
+            value.expectedGeneration ||
+          (prior && preview.resourceGeneration > prior.resourceGeneration)
+        )
+          throw new LocalRefusal(
+            "LOCAL_GENERATION_CONFLICT",
+            "Explicit reauthorization requires the current observed owner generation.",
+          );
+        await this.drainGitHubForReauthorization(resourceId);
+      }
+      await this.requireGitHubCustodySettled(resourceId);
+      if (["create", "start", "adopt"].includes(value.action)) await this.requireGitHubReadiness();
+    };
+    if (options.waitForCompletion !== false) await prepare();
+    const execute = async () => {
+      if (options.waitForCompletion === false) {
+        await this.state.recordPhase(value.requestId, this.identity, {
+          name: "provider_prepare",
+          resourceGeneration: value.expectedGeneration,
+        });
+        await prepare();
+      }
       const admitted = await this.resourceLane(resourceId, async () => {
         this.requireAdmission();
         await this.requireGitHubCustodySettled(resourceId);
@@ -1069,7 +1092,14 @@ export class LocalController {
         return { settled };
       });
       return admitted.settled;
-    });
+    };
+    return this.state.run(
+      value.requestId,
+      this.identity,
+      { resourceId, ...value },
+      execute,
+      options,
+    );
   }
   private verifiedGitHubHealth(proof: GitHubProvisionProof, value: unknown) {
     const health = z
@@ -1135,10 +1165,21 @@ export class LocalController {
   private async resumeGitHubSetup(
     resourceId: string,
     value: Extract<ControllerGitHubLifecycle, { action: "resume_setup" }>,
+    options: ControllerRunOptions = {},
   ) {
-    await this.requireGitHubReadiness("enrollment");
-    await this.requireGitHubCustodySettled(resourceId);
-    return this.state.run(value.requestId, this.identity, { resourceId, ...value }, async () => {
+    const prepare = async () => {
+      await this.requireGitHubReadiness("enrollment");
+      await this.requireGitHubCustodySettled(resourceId);
+    };
+    if (options.waitForCompletion !== false) await prepare();
+    const execute = async () => {
+      if (options.waitForCompletion === false) {
+        await this.state.recordPhase(value.requestId, this.identity, {
+          name: "provider_prepare",
+          resourceGeneration: value.expectedGeneration,
+        });
+        await prepare();
+      }
       const admitted = await this.resourceLane(resourceId, async () => {
         this.requireAdmission();
         if (this.githubEffects.has(resourceId))
@@ -1291,7 +1332,14 @@ export class LocalController {
         return { settled };
       });
       return admitted.settled;
-    });
+    };
+    return this.state.run(
+      value.requestId,
+      this.identity,
+      { resourceId, ...value },
+      execute,
+      options,
+    );
   }
   /** Pure original-process proof and exact child disposal; never restarts SSH or GitHub lifecycle. */
   async collectOperation(requestId: string) {
@@ -1754,7 +1802,12 @@ export class LocalController {
       }),
     );
   }
-  async lifecycle(resourceId: string, input: unknown, localOwner = false) {
+  async lifecycle(
+    resourceId: string,
+    input: unknown,
+    localOwner = false,
+    options: ControllerRunOptions = {},
+  ) {
     this.requireAdmission();
     await this.manager.records.policy();
     z.string().uuid().parse(resourceId);
@@ -1812,6 +1865,10 @@ export class LocalController {
             // an old binding after a newer stop has already consumed its generation.
             if (nativePublished) await this.resourceLane(resourceId, publishAdmission);
             else await publishAdmission();
+            await this.state.recordPhase(value.requestId, this.identity, {
+              name: "local_setup",
+              resourceGeneration: binding!.resourceGeneration,
+            });
             nativePublished = true;
             releaseAdmission();
           };
@@ -1859,6 +1916,10 @@ export class LocalController {
                   ref: value.ref,
                 });
               }
+              await this.state.recordPhase(value.requestId, this.identity, {
+                name: "local_create",
+                resourceGeneration: binding.resourceGeneration,
+              });
               await this.manager.open();
               effect = this.manager.create(
                 value.repositoryId,
@@ -1893,6 +1954,10 @@ export class LocalController {
               binding.routeGeneration ??= binding.resourceGeneration;
               binding.resourceGeneration++;
               await this.state.putBinding(binding);
+              await this.state.recordPhase(value.requestId, this.identity, {
+                name: value.action === "resume_setup" ? "local_setup" : `local_${value.action}`,
+                resourceGeneration: binding.resourceGeneration,
+              });
               if (value.action === "start" || value.action === "resume_setup") {
                 await this.manager.open();
                 effect =
@@ -1948,15 +2013,25 @@ export class LocalController {
             await this.state.putBinding(latest);
           });
         }
-        return this.resource(resourceId, {
-          ...value,
-          expectedGeneration: admitted.binding.resourceGeneration,
-        });
+        return {
+          ...(await this.resource(resourceId, {
+            ...value,
+            expectedGeneration: admitted.binding.resourceGeneration,
+          })),
+          // Retain the completed effect independently of snapshot setup diagnostics.
+          lifecycleAction: value.action,
+        };
       },
+      options,
     );
     if (value.action === "stop" || value.action === "delete") {
-      this.physicalClosures.add(operation);
-      void operation.finally(() => this.physicalClosures.delete(operation)).catch(() => undefined);
+      const completion = operation.then(() =>
+        this.state.waitForOperation(value.requestId, this.identity),
+      );
+      this.physicalClosures.add(completion);
+      void completion
+        .finally(() => this.physicalClosures.delete(completion))
+        .catch(() => undefined);
     }
     return operation;
   }
@@ -2120,10 +2195,14 @@ export async function startLocalController(controller: LocalController) {
           result = await controller.repository(body);
         } else if (request.method === "POST" && resource) {
           dispatched = true;
-          result = await controller.lifecycle(resource[1], body, localOwner);
+          result = await controller.lifecycle(resource[1], body, localOwner, {
+            waitForCompletion: false,
+          });
         } else if (request.method === "POST" && githubResource) {
           dispatched = true;
-          result = await controller.githubLifecycle(githubResource[1], body);
+          result = await controller.githubLifecycle(githubResource[1], body, {
+            waitForCompletion: false,
+          });
         } else {
           response.writeHead(404).end();
           return;

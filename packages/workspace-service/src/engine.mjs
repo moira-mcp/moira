@@ -76,6 +76,12 @@ export function createWorkspaceEngine({ stateRoot, binding, searchExecutable }) 
     throw new Error(message);
   }
 
+  function refuseWorkingDirectory(reason) {
+    throw Object.assign(new Error("Workspace working directory was refused"), {
+      commandStartReason: reason,
+    });
+  }
+
   function operationDirectory(marker) {
     if (!MARKER.test(marker)) fail("invalid operation marker");
     return join(STATE_ROOT, marker);
@@ -262,12 +268,25 @@ export function createWorkspaceEngine({ stateRoot, binding, searchExecutable }) 
     }
     const cwd = resolve(root, request.cwd);
     if (cwd !== root && !cwd.startsWith(`${root}${sep}`))
-      fail("working directory escaped codespace");
-    const canonical = await realpath(cwd);
-    if (canonical !== root && !canonical.startsWith(`${root}${sep}`)) {
-      fail("working directory escaped codespace");
+      refuseWorkingDirectory("COMMAND_CWD_OUTSIDE_WORKSPACE");
+    let canonical;
+    try {
+      canonical = await realpath(cwd);
+      if (canonical !== root && !canonical.startsWith(`${root}${sep}`))
+        refuseWorkingDirectory("COMMAND_CWD_OUTSIDE_WORKSPACE");
+      if (!(await stat(canonical)).isDirectory())
+        refuseWorkingDirectory("COMMAND_CWD_NOT_DIRECTORY");
+      await access(canonical, constants.R_OK | constants.X_OK);
+    } catch (error) {
+      if (error.commandStartReason) throw error;
+      refuseWorkingDirectory(
+        error.code === "ENOENT"
+          ? "COMMAND_CWD_NOT_FOUND"
+          : error.code === "ENOTDIR"
+            ? "COMMAND_CWD_NOT_DIRECTORY"
+            : "COMMAND_CWD_UNAVAILABLE",
+      );
     }
-    await access(cwd, constants.R_OK | constants.X_OK);
     return cwd;
   }
 
@@ -1103,7 +1122,18 @@ if(input.sessionLock){require('node:fs').writeSync(3,'release\n');require('node:
       // Once launch was attempted, lost observation must retain uncertainty.
       const proof = await executionMetadata(directory);
       if (!runnerAttempted && proof?.launchAttempted === false)
-        return publishNotStarted(directory, execution, "COMMAND_START_REJECTED");
+        return publishNotStarted(
+          directory,
+          execution,
+          [
+            "COMMAND_CWD_OUTSIDE_WORKSPACE",
+            "COMMAND_CWD_NOT_FOUND",
+            "COMMAND_CWD_NOT_DIRECTORY",
+            "COMMAND_CWD_UNAVAILABLE",
+          ].includes(error?.commandStartReason)
+            ? error.commandStartReason
+            : "COMMAND_START_REJECTED",
+        );
       throw error;
     } finally {
       admissionLock?.release();

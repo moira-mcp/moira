@@ -92,6 +92,10 @@ contribution contract for delivery. Breaking API changes do not justify destroyi
 persisted user state. Add compatibility behavior only for a demonstrated requirement.
 Report observed checks and remaining limits accurately; never call a partial result complete.
 
+Deploy and activate installed Local releases only from clean revisions merged into `master`.
+Feature branches and uncommitted trees are for validation, not deployment. A deployment repository
+must also use its canonical merged default branch and record the exact accepted product revision.
+
 ## Working through MCP
 
 Use the configured Moira server for ordinary workflows. Diagnose authentication failures

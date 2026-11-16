@@ -52,7 +52,10 @@ const path = z
   .string()
   .min(1)
   .max(4096)
-  .refine((value) => !value.includes("\0"));
+  .refine((value) => !value.includes("\0"))
+  .describe(
+    "Path relative to the selected workspace repository root, for example moira-ws/task/file.md. File tools reject absolute paths, parent traversal and symlinks; use '.' for directory operations at the root",
+  );
 const expected = z.union([
   z.object({ text: z.string() }).strict(),
   z.object({ file: reference("file") }).strict(),
@@ -76,7 +79,11 @@ const commandFields = {
     })
     .strict()
     .optional(),
-  cwd: path.optional(),
+  cwd: path
+    .optional()
+    .describe(
+      "Working directory inside the selected workspace repository; defaults to '.'. Prefer a repository-relative directory such as moira-ws/task. A directory created elsewhere in the VM cannot be used as cwd or accessed through workspace file tools",
+    ),
   env: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), z.string()).optional(),
   background: z.boolean().optional(),
   timeout_seconds: positive.optional(),

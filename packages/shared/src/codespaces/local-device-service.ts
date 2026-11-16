@@ -49,6 +49,17 @@ export interface LocalControllerClient {
     signal?: AbortSignal,
   ): Promise<Record<string, unknown>>;
 }
+/** A received durable admission, not a failed effect or an uncertain transport reply. */
+export class ControllerOperationPending extends Error {
+  readonly operation: ControllerOperation;
+  constructor(operation: ControllerOperation) {
+    super("The owner accepted this original operation; collect its retained result.");
+    this.name = "ControllerOperationPending";
+    this.operation = controllerOperationSchema
+      .extend({ state: z.literal("accepted") })
+      .parse(operation);
+  }
+}
 const localSnapshotSchema = z
   .object({
     state: z.literal("configured"),
@@ -499,13 +510,14 @@ export class LocalDeviceService {
     input: { method: string; path: string; body?: unknown },
     requestId: string,
   ): Promise<ControllerOperation> {
-    this.repository.getActiveDevice(userId, id.parse(deviceId));
+    const admitted = this.repository.getActiveDevice(userId, id.parse(deviceId));
     if (!this.controller)
       throw new LocalDeviceError("LOCAL_UNAVAILABLE", "The device owner is unavailable.");
     let value: Record<string, unknown>;
     try {
       value = await this.controller.json(userId, deviceId, input);
     } catch (error) {
+      if (error instanceof CodespaceResourceError && error.confirmedRefusal) throw error;
       const details =
         error && typeof error === "object" && "details" in error
           ? z
@@ -541,6 +553,15 @@ export class LocalDeviceService {
         requestId,
       );
     }
+    const current = this.repository.getActiveDevice(userId, deviceId);
+    if (
+      current.connectionId !== admitted.connectionId ||
+      current.deviceGeneration !== admitted.deviceGeneration
+    )
+      throw new LocalDeviceError(
+        "LOCAL_UNAUTHORIZED",
+        "Device authority changed during operation.",
+      );
     const operation = controllerOperationSchema.parse(value);
     if (operation.requestId !== requestId)
       throw new LocalDeviceError(
@@ -597,6 +618,7 @@ export class LocalDeviceService {
     return operation.outcome.result;
   }
   resourceOperationResult(operation: ControllerOperation): unknown {
+    if (operation.state === "accepted") throw new ControllerOperationPending(operation);
     return this.completed(operation, true);
   }
   async requestSettings(userId: string, deviceId: string, value: unknown) {
@@ -810,14 +832,21 @@ export class LocalDeviceService {
         input.requestId,
       ),
     );
-    if (this.retireDeviceCredentials && (input.action === "stop" || input.action === "delete"))
-      await this.retireDeviceCredentials?.(userId, deviceId, {
-        kind: "resource",
-        resourceId,
-        throughGeneration: z.object({ resourceGeneration: generation }).passthrough().parse(result)
-          .resourceGeneration,
-      });
     return result;
+  }
+  async retireResourceCredentials(
+    userId: string,
+    deviceId: string,
+    resourceId: string,
+    throughGeneration: number,
+  ) {
+    this.repository.getActiveDevice(userId, deviceId);
+    await this.retireDeviceCredentials?.(userId, deviceId, {
+      kind: "resource",
+      resourceId,
+      throughGeneration: generation.parse(throughGeneration),
+    });
+    this.repository.getActiveDevice(userId, deviceId);
   }
   getBinding(userId: string, resourceId: string) {
     return this.repository.getBinding(userId, resourceId);

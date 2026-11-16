@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { constants } from "node:fs";
-import { lstat, open, readFile, rename, rm } from "node:fs/promises";
+import { lstat, open, rename, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { spawn } from "node:child_process";
@@ -20,11 +20,16 @@ export function failFile(reason, message) {
 }
 
 export async function readStateJson(path) {
-  const value = await lstat(path);
-  if (!value.isFile() || value.isSymbolicLink() || value.nlink !== 1) {
-    fail("invalid supervisor state file");
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const value = await handle.stat();
+    // Atomic publication may unlink this already-open version. Its descriptor
+    // still owns a complete snapshot; never reopen the replacement by pathname.
+    if (!value.isFile() || value.nlink > 1) fail("invalid supervisor state file");
+    return JSON.parse(await handle.readFile("utf8"));
+  } finally {
+    await handle.close();
   }
-  return JSON.parse(await readFile(path, "utf8"));
 }
 
 export function safeRelativePath(value, allowRoot = false) {

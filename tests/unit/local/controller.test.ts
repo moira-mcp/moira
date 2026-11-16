@@ -115,6 +115,66 @@ async function localSnapshot(controller: LocalController) {
 }
 
 describe("One owner HTTP surface for local and remote control", () => {
+  test("HTTP admission and replay return while native stop is held, and maintenance owns its completion", async () => {
+    const f = await fixture(),
+      requestId = createWorkspaceRequestId();
+    let finish!: () => void,
+      entered!: () => void,
+      effects = 0;
+    const held = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const stop = f.manager.stop.bind(f.manager);
+    f.manager.stop = async (...args) => {
+      effects++;
+      entered();
+      await held;
+      return stop(...args);
+    };
+    const body = { requestId, expectedGeneration: 3, action: "stop" };
+    const path = `/v1/resources/${f.resourceId}/lifecycle`;
+    try {
+      expect(await controllerRequest(f.endpoint.socketPath, "POST", path, body)).toMatchObject({
+        requestId,
+        state: "accepted",
+      });
+      await started;
+      const original = await controllerRequest(
+        f.endpoint.socketPath,
+        "GET",
+        `/v1/controller/operations/${requestId}`,
+      );
+      expect(original).toMatchObject({
+        requestId,
+        state: "accepted",
+        phase: { name: "local_stop", resourceGeneration: 4 },
+      });
+      expect(await controllerRequest(f.endpoint.socketPath, "POST", path, body)).toEqual(original);
+      expect(effects).toBe(1);
+      let maintained = false;
+      const maintenance = f.controller.prepareMaintenance().then(() => {
+        maintained = true;
+      });
+      await Promise.resolve();
+      expect(maintained).toBe(false);
+      finish();
+      await maintenance;
+      expect(
+        await controllerRequest(
+          f.endpoint.socketPath,
+          "GET",
+          `/v1/controller/operations/${requestId}`,
+        ),
+      ).toMatchObject({ requestId, state: "completed", outcome: { ok: true } });
+    } finally {
+      finish();
+      await f.controller.state.waitForOperation(requestId, f.identity);
+    }
+    expect(effects).toBe(1);
+  });
   test("management HTTP never starts native observation and composes policy/control from one actual policy", async () => {
     const f = await fixture();
     await f.control.optIn(
@@ -456,9 +516,12 @@ describe("One owner HTTP surface for local and remote control", () => {
       await localCli(["stop", selected, "--state", directory], {});
       const result = JSON.parse(output);
       expect(result).toMatchObject({
-        state: "completed",
-        outcome: { ok: false, error: { code: "LOCAL_GENERATION_CONFLICT" } },
+        state: expect.stringMatching(/^(pending|completed)$/),
       });
+      await f.controller.state.waitForOperation(
+        decodeReference(result.operation, "operation").requestId,
+        f.identity,
+      );
       expect(await f.records.get(f.space.id)).toEqual(before);
       expect(decodeReference(result.operation, "operation")).toMatchObject({
         owner: { kind: "controller", deviceId: f.identity.deviceId },
@@ -466,7 +529,11 @@ describe("One owner HTTP surface for local and remote control", () => {
       });
       output = "";
       await localCli(["collect", result.operation, "--state", directory], {});
-      expect(JSON.parse(output)).toEqual(result);
+      expect(JSON.parse(output)).toMatchObject({
+        operation: result.operation,
+        state: "completed",
+        outcome: { ok: false, error: { code: "LOCAL_GENERATION_CONFLICT" } },
+      });
     } finally {
       stdout.mockRestore();
       stderr.mockRestore();
@@ -679,12 +746,17 @@ describe("One owner HTTP surface for local and remote control", () => {
       ref: "main",
       operationMarker: marker,
     };
-    const result = await controllerRequest(
+    const admission = await controllerRequest(
       f.endpoint.socketPath,
       "POST",
       `/v1/resources/${resourceId}/lifecycle`,
       body,
     );
+    expect(admission).toMatchObject({
+      requestId,
+      state: expect.stringMatching(/^(accepted|completed)$/),
+    });
+    const result = await f.controller.state.waitForOperation(requestId, f.identity);
     expect(result).toMatchObject({ requestId, state: "completed", outcome: { ok: true } });
     expect(
       await controllerRequest(
@@ -706,7 +778,7 @@ describe("One owner HTTP surface for local and remote control", () => {
     };
     const resourceId = randomUUID(),
       requestId = createWorkspaceRequestId();
-    const result = await controllerRequest(
+    const admission = await controllerRequest(
       f.endpoint.socketPath,
       "POST",
       `/v1/resources/${resourceId}/lifecycle`,
@@ -719,6 +791,11 @@ describe("One owner HTTP surface for local and remote control", () => {
         operationMarker: `moira-${"d".repeat(24)}`,
       },
     );
+    expect(admission).toMatchObject({
+      requestId,
+      state: expect.stringMatching(/^(accepted|completed)$/),
+    });
+    const result = await f.controller.state.waitForOperation(requestId, f.identity);
     expect(result).toMatchObject({
       state: "completed",
       outcome: { ok: false, error: { code: "LOCAL_RELAY_REFUSED" } },
@@ -772,12 +849,17 @@ describe("One owner HTTP surface for local and remote control", () => {
   test("owner IPC stop and remote-style collection address the same original native space and preserve its data identity", async () => {
     const f = await fixture(),
       requestId = createWorkspaceRequestId();
-    const result = await controllerRequest(
+    const admission = await controllerRequest(
       f.endpoint.socketPath,
       "POST",
       `/v1/resources/${f.resourceId}/lifecycle`,
       { requestId, expectedGeneration: 3, action: "stop" },
     );
+    expect(admission).toMatchObject({
+      requestId,
+      state: expect.stringMatching(/^(accepted|completed)$/),
+    });
+    const result = await f.controller.state.waitForOperation(requestId, f.identity);
     expect(result).toMatchObject({ requestId, state: "completed", outcome: { ok: true } });
     expect(
       await controllerRequest(
@@ -960,7 +1042,8 @@ describe("One owner HTTP surface for local and remote control", () => {
         `/v1/resources/${f.resourceId}/lifecycle`,
         body,
       ),
-    ).toEqual({ requestId, state: "unconfirmed" });
+    ).toMatchObject({ requestId, state: expect.stringMatching(/^(accepted|unconfirmed)$/) });
+    await f.controller.state.waitForOperation(requestId, f.identity);
     expect((await f.records.get(f.space.id))?.generation).toBe(2);
     expect(
       (await localSnapshot(f.controller)).resources.find(
@@ -973,7 +1056,7 @@ describe("One owner HTTP surface for local and remote control", () => {
         "GET",
         `/v1/controller/operations/${requestId}`,
       ),
-    ).toEqual({ requestId, state: "unconfirmed" });
+    ).toMatchObject({ requestId, state: "unconfirmed", phase: { name: "local_stop" } });
     expect(
       await controllerRequest(
         f.endpoint.socketPath,
@@ -981,7 +1064,7 @@ describe("One owner HTTP surface for local and remote control", () => {
         `/v1/resources/${f.resourceId}/lifecycle`,
         body,
       ),
-    ).toEqual({ requestId, state: "unconfirmed" });
+    ).toMatchObject({ requestId, state: "unconfirmed", phase: { name: "local_stop" } });
     expect((await f.records.get(f.space.id))?.generation).toBe(2);
     await f.state.remove(`controller-resource-${f.resourceId}.json`);
     expect((await localSnapshot(f.controller)).pendingResourceOperations).toEqual([
