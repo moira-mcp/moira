@@ -81,6 +81,7 @@ import { buildReconciliationAwareInstructions } from "./reconciliation-aware-ser
 import { registerTools } from "./tools/register-tools.js";
 import {
   getCatalogInitializeRequest,
+  isCatalogDiscoveryRequest,
   requireRevisionStampBeforeInitializeResult,
 } from "./auth/mcp-catalog-lifecycle.js";
 import { evaluateMcpToolsRevision } from "./auth/mcp-tools-revision.js";
@@ -386,7 +387,7 @@ async function handleAuthenticatedMcpRequest(
   const revisionGate = evaluateMcpToolsRevision(credential.toolsVersion, MCP_SERVER_VERSION);
   const initializeRequest = getCatalogInitializeRequest(req.body);
 
-  if (!revisionGate.accepted && !initializeRequest) {
+  if (!revisionGate.accepted && !initializeRequest && !isCatalogDiscoveryRequest(req.body)) {
     logger.info("Outdated MCP client detected", {
       userId: identity.userId.substring(0, 8) + "...",
       credentialKind: credential.kind,
