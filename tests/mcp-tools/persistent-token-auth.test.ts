@@ -44,6 +44,31 @@ const initializeBody = (id: number) => ({
   },
 });
 
+const discoveryBody = (id: number) => ({
+  jsonrpc: "2.0",
+  id,
+  method: "server/discover",
+  params: {
+    _meta: {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientInfo": { name: "discovery-test", version: "1.0.0" },
+      "io.modelcontextprotocol/clientCapabilities": {},
+    },
+  },
+});
+
+const modernDiscoveryHeaders = {
+  "MCP-Protocol-Version": "2026-07-28",
+  "Mcp-Method": "server/discover",
+} as const;
+
+function rpcReply(body: unknown): unknown {
+  if (typeof body !== "string") return body;
+  const data = body.split("\n").find((line) => line.startsWith("data:"));
+  if (!data) throw new Error("Expected a JSON-RPC response in the SSE stream");
+  return JSON.parse(data.slice(5).trim());
+}
+
 /** Sign in through the shared helper and return a ready-to-send Cookie header value */
 async function signIn(email: string, password: string): Promise<string> {
   return formatSessionCookie(FETCH_URL, await signInUser(FETCH_URL, email, password));
@@ -78,6 +103,7 @@ async function revokeToken(cookie: string, tokenId: string): Promise<void> {
 async function mcpRequest(
   token: string,
   body: unknown,
+  discoveryHeaders?: typeof modernDiscoveryHeaders,
 ): Promise<{ status: number; body: unknown }> {
   const res = await fetch(`${FETCH_URL}/mcp`, {
     method: "POST",
@@ -85,6 +111,7 @@ async function mcpRequest(
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
       Authorization: `Bearer ${token}`,
+      ...discoveryHeaders,
     },
     body: JSON.stringify(body),
   });
@@ -178,6 +205,7 @@ describe("MCP Persistent Token Authentication", () => {
     expect(status).toBe(401);
     expect(body).toHaveProperty("error", "invalid_token");
     expect((body as { error_description: string }).error_description).toContain("revoked");
+    expect((await mcpRequest(token, discoveryBody(2), modernDiscoveryHeaders)).status).toBe(401);
   });
 
   test("rejects expired persistent token with 401", async () => {
@@ -207,6 +235,7 @@ describe("MCP Persistent Token Authentication", () => {
 
     expect(status).toBe(401);
     expect(body).toHaveProperty("error", "invalid_token");
+    expect((await mcpRequest(fakeToken, discoveryBody(2))).status).toBe(401);
   });
 
   test("rejects blocked user with 403 via persistent token", async () => {
@@ -220,6 +249,7 @@ describe("MCP Persistent Token Authentication", () => {
 
       expect(status).toBe(403);
       expect(body).toHaveProperty("error", "access_denied");
+      expect((await mcpRequest(token, discoveryBody(2), modernDiscoveryHeaders)).status).toBe(403);
     } finally {
       // Unblock and re-sign in (block/unblock may invalidate session)
       await unblockUserViaApi(FETCH_URL, testUserId);
@@ -294,6 +324,20 @@ describe("MCP Persistent Token Authentication", () => {
     expect((await mcpRequest(credential.token, withoutId)).status).toBe(426);
     expect((await mcpRequest(credential.token, malformed)).status).toBe(426);
     expect((await mcpRequest(credential.token, [initializeBody(3)])).status).toBe(426);
+    expect(
+      (await mcpRequest(credential.token, { ...discoveryBody(4), id: undefined })).status,
+    ).toBe(426);
+    expect(
+      (await mcpRequest(credential.token, { ...discoveryBody(5), jsonrpc: "1.0" })).status,
+    ).toBe(426);
+    expect(
+      (
+        await mcpRequest(credential.token, [
+          discoveryBody(6),
+          { jsonrpc: "2.0", id: 7, method: "tools/list" },
+        ])
+      ).status,
+    ).toBe(426);
 
     expect(
       execSqliteInDocker(
@@ -301,6 +345,83 @@ describe("MCP Persistent Token Authentication", () => {
       ),
     ).toBe("null");
   });
+
+  test.each([
+    ["persistent", null],
+    ["persistent", "stale-revision"],
+    ["oauth", null],
+    ["oauth", "stale-revision"],
+  ] as const)(
+    "%s discovery with catalog revision %s negotiates without accepting the catalog",
+    async (kind, revision) => {
+      const oauth =
+        kind === "oauth"
+          ? await createAuthenticatedMCPClient({
+              email: TEST_USER.email,
+              password: TEST_USER.password,
+            })
+          : undefined;
+      try {
+        const persistent =
+          kind === "persistent" ? await createToken(userCookie, "discovery-revision") : undefined;
+        const token = oauth?.accessToken ?? persistent!.token;
+        const table = kind === "oauth" ? "oauthAccessToken" : "apiToken";
+        const condition = oauth
+          ? `accessToken = '${token.replaceAll("'", "''")}'`
+          : `id = '${persistent!.id}'`;
+        execSqliteInDocker(
+          `UPDATE ${table} SET toolsVersion = ${revision === null ? "NULL" : "'stale-revision'"} WHERE ${condition}`,
+        );
+        const readRevision = () =>
+          execSqliteInDocker(
+            `SELECT COALESCE(toolsVersion, 'null') FROM ${table} WHERE ${condition}`,
+          );
+        expect(readRevision()).toBe(revision ?? "null");
+
+        // A modern HTTP probe receives the legacy transport's version refusal.
+        const versionProbe = await mcpRequest(token, discoveryBody(20), modernDiscoveryHeaders);
+        expect(versionProbe.status).toBe(400);
+        expect(versionProbe.body).toMatchObject({
+          jsonrpc: "2.0",
+          error: { code: -32000, message: expect.stringContaining("Unsupported protocol version") },
+        });
+        expect(versionProbe.body).not.toHaveProperty("result");
+
+        // Without that header, the SDK answers the unsupported method over SSE.
+        const methodProbe = await mcpRequest(token, discoveryBody(21));
+        expect(methodProbe.status).toBe(200);
+        expect(rpcReply(methodProbe.body)).toMatchObject({
+          jsonrpc: "2.0",
+          id: 21,
+          error: { code: -32601 },
+        });
+        expect(rpcReply(methodProbe.body)).not.toHaveProperty("result");
+        expect(readRevision()).toBe(revision ?? "null");
+        expect(
+          (await mcpRequest(token, { jsonrpc: "2.0", id: 22, method: "tools/list" })).status,
+        ).toBe(426);
+        expect(
+          (
+            await mcpRequest(token, {
+              jsonrpc: "2.0",
+              id: 23,
+              method: "tools/call",
+              params: { name: "execution", arguments: { action: "user" } },
+            })
+          ).status,
+        ).toBe(426);
+
+        expect(readRevision()).toBe(revision ?? "null");
+        expect((await mcpRequest(token, initializeBody(24))).status).toBe(200);
+        expect(readRevision()).toBe(MCP_TOOLS_REVISION);
+        expect(
+          (await mcpRequest(token, { jsonrpc: "2.0", id: 25, method: "tools/list" })).status,
+        ).toBe(200);
+      } finally {
+        await oauth?.cleanup();
+      }
+    },
+  );
 
   test("repeated concurrent initialization converges without rotating the persistent token", async () => {
     const credential = await createToken(userCookie, "revision-concurrent");

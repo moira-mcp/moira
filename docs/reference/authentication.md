@@ -22,6 +22,8 @@ MCP clients follow the advertised OAuth discovery documents and browser authoriz
 
 MCP additionally binds catalog initialization to the exact credential's `toolsVersion`. Null/stale revisions return HTTP 426 for ordinary requests. A valid singleton JSON-RPC `initialize` may proceed and records `MCP_TOOLS_REVISION` conditionally on that still-valid credential; malformed requests, batches, notifications and failed results cannot initialize it. OAuth refresh preserves the predecessor's exact catalog revision. Reinitialize with the valid credential; initialization never bypasses account admission. MCP authenticates before incremental body parsing and revalidates account/credential after the read before SDK dispatch.
 
+An authenticated singleton `server/discover` probe also reaches the SDK before catalog acceptance. The installed SDK serves the legacy protocol and returns its unsupported-method or unsupported-version response, allowing compatible clients to fall back to `initialize`. Discovery does not accept a catalog revision or authorize tool calls. This negotiation path does not advertise support for the 2026 stateless protocol.
+
 Sources: [token manager](../../packages/shared/src/services/token-manager.ts), [MCP server](../../packages/mcp-server/src/server.ts), [HTTP account endpoints](http-api.md).
 
 ## Browser private state

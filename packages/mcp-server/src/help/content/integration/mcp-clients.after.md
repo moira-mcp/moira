@@ -60,6 +60,11 @@ with the same credential. A successful initialize refreshes the catalog for that
 does not require a new API token. OAuth access tokens may rotate independently during automatic
 refresh without losing their current, stale, or uninitialized catalog state.
 
+Clients may first probe `server/discover`. An authenticated discovery request reaches the SDK
+before catalog acceptance. Moira's legacy SDK returns an unsupported-method or unsupported-version
+response so compatible clients can fall back to `initialize`; discovery itself does not accept
+the catalog or enable tool calls. This does not advertise support for the 2026 stateless protocol.
+
 :::note
 Authentication and account checks run before catalog refresh. A revoked or expired credential, or
 an account that cannot access MCP, still receives its normal authentication or access error.

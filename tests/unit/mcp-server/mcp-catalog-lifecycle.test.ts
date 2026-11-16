@@ -2,6 +2,7 @@ import { describe, expect, it, jest } from "@jest/globals";
 import type { JSONRPCMessage, RequestId } from "@modelcontextprotocol/sdk/types.js";
 import {
   getCatalogInitializeRequest,
+  isCatalogDiscoveryRequest,
   requireRevisionStampBeforeInitializeResult,
 } from "../../../packages/mcp-server/src/auth/mcp-catalog-lifecycle.js";
 
@@ -17,6 +18,23 @@ const initializeRequest = {
 };
 
 describe("MCP catalog initialization lifecycle", () => {
+  it("allows only a singleton discovery request to negotiate before catalog acceptance", () => {
+    const discovery = {
+      jsonrpc: "2.0",
+      id: "discovery",
+      method: "server/discover",
+      params: { _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" } },
+    };
+    expect(isCatalogDiscoveryRequest(discovery)).toBe(true);
+    expect(isCatalogDiscoveryRequest({ ...discovery, params: undefined })).toBe(true);
+    expect(isCatalogDiscoveryRequest([discovery])).toBe(false);
+    expect(isCatalogDiscoveryRequest({ ...discovery, id: undefined })).toBe(false);
+    expect(isCatalogDiscoveryRequest({ ...discovery, jsonrpc: "1.0" })).toBe(false);
+    expect(isCatalogDiscoveryRequest({ ...discovery, method: "tools/list" })).toBe(false);
+    expect(isCatalogDiscoveryRequest({ ...discovery, method: "tools/call" })).toBe(false);
+    expect(isCatalogDiscoveryRequest(null)).toBe(false);
+  });
+
   it("accepts only an SDK-valid singleton initialize request", () => {
     expect(getCatalogInitializeRequest(initializeRequest)).toEqual(initializeRequest);
     expect(getCatalogInitializeRequest([{ ...initializeRequest }])).toBeNull();

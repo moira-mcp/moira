@@ -18,6 +18,11 @@ export function getCatalogInitializeRequest(body: unknown): CatalogInitializeReq
   return body as CatalogInitializeRequest;
 }
 
+/** Let the SDK negotiate an unsupported protocol before requiring catalog acceptance. */
+export function isCatalogDiscoveryRequest(body: unknown): boolean {
+  return !Array.isArray(body) && isJSONRPCRequest(body) && body.method === "server/discover";
+}
+
 export function requireRevisionStampBeforeInitializeResult(
   transport: RevisionAwareTransport,
   request: CatalogInitializeRequest,
