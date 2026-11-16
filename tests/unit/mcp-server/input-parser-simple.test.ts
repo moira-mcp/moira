@@ -183,7 +183,7 @@ describe("wrapSchemaWithAutoparse", () => {
 
   it("should not modify z.union() fields that include z.string()", () => {
     const schema = wrapSchemaWithAutoparse({
-      input: z.union([z.string(), z.record(z.any())]),
+      input: z.union([z.string(), z.record(z.string(), z.any())]),
     });
     const wrapped = z.object(schema);
     const result = wrapped.parse({ input: '{"kept": "as-string"}' });
@@ -201,7 +201,7 @@ describe("wrapSchemaWithAutoparse", () => {
 
   it("should auto-parse z.record() fields from string", () => {
     const schema = wrapSchemaWithAutoparse({
-      metadata: z.record(z.unknown()),
+      metadata: z.record(z.string(), z.unknown()),
     });
     const wrapped = z.object(schema);
     const result = wrapped.parse({ metadata: '{"key": "value"}' });
@@ -224,7 +224,7 @@ describe("wrapSchemaWithAutoparse", () => {
           version: z.string(),
           description: z.string(),
         }),
-        nodes: z.array(z.record(z.unknown())),
+        nodes: z.array(z.record(z.string(), z.unknown())),
       });
 
       const schema = wrapSchemaWithAutoparse({
@@ -248,7 +248,7 @@ describe("wrapSchemaWithAutoparse", () => {
     it("should accept stringified changes parameter", () => {
       const changesSchema = z.object({
         metadata: z.object({ name: z.string().optional() }).optional(),
-        addNodes: z.array(z.record(z.unknown())).optional(),
+        addNodes: z.array(z.record(z.string(), z.unknown())).optional(),
       });
 
       const schema = wrapSchemaWithAutoparse({
@@ -272,6 +272,50 @@ describe("wrapSchemaWithAutoparse", () => {
 });
 
 describe("wrapToolSchemaWithAutoparse", () => {
+  it("preserves root and nested refinements while parsing structured fields", () => {
+    const source = z
+      .object({
+        expected: z.number(),
+        data: z.object({ count: z.number() }).refine((value) => value.count > 0),
+      })
+      .refine((value) => value.expected === value.data.count);
+    const registered = wrapToolSchemaWithAutoparse(source);
+    expect(registered.parse({ expected: 2, data: '{"count":2}' })).toEqual({
+      expected: 2,
+      data: { count: 2 },
+    });
+    expect(registered.safeParse({ expected: 1, data: '{"count":2}' }).success).toBe(false);
+    expect(registered.safeParse({ expected: -1, data: '{"count":-1}' }).success).toBe(false);
+  });
+
+  it("retains catchall validation instead of stripping extra fields", () => {
+    const registered = wrapToolSchemaWithAutoparse(
+      z.object({ data: z.array(z.string()) }).catchall(z.number()),
+    );
+    expect(registered.parse({ data: '["x"]', count: 1 })).toEqual({ data: ["x"], count: 1 });
+    expect(registered.safeParse({ data: '["x"]', count: "1" }).success).toBe(false);
+  });
+
+  it("evaluates structured default factories at parse time and preserves omission and null", () => {
+    let generation = 0;
+    const source = z.object({
+      data: z.object({ generation: z.number() }).default(() => ({ generation: ++generation })),
+      optional: z.object({ name: z.string() }).nullable().optional(),
+    });
+    const registered = wrapToolSchemaWithAutoparse(source);
+    expect(generation).toBe(0);
+    expect(registered.parse({})).toEqual({ data: { generation: 1 } });
+    expect(registered.parse({ optional: null })).toEqual({
+      data: { generation: 2 },
+      optional: null,
+    });
+    expect(registered.parse({ data: '{"generation":9}', optional: '{"name":"x"}' })).toEqual({
+      data: { generation: 9 },
+      optional: { name: "x" },
+    });
+    expect(generation).toBe(2);
+  });
+
   it("keeps a strict tool object strict so unknown fields are rejected, not stripped", () => {
     const strict = z.object({ id: z.string(), file: z.object({ a: z.string() }) }).strict();
     const registered = wrapToolSchemaWithAutoparse(strict);
@@ -282,10 +326,9 @@ describe("wrapToolSchemaWithAutoparse", () => {
     expect(schema.parse({ id: "x", file: '{"a":"1"}' })).toEqual({ id: "x", file: { a: "1" } });
   });
 
-  it("contributes a plain object as its auto-parsing shape", () => {
+  it("keeps the default object policy that strips unknown fields", () => {
     const plain = z.object({ id: z.string() });
     const registered = wrapToolSchemaWithAutoparse(plain);
-    expect(registered).not.toBeInstanceOf(z.ZodObject);
-    expect(Object.keys(registered as Record<string, unknown>)).toEqual(["id"]);
+    expect(registered.parse({ id: "x", extra: true })).toEqual({ id: "x" });
   });
 });

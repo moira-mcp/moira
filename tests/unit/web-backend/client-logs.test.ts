@@ -101,6 +101,9 @@ describe("Client Logs API", () => {
       expect(response.status).toBe(400);
       expect(response.body.success).toBe(false);
       expect(response.body.error.message).toBe("Invalid log entry");
+      expect(response.body.error.details.details).toEqual([
+        expect.objectContaining({ path: ["level"], message: expect.any(String) }),
+      ]);
     });
 
     it("should reject empty message", async () => {
@@ -174,6 +177,9 @@ describe("Client Logs API", () => {
       expect(response.status).toBe(400);
       expect(response.body.success).toBe(false);
       expect(response.body.error.message).toBe("Invalid batch log entries");
+      expect(response.body.error.details.details).toEqual([
+        expect.objectContaining({ path: [1, "level"], message: expect.any(String) }),
+      ]);
     });
 
     it("should accept empty batch", async () => {

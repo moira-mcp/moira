@@ -5,7 +5,6 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { Ajv } from "ajv";
 import addFormats from "ajv-formats";
-import { zodToJsonSchema } from "zod-to-json-schema";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -143,6 +142,64 @@ async function inspectPublishedContract(instructions: string, context?: { agent?
 }
 
 describe("MCP tool definitions", () => {
+  it("retains omitted node update fields in the established workflow transport contract", () => {
+    const input = {
+      action: "edit",
+      workflowId: "flow",
+      changes: { updateNodes: [{ nodeId: "node" }] },
+    };
+    expect(PUBLIC_TOOL_SCHEMAS.workflow.parse(input)).toEqual(input);
+    const definition = TOOL_DEFINITIONS.find((tool) => tool.name === "workflow")!;
+    const ajv = new Ajv({ strict: false });
+    (addFormats as unknown as (instance: Ajv) => void)(ajv);
+    expect(ajv.compile(getToolJsonSchema(definition))(input)).toBe(true);
+  });
+
+  it("accepts native and stringified workflow objects through the registered SDK without losing fields", async () => {
+    const workflow = {
+      metadata: { name: "Flow", version: "1.0.0", description: "Flow", custom: false },
+      nodes: [{ id: "end", type: "end" }],
+      custom: { retained: 0 },
+    };
+    const received: unknown[] = [];
+    const restore = replaceToolBinding("manage", async (params: unknown) => {
+      received.push(params);
+      return { success: true, data: "retained" };
+    });
+    const server = new McpServer(
+      { name: "autoparse", version: "1" },
+      { capabilities: { tools: {} } },
+    );
+    registerTools(server, undefined, () => null);
+    const client = new Client({ name: "autoparse-client", version: "1" }, {});
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      for (const value of [workflow, JSON.stringify(workflow)]) {
+        const result = await client.callTool({
+          name: "workflow",
+          arguments: { action: "validate", workflow: value },
+        });
+        expect(result.isError).not.toBe(true);
+      }
+      expect(received).toEqual([
+        { action: "validate", workflow },
+        { action: "validate", workflow },
+      ]);
+      const rejected = await client.callTool({
+        name: "workflow",
+        arguments: { action: "validate", workflow: JSON.stringify(workflow), overwrite: true },
+      });
+      expect(rejected.isError).toBe(true);
+      expect(received).toHaveLength(2);
+    } finally {
+      restore();
+      await client.close();
+      await server.close();
+    }
+  });
+
   it("retains the complete authored graph through the actual grouped binding", async () => {
     const workflow = {
       metadata: {
@@ -616,7 +673,7 @@ describe("MCP tool definitions", () => {
     ).toBe(false);
   });
 
-  it("uses the MCP SDK input conversion semantics for reusable tool schemas", () => {
+  it("publishes the actual input of unions and transforms without narrowing unknown values", () => {
     const schema = z.object({
       choice: z.union([z.string(), z.unknown()]),
       piped: z
@@ -627,15 +684,26 @@ describe("MCP tool definitions", () => {
     const projected = getToolJsonSchema({ schema }) as unknown as {
       properties: { choice: unknown; piped: unknown };
     };
-    const sdkSemantics = zodToJsonSchema(schema, {
-      $refStrategy: "none",
-      strictUnions: true,
-      pipeStrategy: "input",
-    });
-
-    expect(projected).toEqual(sdkSemantics);
-    expect(projected.properties.choice).toEqual({ anyOf: [{ type: "string" }] });
+    const validate = new Ajv({ strict: false }).compile(projected);
+    for (const choice of ["text", null, false, { nested: 1 }]) {
+      const input = { choice, piped: "length" };
+      expect(schema.parse(input)).toEqual({ choice, piped: 6 });
+      expect(validate(input)).toBe(true);
+    }
+    expect(validate({ choice: false, piped: 6 })).toBe(false);
     expect(projected.properties.piped).toEqual({ type: "string" });
+  });
+
+  it("uses native Zod 4 for the production catalog and Local persisted schemas", async () => {
+    const { localPolicySchema } = await import("../../../packages/local/src/policy.js");
+    const { spaceSchema } = await import("../../../packages/local/src/space-record.js");
+    for (const schema of [
+      ...TOOL_DEFINITIONS.map((definition) => definition.schema),
+      localPolicySchema,
+      spaceSchema,
+    ]) {
+      expect(schema._zod.version.major).toBe(4);
+    }
   });
 
   it("projects blank settings selector rejection into the published JSON Schema", () => {

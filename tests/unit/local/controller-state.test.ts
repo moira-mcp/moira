@@ -9,6 +9,7 @@ import { ControllerState } from "../../../packages/local/src/controller-state.js
 import { createWorkspaceRequestId } from "../../../packages/shared/src/codespaces/workspace-request-id.js";
 import { localFixture } from "../../integration/local/fixtures.js";
 import { LocalRefusal } from "../../../packages/local/src/policy.js";
+import { controllerOperationSchema } from "../../../packages/shared/src/codespaces/local-controller-protocol.js";
 
 let directory: string;
 beforeEach(async () => {
@@ -72,6 +73,37 @@ describe("Controller owns lifecycle admission and original result", () => {
       outcome: { ok: true, result: { started: true } },
     });
   });
+  test("a completed effect without a result remains collectable after restart without replay", async () => {
+    const state = await PrivateState.open(directory);
+    const records = new LocalRecords(state),
+      owner = identity(),
+      requestId = createWorkspaceRequestId();
+    const input = { action: "stop", resourceId: randomUUID() };
+    const journal = new ControllerState(records);
+    await journal.run(requestId, owner, input, async () => undefined);
+    const path = join(directory, `controller-operation-${requestId}.json`);
+    const bytes = await readFile(path);
+    expect(JSON.parse(bytes.toString()).outcome).toEqual({ ok: true });
+    const restarted = new ControllerState(records);
+    expect((await restarted.pendingResources(owner)).size).toBe(0);
+    expect(controllerOperationSchema.parse(await restarted.inspect(requestId, owner))).toEqual({
+      requestId,
+      state: "completed",
+      outcome: { ok: true },
+    });
+    await expect(restarted.inspect(requestId, owner)).resolves.toEqual({
+      requestId,
+      state: "completed",
+      outcome: { ok: true },
+    });
+    await expect(
+      restarted.run(requestId, owner, input, async () => {
+        throw new Error("Do not repeat the effect");
+      }),
+    ).resolves.toEqual({ requestId, state: "completed", outcome: { ok: true } });
+    expect(await readFile(path)).toEqual(bytes);
+  });
+
   test("routine pending and custody reads exclude terminal history while originals remain collectable and nonreplayable", async () => {
     const state = await PrivateState.open(directory),
       records = new LocalRecords(state),

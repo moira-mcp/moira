@@ -229,7 +229,8 @@ export const controllerOperationSchema = z
     descriptor: controllerOperationDescriptorSchema.optional(),
     outcome: z
       .discriminatedUnion("ok", [
-        z.object({ ok: z.literal(true), result: z.unknown() }).strict(),
+        // A completed void effect has no result member after JSON serialization.
+        z.object({ ok: z.literal(true), result: z.unknown().optional() }).strict(),
         z
           .object({
             ok: z.literal(false),

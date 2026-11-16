@@ -24,7 +24,7 @@ const ClientLogSchema = z.object({
   url: z.string().max(2000).optional(),
   userAgent: z.string().max(1000).optional(),
   timestamp: z.string().optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 type ClientLogEntry = z.infer<typeof ClientLogSchema>;
@@ -69,7 +69,7 @@ router.post(
 
     if (!parsed.success) {
       throw createApiError.validationFailed("Invalid log entry", {
-        details: parsed.error.errors,
+        details: parsed.error.issues,
       });
     }
 
@@ -91,7 +91,7 @@ router.post(
 
     if (!parsed.success) {
       throw createApiError.validationFailed("Invalid batch log entries", {
-        details: parsed.error.errors,
+        details: parsed.error.issues,
       });
     }
 

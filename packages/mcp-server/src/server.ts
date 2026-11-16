@@ -4,7 +4,6 @@
  * MCP Server for Moira Workflow Engine
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express, { Request, Response } from "express";
 import cors from "cors";
 import {
@@ -30,8 +29,6 @@ import {
   metricsMiddleware,
   applyTrustProxy,
   setLogLevel,
-  getMcpServerVersion,
-  updateContext,
   getMcpTextService,
   isPersistentToken,
   hashToken,
@@ -59,8 +56,12 @@ import {
   authorizeWorkspacePublication,
 } from "@mcp-moira/web-backend/services";
 
-// Get monorepo version from root package.json (#196)
-export const MCP_SERVER_VERSION: string = getMcpServerVersion() || "0.0.0";
+import {
+  MCP_SERVER_VERSION,
+  handleAuthenticatedMcpRequest,
+  type AuthenticatedCatalogCredential,
+} from "./authenticated-mcp-handler.js";
+export { MCP_SERVER_VERSION };
 
 // Set global service for this process (MUST be first thing after imports)
 setGlobalService(Service.MCP_SERVER);
@@ -73,25 +74,12 @@ import {
   ExecutionAttemptMaintenance,
   WaitingNotificationSender,
 } from "@mcp-moira/workflow-engine";
-import { runWithMCPContext } from "./core/request-context.js";
 import { auth } from "./auth.js";
 import { mcpLimiter } from "./middleware/rate-limit-middleware.js";
 
 import { buildReconciliationAwareInstructions } from "./reconciliation-aware-server.js";
 import { registerTools } from "./tools/register-tools.js";
-import {
-  getCatalogInitializeRequest,
-  isCatalogDiscoveryRequest,
-  requireRevisionStampBeforeInitializeResult,
-} from "./auth/mcp-catalog-lifecycle.js";
-import { evaluateMcpToolsRevision } from "./auth/mcp-tools-revision.js";
-import {
-  MCP_TOOLS_REVISION,
-  TOOL_DEFINITIONS,
-  PUBLIC_TOOL_SCHEMAS,
-  type McpToolName,
-} from "./tools/tool-definitions.js";
-import { publicToolLogContext } from "./tools/public-tool-contract.js";
+import { MCP_TOOLS_REVISION, TOOL_DEFINITIONS } from "./tools/tool-definitions.js";
 import { createWorkspacePublicationHandler } from "./workspace-publication-route.js";
 import { readAuthenticatedMcpRequest } from "./authenticated-request.js";
 
@@ -118,9 +106,6 @@ if (logLevel) {
 // runtime-configurable and are passed only through that protocol field.
 // Tool descriptions are part of the static typed registry. Agent/model context
 // selects a static variant and never causes a database lookup.
-
-// Import prompt context extraction utilities
-import { extractPromptContext } from "./utils/prompt-context.js";
 
 /**
  * Create a new MCP server instance with tools registered from the static contract.
@@ -152,13 +137,6 @@ async function createMcpServerWithTools(context?: McpPromptContext): Promise<Mcp
   registerTools(mcpServer, context);
 
   return mcpServer;
-}
-
-interface AuthenticatedCatalogCredential {
-  kind: "oauth" | "persistent";
-  id: string;
-  toolsVersion: string | null;
-  stampRevision: () => Promise<boolean>;
 }
 
 interface AuthenticatedPrincipal {
@@ -378,85 +356,6 @@ async function authenticatePrincipal(
   };
 }
 
-async function handleAuthenticatedMcpRequest(
-  req: Request,
-  res: Response,
-  identity: { userId: string; email: string },
-  credential: AuthenticatedCatalogCredential,
-): Promise<void> {
-  const revisionGate = evaluateMcpToolsRevision(credential.toolsVersion, MCP_SERVER_VERSION);
-  const initializeRequest = getCatalogInitializeRequest(req.body);
-
-  if (!revisionGate.accepted && !initializeRequest && !isCatalogDiscoveryRequest(req.body)) {
-    logger.info("Outdated MCP client detected", {
-      userId: identity.userId.substring(0, 8) + "...",
-      credentialKind: credential.kind,
-      tokenToolsRevision: credential.toolsVersion || "unknown",
-      serverToolsRevision: MCP_TOOLS_REVISION,
-    });
-    res.status(revisionGate.status).json(revisionGate.body);
-    return;
-  }
-
-  const mcpMethod = req.body?.method;
-  const mcpParams = req.body?.params;
-  const toolName = mcpMethod === "tools/call" && mcpParams?.name ? mcpParams.name : undefined;
-  const toolArgs = toolName ? mcpParams.arguments || {} : undefined;
-  if (toolName !== undefined) {
-    if (
-      typeof toolName !== "string" ||
-      !Object.hasOwn(PUBLIC_TOOL_SCHEMAS, toolName) ||
-      !PUBLIC_TOOL_SCHEMAS[toolName as McpToolName].safeParse(toolArgs).success
-    ) {
-      res.status(400).json({
-        jsonrpc: "2.0",
-        id: req.body?.id ?? null,
-        error: { code: -32602, message: "Invalid tool action parameters" },
-      });
-      return;
-    }
-  }
-  const promptContext = await extractPromptContext(req);
-  const userContext = {
-    ...identity,
-    agent: promptContext.agent,
-    model: promptContext.model,
-  };
-
-  logger.info("Authenticated MCP request", {
-    method: mcpMethod,
-    requestId: req.body?.id,
-    userId: userContext.userId.substring(0, 8) + "...",
-    credentialKind: credential.kind,
-    credentialId: credential.id.substring(0, 8) + "...",
-    ...(promptContext.agent && { agent: promptContext.agent }),
-    ...(promptContext.model && { model: promptContext.model }),
-  });
-
-  const mcpServer = await createMcpServerWithTools(promptContext);
-  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-  if (!revisionGate.accepted && initializeRequest) {
-    requireRevisionStampBeforeInitializeResult(
-      transport,
-      initializeRequest,
-      credential.stampRevision,
-    );
-  }
-  await mcpServer.connect(transport);
-
-  await runWithMCPContext(userContext, async () => {
-    if (toolName && toolArgs) {
-      const { inputData, resourceIds } = publicToolLogContext(toolName as McpToolName, toolArgs);
-      updateContext({ operation: `mcp:${toolName}`, inputData, resourceIds });
-    }
-    await transport.handleRequest(req, res, req.body);
-  });
-
-  res.on("finish", () => {
-    transport.close?.();
-  });
-}
-
 // Tools will be registered per session in HTTP mode
 
 // Stateless mode - no session storage needed
@@ -557,7 +456,13 @@ app.post("/mcp", mcpLimiter, async (req: Request, res: Response) => {
       hasAuthHeader: !!req.headers.authorization,
     });
 
-    await handleAuthenticatedMcpRequest(req, res, principal.identity, principal.credential);
+    await handleAuthenticatedMcpRequest(
+      req,
+      res,
+      principal.identity,
+      principal.credential,
+      createMcpServerWithTools,
+    );
     return;
   } catch (error) {
     logger.error("MCP request failed", error);

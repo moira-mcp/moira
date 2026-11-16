@@ -179,7 +179,12 @@ actions and [workflow CLI](../reference/workflow-cli.md) for local authored file
 MCP and HTTP are separate process entry points sharing domain services and persisted state. MCP
 request context carries authenticated user and detected agent/model for effective text resolution;
 tool registration applies the common input preprocessing instead of each handler parsing its own
-stringified objects. The file default prompt, portable help and typed tool projection each have one
+stringified objects. Typed tool schemas use native Zod 4. The central `getToolJsonSchema` exporter
+publishes the original input schema for discovery, catalog revisions and generated references;
+registration applies preprocessing separately. It preserves each object's unknown-field policy,
+refinements and parse-time defaults, including grouped action branches. JSON Schema expresses the
+structural input contract; runtime refinements still enforce constraints that JSON Schema cannot
+represent. The file default prompt, portable help and typed tool projection each have one
 source owner; [documentation development](documentation.md) explains their delivery paths.
 
 Workspace source bytes and long-running owner operations use their dedicated authenticated

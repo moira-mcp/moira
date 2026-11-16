@@ -118,9 +118,8 @@ export async function startWithoutGateway(
   await call(socket, "POST", `/sandbox/${name}/start`, 200, "{}", signal, null);
 }
 
-const createProfile = localPolicySchema
-  .innerType()
-  .shape.runtime.pick({
+const createProfile = localPolicySchema.shape.runtime
+  .pick({
     template: true,
     cpuCores: true,
     memoryBytes: true,
