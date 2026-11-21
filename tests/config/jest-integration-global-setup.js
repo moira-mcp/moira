@@ -30,7 +30,7 @@ if (existsSync(envTestPath)) {
   }
 }
 
-const testDbPath = "./data/test-integration.db";
+const testDbPath = "./test-results/integration-db/test-integration.db";
 const dbDir = path.dirname(testDbPath);
 
 export default async function globalSetup() {

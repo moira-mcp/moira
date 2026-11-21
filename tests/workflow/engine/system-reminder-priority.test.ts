@@ -141,6 +141,51 @@ describe("Actual execution reminder presentation", () => {
     },
   );
 
+  test.each([
+    [{ metadata: { displayName: "Review draft" }, progressActiveLabel: "Other" }, "Review draft"],
+    [{ progressActiveLabel: "Review {{subject}}" }, "Review draft"],
+    [
+      { metadata: { description: "Review\ndraft" }, progressActiveLabel: "{{missing}}" },
+      "Review draft",
+    ],
+    [{ progressActiveContent: { summary: "Review {{subject}}" } }, "Review draft"],
+    [
+      { progressActiveLabel: "{{missing}}", progressActiveContent: { summary: "Review draft" } },
+      "Review draft",
+    ],
+    [
+      { metadata: { description: "Description" }, progressActiveContent: { summary: "Summary" } },
+      "Description",
+    ],
+    [{}, "task"],
+  ] as const)(
+    "heads the directive with its own label and puts jumps before reminders",
+    async (fields, heading) => {
+      const repository = new InMemoryRepository();
+      const workflow = graph("AUTHORED REMINDER");
+      workflow.progress = { nodes: [{ id: "work", label: "Work", content: { summary: "Work" } }] };
+      Object.assign(workflow.nodes[1], { progressNodeId: "work" }, fields);
+      workflow.nodes.push({
+        id: "revise",
+        type: "teleport",
+        hint: "Revise the draft",
+        directive: "Revise",
+        completionCondition: "Done",
+        connections: { success: "task" },
+      });
+      await repository.saveWorkflow(workflow, "user");
+      const executor = new UniversalGraphExecutor(repository);
+      const executionId = await executor.startWorkflow(workflow, { subject: "draft" }, "user");
+      const response = await executor.executeStep(executionId);
+      expect(response).toContain(
+        `Step: ${heading}\n\nYour next task: Produce the requested result`,
+      );
+      expect(response).toMatch(
+        /Success criteria:[\s\S]+Available Teleport Jumps[\s\S]+Revise the draft[\s\S]+AUTHORED REMINDER/u,
+      );
+    },
+  );
+
   test("lookup failure cannot remove universal language guidance", async () => {
     settings({}).mockRejectedValue(new Error("Controlled settings outage"));
     const repository = new InMemoryRepository(),
