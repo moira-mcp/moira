@@ -179,7 +179,7 @@ export default defineConfig({
       env: {
         NODE_ENV: "test",
         NODE_OPTIONS: "--experimental-vm-modules",
-        DB_PATH: "./data/test-integration.db",
+        DB_PATH: "./test-results/integration-db/test-integration.db",
         TELEGRAM_ENCRYPTION_KEY: "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456",
       },
     },

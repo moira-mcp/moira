@@ -19,7 +19,7 @@ belongs to the [runner configs](docs/test-infrastructure.md#discovery-and-prepar
 ## Execution, attempts and waiting
 
 [Reminder presentation](workflow/engine/system-reminder-priority.test.ts) exercises the actual
-executor's reminder precedence and universal language instruction. Ordinary/current/replayed
+executor's one-line step heading, teleport placement, reminder precedence and universal language instruction. Ordinary/current/replayed
 presentations retain durable originals and attempt identity through the
 [current/replay MCP boundary](integration/replay-safe-step-mcp-boundary.test.ts) and
 [prepared-start recovery](integration/replay-safe-start-attempts.test.ts).

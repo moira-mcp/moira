@@ -96,7 +96,7 @@ jobs:
         run: |
           cp .env.ci .env
           # Override DB_PATH for integration tests
-          echo "DB_PATH=./data/test-integration.db" >> .env
+          echo "DB_PATH=./test-results/integration-db/test-integration.db" >> .env
 
       - name: Create data directory
         run: mkdir -p data

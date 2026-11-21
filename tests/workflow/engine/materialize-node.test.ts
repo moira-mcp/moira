@@ -606,10 +606,15 @@ const owner = "Moira";
       id: "workflow-1",
       metadata: { name: "Scenario", version: "1.0.0", description: "Scenario" },
       variableRegistry: registry,
+      progress: {
+        nodes: [{ id: "setup", label: "Setup", content: { summary: "Prepare inputs" } }],
+      },
       nodes: [
         { id: "start", type: "start", connections: { default: "materialize" } },
         {
           ...node,
+          progressNodeId: "setup",
+          progressActiveLabel: "{{readme}}",
           files: [
             { path: "README.md", from: "readme" },
             { path: "plans/.keep", content: "" },
@@ -642,6 +647,10 @@ const owner = "Moira";
     expect(waiting?.waitingForInputNodeId).toBe("materialize");
     expect(waiting?.globalContext.variables.materialize).toBeUndefined();
     expect(JSON.stringify(waiting?.globalContext)).not.toContain("scenario-token");
+
+    expect(paused).toContain("Step: # default name\n");
+    await repository.saveExecution(JSON.parse(JSON.stringify(waiting)));
+    expect(await executor.presentCurrentStep(executionId)).toContain("Step: # default name\n");
 
     const rejected = await executor.executeStep(executionId, { extra: true });
     expect(rejected).toContain("VALIDATION ERROR");

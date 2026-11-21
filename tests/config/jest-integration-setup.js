@@ -26,4 +26,4 @@ if (existsSync(envTestPath)) {
 }
 
 // ALWAYS use test-integration.db for integration tests (never production DB)
-process.env.DB_PATH = "./data/test-integration.db";
+process.env.DB_PATH = "./test-results/integration-db/test-integration.db";

@@ -3,6 +3,7 @@
  * Handles all node types through universal action-based approach
  */
 
+import { GraphTemplateProcessor } from "../templates/graph-template-processor.js";
 import { randomUUID } from "crypto";
 import { WorkflowExecution, isStartNode, isTeleportNode } from "../types/index.js";
 import type { ExecutionVisit } from "../types/base-types.js";
@@ -452,7 +453,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
       let nextAttempt: ReturnType<ExecutionMutationCoordinator["newPresentedAttempt"]> | undefined;
       switch (executionResult.action) {
         case "pause":
-          response = await this.formatQueueResponse(execution.executionId, messageQueue, graph);
+          response = await this.formatQueueResponse(execution, messageQueue, graph);
           if (claimed || mutation?.createPresentation) {
             const attemptId = randomUUID();
             response = presentedAttemptResponse(attemptId, response);
@@ -625,7 +626,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
       execution.currentNodeId,
     );
 
-    const rawRendered = await this.formatQueueResponse(execution.executionId, messageQueue, graph);
+    const rawRendered = await this.formatQueueResponse(execution, messageQueue, graph);
     const rendered = presentedAttemptResponse(currentAttempt.attemptId, rawRendered);
     const refreshed = await this.repository.updatePresentedExecutionAttemptResponse(
       currentAttempt.attemptId,
@@ -648,10 +649,11 @@ export class UniversalGraphExecutor implements IGraphExecutor {
    * Format message queue into string
    */
   private async formatQueueResponse(
-    executionId: string,
+    execution: WorkflowExecution,
     messageQueue: AgentMessageQueue,
     graph: WorkflowGraph,
   ): Promise<string> {
+    const { executionId } = execution;
     const queueResponse = messageQueue.flush(executionId);
 
     if (queueResponse.totalMessages === 0) {
@@ -660,7 +662,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
 
     // Format: Process ID + Messages + System Reminder
     const formattedMessages = queueResponse.messages.map((message) =>
-      this.formatAgentMessage(message),
+      this.formatAgentMessage(message, graph, execution),
     );
 
     let finalText = `Process ID: ${executionId}\n\n`;
@@ -677,15 +679,15 @@ export class UniversalGraphExecutor implements IGraphExecutor {
       finalText += "\n\n" + activeChildInfo;
     }
 
-    const systemReminder = await this.getSystemReminder(graph);
-    if (systemReminder) {
-      finalText += "\n\n" + systemReminder;
-    }
-
     // Append teleport node hints so agents know about available escape routes
     const teleportHints = this.formatTeleportHints(graph);
     if (teleportHints) {
       finalText += "\n\n" + teleportHints;
+    }
+
+    const systemReminder = await this.getSystemReminder(graph);
+    if (systemReminder) {
+      finalText += "\n\n" + systemReminder;
     }
 
     return finalText;
@@ -718,11 +720,35 @@ export class UniversalGraphExecutor implements IGraphExecutor {
   /**
    * Format agent message based on type (no process ID here)
    */
-  private formatAgentMessage(message: AgentMessage): string {
+  private formatAgentMessage(
+    message: AgentMessage,
+    graph: WorkflowGraph,
+    execution: WorkflowExecution,
+  ): string {
     switch (message.type) {
       case AgentMessageType.DIRECTIVE: {
         const directiveMsg = message as DirectiveMessage;
-        let formatted = `Your next task: ${directiveMsg.directive}\n\nSuccess criteria: ${directiveMsg.completionCondition}`;
+        const node = graph.nodes.find((candidate) => candidate.id === message.nodeId);
+        const resolveLabel = (template?: string): string | undefined => {
+          if (!template) return undefined;
+          const label = new GraphTemplateProcessor()
+            .processDirective(template, {
+              ...execution.globalContext,
+              _templateFragmentVars: GraphTemplateProcessor.computeFragmentVars(
+                graph.variableRegistry,
+              ),
+            })
+            .trim();
+          return label.includes(GraphTemplateProcessor.UNDEFINED_PLACEHOLDER) ? undefined : label;
+        };
+        const heading = (
+          node?.metadata?.displayName?.trim() ||
+          resolveLabel(node?.progressActiveLabel) ||
+          node?.metadata?.description?.trim() ||
+          resolveLabel(node?.progressActiveContent?.summary) ||
+          message.nodeId
+        ).replace(/\s+/gu, " ");
+        let formatted = `Step: ${heading}\n\nYour next task: ${directiveMsg.directive}\n\nSuccess criteria: ${directiveMsg.completionCondition}`;
 
         if (directiveMsg.inputSchema && this.hasNonEmptySchema(directiveMsg.inputSchema)) {
           formatted +=

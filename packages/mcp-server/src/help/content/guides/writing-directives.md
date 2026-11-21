@@ -5,6 +5,8 @@ description: Best practices for writing clear and effective workflow directives
 
 ## Directive Structure
 
+Each newly presented directive opens with a one-line `Step:` heading after the process and attempt identifiers. A node-specific progress label can include workflow variables. When a suitable name or description is unavailable, the heading uses the node ID. Available teleport jumps appear after the task details and before system reminders.
+
 An `agent-directive` node needs an ID, directive, completion condition and success connection.
 Add `inputSchema` when the agent must return data:
 
