@@ -8,6 +8,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import Database from "better-sqlite3";
 import crypto from "crypto";
+import { writeAdminCredential } from "./admin-credential.js";
 import fs from "fs";
 import path from "path";
 import "dotenv/config";
@@ -379,53 +380,25 @@ if (adminPassword) {
 
   const adminId = "system-admin";
 
-  // Check if admin already exists
-  const existingUser = sqlite.prepare("SELECT id FROM user WHERE id = ?").get(adminId);
-
-  if (!existingUser) {
-    // Admin user always gets handle "admin"
-    const adminHandle = "admin";
-    sqlite
-      .prepare(
-        `
-      INSERT INTO user
-        (id, email, name, handle, emailVerified, isAdmin, approvedAt, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), datetime('now'), datetime('now'))
-    `,
-      )
-      .run(adminId, adminEmail, "Admin User", adminHandle, 1, 1);
-
-    console.log("  ✅ Admin user created with admin flag");
-  } else {
-    // Update existing admin user to set isAdmin flag
-    sqlite
-      .prepare(
-        "UPDATE user SET isAdmin = 1, approvedAt = COALESCE(approvedAt, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) WHERE id = ?",
-      )
-      .run(adminId);
-    console.log("  ✅ Admin user updated with admin flag");
-  }
-
-  // Create or update admin account with password
-  // Delete all existing credential accounts to avoid duplicates
-  sqlite
-    .prepare("DELETE FROM account WHERE userId = ? AND providerId = ?")
-    .run(adminId, "credential");
-
-  // Hash password using Better Auth API (ensures correct format)
   const ctx = await auth.$context;
   const hashedPassword = await ctx.password.hash(adminPassword);
-
   sqlite
-    .prepare(
-      `
-    INSERT INTO account (id, userId, accountId, providerId, password, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-  `,
-    )
-    .run(crypto.randomUUID(), adminId, adminEmail, "credential", hashedPassword);
+    .transaction(() => {
+      sqlite
+        .prepare(
+          `INSERT INTO user
+           (id, email, name, handle, emailVerified, isAdmin, approvedAt, createdAt, updatedAt)
+         VALUES (?, ?, 'Admin User', 'admin', 1, 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), datetime('now'), datetime('now'))
+         ON CONFLICT(id) DO UPDATE SET
+           isAdmin = 1, approvedAt = COALESCE(user.approvedAt, excluded.approvedAt)`,
+        )
+        .run(adminId, adminEmail);
 
-  console.log("  ✅ Admin account created with Better Auth password hash");
+      writeAdminCredential(sqlite, adminId, hashedPassword);
+    })
+    .immediate();
+
+  console.log("  ✅ Admin password credential ready");
 
   console.log("");
   console.log("Admin user seeded:");

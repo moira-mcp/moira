@@ -7,7 +7,7 @@
  */
 
 import Database from "better-sqlite3";
-import crypto from "crypto";
+import { writeAdminCredential } from "./admin-credential.js";
 import path from "path";
 import { hashPassword } from "better-auth/crypto";
 import {
@@ -61,29 +61,7 @@ try {
       ).run(ADMIN_EMAIL, ADMIN_ID);
     }
 
-    const accounts = db
-      .prepare(
-        "SELECT id, userId FROM account WHERE providerId = 'credential' AND (userId = ? OR accountId = ?)",
-      )
-      .all(ADMIN_ID, ADMIN_ID) as { id: string; userId: string }[];
-    if (accounts.length > 1 || accounts.some((account) => account.userId !== ADMIN_ID)) {
-      throw new Error("Ambiguous administrator password credential ownership");
-    }
-    const existingAccount = accounts[0];
-    const createdAccount = !existingAccount;
-
-    if (createdAccount) {
-      db.prepare(
-        `INSERT INTO account (id, userId, accountId, providerId, password, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-      ).run(crypto.randomUUID(), ADMIN_ID, ADMIN_ID, "credential", hashedPassword);
-    } else {
-      db.prepare(
-        `UPDATE account
-            SET accountId = ?, password = ?, updatedAt = datetime('now')
-          WHERE id = ? AND userId = ? AND providerId = 'credential'`,
-      ).run(ADMIN_ID, hashedPassword, existingAccount.id, ADMIN_ID);
-    }
+    const createdAccount = writeAdminCredential(db, ADMIN_ID, hashedPassword);
 
     return { createdUser, createdAccount };
   });
