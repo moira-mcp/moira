@@ -362,6 +362,7 @@ export function buildMcpPluginOptions() {
     consentPage: `${prefix}/oauth/consent`,
     disableJwtPlugin: true,
     allowDynamicClientRegistration: true,
+    clientRegistrationDefaultApplicationType: "infer" as const,
     allowUnauthenticatedClientRegistration: true,
     scopes: ["openid", "profile", "email", "offline_access"],
     clientRegistrationDefaultScopes: ["openid", "profile", "email", "offline_access"],

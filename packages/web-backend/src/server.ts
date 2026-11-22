@@ -24,6 +24,7 @@ import {
   closeDatabase,
   getBaseUrl,
   getMcpUrl,
+  getAuthUrl,
   getAppPrefix,
   getWebBackendPort,
   getNodeEnv,
@@ -305,9 +306,7 @@ class MoiraApiServer {
       const url = req.url || req.originalUrl || "";
       logger.info("Auth request received", {
         method: req.method,
-        url: url,
         path: url.split("?")[0],
-        query: url.includes("?") ? url.split("?")[1] : "",
       });
 
       try {
@@ -371,53 +370,34 @@ class MoiraApiServer {
     }
 
     // OAuth Protected Resource Metadata (RFC9728)
-    this.app.get("/.well-known/oauth-protected-resource", (req, res) => {
-      const baseUrl = getBaseUrl();
+    this.app.get(
+      ["/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"],
+      (_req, res) => {
+        res.json({
+          resource: getMcpUrl(),
+          authorization_servers: [getAuthUrl()],
+          scopes_supported: ["openid", "profile", "email", "offline_access"],
+          bearer_methods_supported: ["header"],
+        });
+      },
+    );
 
-      res.json({
-        resource: getMcpUrl(),
-        authorization_servers: [baseUrl],
-        scopes_supported: ["openid", "profile", "email", "offline_access"],
-        bearer_methods_supported: ["header"],
-      });
-    });
-
-    // OAuth Authorization Server Metadata (RFC8414)
-    this.app.get("/.well-known/oauth-authorization-server", (req, res) => {
-      const baseUrl = getBaseUrl();
-
-      res.json({
-        issuer: baseUrl,
-        authorization_endpoint: `${baseUrl}/api/auth/oauth2/authorize`,
-        token_endpoint: `${baseUrl}/api/auth/oauth2/token`,
-        userinfo_endpoint: `${baseUrl}/api/auth/oauth2/userinfo`,
-        registration_endpoint: `${baseUrl}/api/auth/oauth2/register`,
-        scopes_supported: ["openid", "profile", "email", "offline_access"],
-        response_types_supported: ["code"],
-        response_modes_supported: ["query"],
-        grant_types_supported: ["authorization_code", "refresh_token"],
-        subject_types_supported: ["public"],
-        id_token_signing_alg_values_supported: ["HS256"],
-        token_endpoint_auth_methods_supported: [
-          "client_secret_basic",
-          "client_secret_post",
-          "none",
-        ],
-        code_challenge_methods_supported: ["S256"],
-        claims_supported: [
-          "sub",
-          "iss",
-          "aud",
-          "exp",
-          "nbf",
-          "iat",
-          "jti",
-          "email",
-          "email_verified",
-          "name",
-        ],
-      });
-    });
+    // The provider owns the issuer, endpoints and algorithms advertised at both discovery URLs.
+    this.app.get(
+      [
+        "/.well-known/oauth-authorization-server",
+        "/.well-known/oauth-authorization-server/api/auth",
+      ],
+      async (_req, res) => {
+        const metadata = await auth.handler(
+          new Request(getAuthUrl() + "/.well-known/oauth-authorization-server"),
+        );
+        res
+          .status(metadata.status)
+          .set(Object.fromEntries(metadata.headers))
+          .send(await metadata.text());
+      },
+    );
   }
 
   /**
