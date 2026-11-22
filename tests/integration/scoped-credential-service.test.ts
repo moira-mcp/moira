@@ -43,6 +43,7 @@ const now = 1_000_000,
   expiresAt = 2_000_000;
 const privateBearer = "a".repeat(43);
 describe("Scoped credential issuer custody", () => {
+  let clock: number;
   let sqlite: Database.Database,
     repository: CodespaceConnectionRepository,
     service: ScopedCredentialService;
@@ -60,6 +61,7 @@ describe("Scoped credential issuer custody", () => {
       >
     >;
   beforeEach(() => {
+    clock = now;
     sqlite = new Database(":memory:");
     migrate(drizzle(sqlite), {
       migrationsFolder: path.resolve(process.cwd(), "packages/web-backend/drizzle"),
@@ -138,7 +140,7 @@ describe("Scoped credential issuer custody", () => {
       },
       authorize: async () => authority,
       isAuthorityCurrent: currentAuthority,
-      now: () => now,
+      now: () => clock,
     });
   });
   afterEach(() => {
@@ -618,6 +620,22 @@ describe("Scoped credential issuer custody", () => {
       code: "SCOPED_CREDENTIAL_AUTHORITY_REFUSED",
     });
     expect(create).not.toHaveBeenCalled();
+  });
+  test("a candidate is disposed if its owner expires before the live write finishes", async () => {
+    const update = repository.updateScopedCredential.bind(repository);
+    repository.updateScopedCredential = (change) => {
+      if (change.state === "live") clock = authority.useUntil!;
+      return update(change);
+    };
+    await expect(service.acquire("owner-bearer", input)).rejects.toMatchObject({
+      code: "SCOPED_CREDENTIAL_AUTHORITY_REFUSED",
+    });
+    expect(revoke).toHaveBeenCalledWith(candidate.token);
+    expect(
+      repository.getScopedCredential(authority.userId, CODESPACE_PROVIDER_GITHUB, {
+        requestId: input.requestId,
+      })?.state,
+    ).toBe("disposed");
   });
   test("recovery retains a refused disposal and continues disposing independent known children", async () => {
     await service.acquire("owner-bearer", input);

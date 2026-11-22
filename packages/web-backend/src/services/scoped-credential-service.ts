@@ -206,12 +206,19 @@ export class ScopedCredentialService {
       );
     try {
       const current = await this.authority(bearer, input, false);
+      const stored = this.dependencies.repository.getScopedCredential(userId, previous.provider, {
+        credentialId: previous.id,
+      });
+      const now = this.now();
       if (
         !same(current.witness, witness) ||
+        stored?.state !== "live" ||
+        !same(stored.envelope, previous.envelope) ||
         !payload.token ||
         payload.expiresAt === null ||
-        payload.expiresAt <= this.now() ||
-        (witness.authority.useUntil !== null && witness.authority.useUntil <= this.now())
+        payload.expiresAt <= now ||
+        witness.parentExpiresAt <= now ||
+        (witness.authority.useUntil !== null && witness.authority.useUntil <= now)
       )
         throw new ScopedCredentialError("SCOPED_CREDENTIAL_AUTHORITY_REFUSED", 403);
     } catch {
@@ -339,23 +346,14 @@ export class ScopedCredentialService {
       const current = await this.authority(bearer, input, false);
       if (!same(current.witness, witness))
         throw new ScopedCredentialError("SCOPED_CREDENTIAL_AUTHORITY_REFUSED", 403);
-      const result = scopedCredentialViewSchema.parse({
-        credentialId: id,
-        token: candidate.token,
-        expiresAt: candidate.expiresAt,
-        useUntil: Math.min(
-          candidate.expiresAt!,
-          witness.parentExpiresAt,
-          witness.authority.useUntil ?? candidate.expiresAt!,
-        ),
-        repositoryFullName: witness.authority.repositoryFullName,
-      });
-      await this.update(retained, "live", candidate.token, candidate.expiresAt);
-      return result;
+      row = await this.update(retained, "live", candidate.token, candidate.expiresAt);
     } catch {
       await this.dispose(retained);
       throw new ScopedCredentialError("SCOPED_CREDENTIAL_SCOPE_REFUSED", 403);
     }
+    // Admission to the writer may have waited. Apply the ordinary delivery checks
+    // to the committed credential and its current authority before releasing it.
+    return this.existing(bearer, input, row);
   }
   private async dispose(row: StoredScopedCredential) {
     try {
