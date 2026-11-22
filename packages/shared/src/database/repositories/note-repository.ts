@@ -10,6 +10,7 @@
  * - Soft delete: Preserves data for audit trail
  */
 
+import { executeDrizzleWrite } from "../drizzle-write.js";
 import { eq, and, or, isNull, like, desc, asc, sql } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { note, entityRevision } from "../schema.js";
@@ -465,18 +466,21 @@ export class NoteRepository {
       const newVersion = appended.revision;
 
       // Update note metadata
-      await this.db
-        .update(note)
-        .set({
-          tags: JSON.stringify(tags),
-          size,
-          currentVersion: newVersion,
-          deleted: false, // Restore if was soft-deleted
-          deletedAt: null,
-          deletedBy: null,
-          updatedAt: now,
-        })
-        .where(eq(note.id, existingNote.id));
+      await executeDrizzleWrite(
+        this.db,
+        this.db
+          .update(note)
+          .set({
+            tags: JSON.stringify(tags),
+            size,
+            currentVersion: newVersion,
+            deleted: false, // Restore if was soft-deleted
+            deletedAt: null,
+            deletedBy: null,
+            updatedAt: now,
+          })
+          .where(eq(note.id, existingNote.id)),
+      );
 
       this.logger.debug("save() updated existing note", {
         id: existingNote.id,
@@ -489,16 +493,19 @@ export class NoteRepository {
       const version = 1;
 
       // Insert note
-      await this.db.insert(note).values({
-        id: noteId,
-        userId,
-        key,
-        tags: JSON.stringify(tags),
-        size,
-        currentVersion: version,
-        createdAt: now,
-        updatedAt: now,
-      });
+      await executeDrizzleWrite(
+        this.db,
+        this.db.insert(note).values({
+          id: noteId,
+          userId,
+          key,
+          tags: JSON.stringify(tags),
+          size,
+          currentVersion: version,
+          createdAt: now,
+          updatedAt: now,
+        }),
+      );
 
       // Insert first version
       await this.revisions.append({
@@ -521,21 +528,24 @@ export class NoteRepository {
   async softDelete(key: string, userId: string): Promise<boolean> {
     const now = new Date();
 
-    const result = await this.db
-      .update(note)
-      .set({
-        deleted: true,
-        deletedAt: now,
-        deletedBy: userId,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(note.key, key),
-          eq(note.userId, userId),
-          or(eq(note.deleted, false), isNull(note.deleted)),
+    const result = await executeDrizzleWrite(
+      this.db,
+      this.db
+        .update(note)
+        .set({
+          deleted: true,
+          deletedAt: now,
+          deletedBy: userId,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(note.key, key),
+            eq(note.userId, userId),
+            or(eq(note.deleted, false), isNull(note.deleted)),
+          ),
         ),
-      );
+    );
 
     return result.changes > 0;
   }
@@ -560,7 +570,7 @@ export class NoteRepository {
     await this.revisions.deleteHistory(this.revisionTarget(noteRow.id));
 
     // Delete note
-    await this.db.delete(note).where(eq(note.id, noteRow.id));
+    await executeDrizzleWrite(this.db, this.db.delete(note).where(eq(note.id, noteRow.id)));
 
     return true;
   }
@@ -571,15 +581,18 @@ export class NoteRepository {
   async restore(key: string, userId: string): Promise<boolean> {
     const now = new Date();
 
-    const result = await this.db
-      .update(note)
-      .set({
-        deleted: false,
-        deletedAt: null,
-        deletedBy: null,
-        updatedAt: now,
-      })
-      .where(and(eq(note.key, key), eq(note.userId, userId), eq(note.deleted, true)));
+    const result = await executeDrizzleWrite(
+      this.db,
+      this.db
+        .update(note)
+        .set({
+          deleted: false,
+          deletedAt: null,
+          deletedBy: null,
+          updatedAt: now,
+        })
+        .where(and(eq(note.key, key), eq(note.userId, userId), eq(note.deleted, true))),
+    );
 
     return result.changes > 0;
   }

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { AuditAction } from "../../audit/actions.js";
 import { getAuditSource } from "../../logging/context.js";
+import { withSqliteWrite } from "../sqlite-write.js";
 
 export interface AccountApprovalTransitionResult {
   status: "approved" | "already-approved" | "not-found";
@@ -16,8 +17,8 @@ export interface AccountApprovalTransitionResult {
 export class AccountApprovalRepository {
   constructor(private sqlite: Database.Database) {}
 
-  approve(adminUserId: string, targetUserId: string): AccountApprovalTransitionResult {
-    const approveInTransaction = this.sqlite.transaction((): AccountApprovalTransitionResult => {
+  approve(adminUserId: string, targetUserId: string): Promise<AccountApprovalTransitionResult> {
+    return withSqliteWrite((): AccountApprovalTransitionResult => {
       const existing = this.sqlite
         .prepare("SELECT approvedAt FROM user WHERE id = ?")
         .get(targetUserId) as { approvedAt: string | null } | undefined;
@@ -62,8 +63,6 @@ export class AccountApprovalRepository {
       return current
         ? { status: "already-approved", approvedAt: current.approvedAt }
         : { status: "not-found", approvedAt: null };
-    });
-
-    return approveInTransaction();
+    }, this.sqlite);
   }
 }

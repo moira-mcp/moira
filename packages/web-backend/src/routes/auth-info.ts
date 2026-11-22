@@ -3,6 +3,7 @@
  * Current user information endpoint
  */
 
+import { executeDrizzleWrite } from "@mcp-moira/shared";
 import { Router, Request, Response } from "express";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
 import { requireAuth, requireSessionAuth } from "../middleware/auth-middleware.js";
@@ -92,20 +93,29 @@ router.post(
     }
 
     // Clear passwordResetRequired flag
-    await db
-      .update(user)
-      .set({
-        passwordResetRequired: false,
-        passwordResetRequestedAt: null,
-        passwordResetRequestedBy: null,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(user.id, userId));
+    await executeDrizzleWrite(
+      db,
+      db
+        .update(user)
+        .set({
+          passwordResetRequired: false,
+          passwordResetRequestedAt: null,
+          passwordResetRequestedBy: null,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(user.id, userId)),
+    );
 
     // Revoke all OAuth tokens for security
-    await db.delete(oauthConsent).where(eq(oauthConsent.userId, userId));
-    await db.delete(oauthRefreshToken).where(eq(oauthRefreshToken.userId, userId));
-    await db.delete(oauthAccessToken).where(eq(oauthAccessToken.userId, userId));
+    await executeDrizzleWrite(db, db.delete(oauthConsent).where(eq(oauthConsent.userId, userId)));
+    await executeDrizzleWrite(
+      db,
+      db.delete(oauthRefreshToken).where(eq(oauthRefreshToken.userId, userId)),
+    );
+    await executeDrizzleWrite(
+      db,
+      db.delete(oauthAccessToken).where(eq(oauthAccessToken.userId, userId)),
+    );
 
     // Audit log for forced password change
     const repository = new DatabaseRepository();

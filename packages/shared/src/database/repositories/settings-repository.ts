@@ -3,6 +3,7 @@
  * Drizzle ORM queries for settings operations
  */
 
+import { executeDrizzleWrite } from "../drizzle-write.js";
 import { eq, and } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { settingDefinition, userSettingValue } from "../schema.js";
@@ -154,23 +155,29 @@ export class SettingsRepository {
 
     if (existing.length > 0) {
       // Update
-      await this.db
-        .update(userSettingValue)
-        .set({
+      await executeDrizzleWrite(
+        this.db,
+        this.db
+          .update(userSettingValue)
+          .set({
+            value: stringValue,
+            encrypted: shouldEncrypt,
+            updatedAt: now,
+          })
+          .where(and(eq(userSettingValue.userId, userId), eq(userSettingValue.settingKey, key))),
+      );
+    } else {
+      // Insert
+      await executeDrizzleWrite(
+        this.db,
+        this.db.insert(userSettingValue).values({
+          userId,
+          settingKey: key,
           value: stringValue,
           encrypted: shouldEncrypt,
           updatedAt: now,
-        })
-        .where(and(eq(userSettingValue.userId, userId), eq(userSettingValue.settingKey, key)));
-    } else {
-      // Insert
-      await this.db.insert(userSettingValue).values({
-        userId,
-        settingKey: key,
-        value: stringValue,
-        encrypted: shouldEncrypt,
-        updatedAt: now,
-      });
+        }),
+      );
     }
   }
 
@@ -280,11 +287,14 @@ export class SettingsRepository {
   ): Promise<void> {
     const now = new Date(); // Drizzle expects Date object for timestamp_ms
 
-    await this.db.insert(settingDefinition).values({
-      ...definition,
-      createdAt: now,
-      updatedAt: now,
-    });
+    await executeDrizzleWrite(
+      this.db,
+      this.db.insert(settingDefinition).values({
+        ...definition,
+        createdAt: now,
+        updatedAt: now,
+      }),
+    );
   }
 
   async deleteSettingDefinition(key: string): Promise<void> {
@@ -300,13 +310,19 @@ export class SettingsRepository {
     }
 
     // Foreign key cascade deletes userSettingValue rows
-    await this.db.delete(settingDefinition).where(eq(settingDefinition.key, key));
+    await executeDrizzleWrite(
+      this.db,
+      this.db.delete(settingDefinition).where(eq(settingDefinition.key, key)),
+    );
   }
 
   async deleteUserSettingValue(userId: string, key: string): Promise<void> {
-    await this.db
-      .delete(userSettingValue)
-      .where(and(eq(userSettingValue.userId, userId), eq(userSettingValue.settingKey, key)));
+    await executeDrizzleWrite(
+      this.db,
+      this.db
+        .delete(userSettingValue)
+        .where(and(eq(userSettingValue.userId, userId), eq(userSettingValue.settingKey, key))),
+    );
   }
 
   private convertToType<T>(value: string, type: string): T {

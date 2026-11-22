@@ -3,6 +3,7 @@
  * Admin-only endpoints for system management
  */
 
+import { executeDrizzleWrite, withDrizzleWrite } from "@mcp-moira/shared";
 import { Router, Request, Response } from "express";
 import {
   DatabaseRepository,
@@ -460,31 +461,39 @@ router.post(
     }
 
     // Block user
-    await db
-      .update(user)
-      .set({
-        blocked: true,
-        blockedAt: new Date().toISOString(),
-        blockedReason: reason || null,
-        blockedBy: currentUserId,
-      })
-      .where(eq(user.id, id));
+    await executeDrizzleWrite(
+      db,
+      db
+        .update(user)
+        .set({
+          blocked: true,
+          blockedAt: new Date().toISOString(),
+          blockedReason: reason || null,
+          blockedBy: currentUserId,
+        })
+        .where(eq(user.id, id)),
+    );
 
     // Revoke all sessions, OAuth tokens, and OAuth consents
-    const deletedSessions = await db.delete(session).where(eq(session.userId, id)).returning();
-    const deletedOAuthTokens = db.transaction((tx) => {
-      const deleted = tx
-        .delete(oauthAccessToken)
-        .where(eq(oauthAccessToken.userId, id))
-        .returning({ id: oauthAccessToken.id })
-        .all();
-      tx.delete(oauthRefreshToken).where(eq(oauthRefreshToken.userId, id)).run();
-      return deleted;
-    });
-    const deletedOAuthConsents = await db
-      .delete(oauthConsent)
-      .where(eq(oauthConsent.userId, id))
-      .returning();
+    const deletedSessions = await executeDrizzleWrite(
+      db,
+      db.delete(session).where(eq(session.userId, id)).returning(),
+    );
+    const deletedOAuthTokens = await withDrizzleWrite(db, () =>
+      db.transaction((tx) => {
+        const deleted = tx
+          .delete(oauthAccessToken)
+          .where(eq(oauthAccessToken.userId, id))
+          .returning({ id: oauthAccessToken.id })
+          .all();
+        tx.delete(oauthRefreshToken).where(eq(oauthRefreshToken.userId, id)).run();
+        return deleted;
+      }),
+    );
+    const deletedOAuthConsents = await executeDrizzleWrite(
+      db,
+      db.delete(oauthConsent).where(eq(oauthConsent.userId, id)).returning(),
+    );
 
     // Audit logging
     await logAuditEvent(repository, req, {
@@ -548,15 +557,18 @@ router.post(
     }
 
     // Unblock user
-    await db
-      .update(user)
-      .set({
-        blocked: false,
-        blockedAt: null,
-        blockedReason: null,
-        blockedBy: null,
-      })
-      .where(eq(user.id, id));
+    await executeDrizzleWrite(
+      db,
+      db
+        .update(user)
+        .set({
+          blocked: false,
+          blockedAt: null,
+          blockedReason: null,
+          blockedBy: null,
+        })
+        .where(eq(user.id, id)),
+    );
 
     // Audit logging
     const currentUserId = (req as AuthenticatedRequest).userId;
@@ -594,13 +606,16 @@ router.post(
     }
 
     // Set emailVerified to true
-    await db
-      .update(user)
-      .set({
-        emailVerified: true,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(user.id, id));
+    await executeDrizzleWrite(
+      db,
+      db
+        .update(user)
+        .set({
+          emailVerified: true,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(user.id, id)),
+    );
 
     // Audit logging
     const currentUserId = (req as AuthenticatedRequest).userId;
@@ -966,7 +981,7 @@ router.put(
       }
     }
 
-    await db.update(user).set(updates).where(eq(user.id, id));
+    await executeDrizzleWrite(db, db.update(user).set(updates).where(eq(user.id, id)));
 
     // Audit logging
     await logAuditEvent(repository, req, {
@@ -1022,14 +1037,23 @@ router.delete(
 
     // Fence the account before retiring capabilities. Failed retirement must never restore access
     // or cascade away the original encrypted custody needed to finish provider revocation.
-    await db
-      .update(user)
-      .set({ blocked: true, blockedAt: new Date().toISOString(), blockedBy: currentUserId })
-      .where(eq(user.id, id));
-    await db.delete(session).where(eq(session.userId, id));
-    await db.delete(oauthRefreshToken).where(eq(oauthRefreshToken.userId, id));
-    await db.delete(oauthAccessToken).where(eq(oauthAccessToken.userId, id));
-    await db.delete(oauthConsent).where(eq(oauthConsent.userId, id));
+    await executeDrizzleWrite(
+      db,
+      db
+        .update(user)
+        .set({ blocked: true, blockedAt: new Date().toISOString(), blockedBy: currentUserId })
+        .where(eq(user.id, id)),
+    );
+    await executeDrizzleWrite(db, db.delete(session).where(eq(session.userId, id)));
+    await executeDrizzleWrite(
+      db,
+      db.delete(oauthRefreshToken).where(eq(oauthRefreshToken.userId, id)),
+    );
+    await executeDrizzleWrite(
+      db,
+      db.delete(oauthAccessToken).where(eq(oauthAccessToken.userId, id)),
+    );
+    await executeDrizzleWrite(db, db.delete(oauthConsent).where(eq(oauthConsent.userId, id)));
     const retirementPending = (resourcePending = false) => {
       res.status(409).json({
         success: false,
@@ -1068,7 +1092,7 @@ router.delete(
     }
     try {
       // The shared deletion guard also refuses unresolved issuance and parent custody.
-      deleteUserAccount(db, id);
+      await withDrizzleWrite(db, () => deleteUserAccount(db, id));
     } catch (error) {
       if (
         !(error instanceof AccountCredentialRetirementRequiredError) &&
@@ -2334,13 +2358,13 @@ router.delete(
     // Delete all sessions except the current admin's session
     let deletedSessions;
     if (currentSessionToken) {
-      deletedSessions = await db
-        .delete(session)
-        .where(ne(session.token, currentSessionToken))
-        .returning();
+      deletedSessions = await executeDrizzleWrite(
+        db,
+        db.delete(session).where(ne(session.token, currentSessionToken)).returning(),
+      );
     } else {
       // If no token found, delete all sessions
-      deletedSessions = await db.delete(session).returning();
+      deletedSessions = await executeDrizzleWrite(db, db.delete(session).returning());
     }
 
     // Audit logging

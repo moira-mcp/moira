@@ -8,6 +8,7 @@
  * - Global reference: handle/slug (resolved at service layer)
  */
 
+import { executeDrizzleWrite, withDrizzleWrite } from "../drizzle-write.js";
 import { eq, ne, and, or, isNull, inArray, like, desc, asc, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
@@ -1175,59 +1176,61 @@ export class WorkflowRepository {
       // of the workflow whose gate the new definition changes are re-decided in the same transaction.
       // Content writes cannot undo a deletion acknowledged after the authority read above.
       let historyRevision = 0;
-      const updated = this.db.transaction(
-        (tx) => {
-          const previous = storedGraphNodes(tx, existingId);
-          const previousDefinition = tx
-            .select({ graph: workflow.graph })
-            .from(workflow)
-            .where(eq(workflow.id, existingId))
-            .get();
-          const rows = tx
-            .update(workflow)
-            .set({
-              name: graph.metadata.name,
-              description: graph.metadata.description || null,
-              version: graph.metadata.version,
-              graph: graphJson,
-              visibility: options.preserveVisibility ? sql`${workflow.visibility}` : visibility,
-              updatedAt: now,
-              revision: sql`${workflow.revision} + 1`,
-            })
-            .where(
-              and(
-                eq(workflow.id, existingId),
-                or(eq(workflow.deleted, false), isNull(workflow.deleted)),
-                options.expectedRevision === undefined
-                  ? undefined
-                  : eq(workflow.revision, options.expectedRevision),
-              ),
-            )
-            .returning({ id: workflow.id, revision: workflow.revision })
-            .all();
-          if (rows.length === 0) {
-            const current = tx
-              .select({ revision: workflow.revision, deleted: workflow.deleted })
+      const updated = await withDrizzleWrite(this.db, () =>
+        this.db.transaction(
+          (tx) => {
+            const previous = storedGraphNodes(tx, existingId);
+            const previousDefinition = tx
+              .select({ graph: workflow.graph })
               .from(workflow)
               .where(eq(workflow.id, existingId))
               .get();
-            if (!current || current.deleted) throw new WorkflowNotFoundError(existingId, "id");
-            throw new WorkflowRevisionConflictError(
-              existingId,
-              options.expectedRevision ?? 0,
-              current.revision,
-            );
-          }
-          historyRevision = recordWorkflowRevision(this.db, {
-            id: existingId,
-            graph: graphJson,
-            previousGraph: previousDefinition?.graph,
-            authorId: userId,
-          });
-          recomputeGateWaiting(tx, existingId, previous, graph);
-          return rows;
-        },
-        { behavior: "immediate" },
+            const rows = tx
+              .update(workflow)
+              .set({
+                name: graph.metadata.name,
+                description: graph.metadata.description || null,
+                version: graph.metadata.version,
+                graph: graphJson,
+                visibility: options.preserveVisibility ? sql`${workflow.visibility}` : visibility,
+                updatedAt: now,
+                revision: sql`${workflow.revision} + 1`,
+              })
+              .where(
+                and(
+                  eq(workflow.id, existingId),
+                  or(eq(workflow.deleted, false), isNull(workflow.deleted)),
+                  options.expectedRevision === undefined
+                    ? undefined
+                    : eq(workflow.revision, options.expectedRevision),
+                ),
+              )
+              .returning({ id: workflow.id, revision: workflow.revision })
+              .all();
+            if (rows.length === 0) {
+              const current = tx
+                .select({ revision: workflow.revision, deleted: workflow.deleted })
+                .from(workflow)
+                .where(eq(workflow.id, existingId))
+                .get();
+              if (!current || current.deleted) throw new WorkflowNotFoundError(existingId, "id");
+              throw new WorkflowRevisionConflictError(
+                existingId,
+                options.expectedRevision ?? 0,
+                current.revision,
+              );
+            }
+            historyRevision = recordWorkflowRevision(this.db, {
+              id: existingId,
+              graph: graphJson,
+              previousGraph: previousDefinition?.graph,
+              authorId: userId,
+            });
+            recomputeGateWaiting(tx, existingId, previous, graph);
+            return rows;
+          },
+          { behavior: "immediate" },
+        ),
       );
 
       return {
@@ -1263,30 +1266,32 @@ export class WorkflowRepository {
       // Update graph.id to use the new UUID
       const graphWithId = { ...graph, id: workflowId };
 
-      const historyRevision = this.db.transaction(
-        () => {
-          this.db
-            .insert(workflow)
-            .values({
+      const historyRevision = await withDrizzleWrite(this.db, () =>
+        this.db.transaction(
+          () => {
+            this.db
+              .insert(workflow)
+              .values({
+                id: workflowId,
+                userId,
+                slug: finalSlug,
+                name: graph.metadata.name,
+                description: graph.metadata.description || null,
+                version: graph.metadata.version,
+                graph: JSON.stringify(graphWithId),
+                visibility,
+                createdAt: now,
+                updatedAt: now,
+              })
+              .run();
+            return recordWorkflowRevision(this.db, {
               id: workflowId,
-              userId,
-              slug: finalSlug,
-              name: graph.metadata.name,
-              description: graph.metadata.description || null,
-              version: graph.metadata.version,
               graph: JSON.stringify(graphWithId),
-              visibility,
-              createdAt: now,
-              updatedAt: now,
-            })
-            .run();
-          return recordWorkflowRevision(this.db, {
-            id: workflowId,
-            graph: JSON.stringify(graphWithId),
-            authorId: userId,
-          });
-        },
-        { behavior: "immediate" },
+              authorId: userId,
+            });
+          },
+          { behavior: "immediate" },
+        ),
       );
 
       return { id: workflowId, slug: finalSlug, revision: 0, historyRevision };
@@ -1314,19 +1319,22 @@ export class WorkflowRepository {
 
     const now = new Date();
 
-    const result = await this.db
-      .update(workflow)
-      .set({
-        slug: normalizedSlug,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(workflow.id, workflowId),
-          eq(workflow.userId, userId),
-          or(eq(workflow.deleted, false), isNull(workflow.deleted)),
+    const result = await executeDrizzleWrite(
+      this.db,
+      this.db
+        .update(workflow)
+        .set({
+          slug: normalizedSlug,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(workflow.id, workflowId),
+            eq(workflow.userId, userId),
+            or(eq(workflow.deleted, false), isNull(workflow.deleted)),
+          ),
         ),
-      );
+    );
 
     return result.changes > 0;
   }
@@ -1362,24 +1370,26 @@ export class WorkflowRepository {
   async delete(workflowId: string, userId: string): Promise<void> {
     // Hard delete - only owner can delete. Its runs go with it (cascade): the change feed records
     // them as deleted in the same transaction, before the delete.
-    this.db.transaction(
-      (tx) => {
-        const owned = tx
-          .select({ id: workflow.id })
-          .from(workflow)
-          .where(and(eq(workflow.id, workflowId), eq(workflow.userId, userId)))
-          .get();
-        if (!owned) return;
-        new RevisionRepository(this.db).deleteHistorySync({
-          entityType: REVISION_ENTITY_TYPES.workflow,
-          entityId: workflowId,
-        });
-        recordExecutionsDeleted(tx, { workflowId });
-        tx.delete(workflow)
-          .where(and(eq(workflow.id, workflowId), eq(workflow.userId, userId)))
-          .run();
-      },
-      { behavior: "immediate" },
+    await withDrizzleWrite(this.db, () =>
+      this.db.transaction(
+        (tx) => {
+          const owned = tx
+            .select({ id: workflow.id })
+            .from(workflow)
+            .where(and(eq(workflow.id, workflowId), eq(workflow.userId, userId)))
+            .get();
+          if (!owned) return;
+          new RevisionRepository(this.db).deleteHistorySync({
+            entityType: REVISION_ENTITY_TYPES.workflow,
+            entityId: workflowId,
+          });
+          recordExecutionsDeleted(tx, { workflowId });
+          tx.delete(workflow)
+            .where(and(eq(workflow.id, workflowId), eq(workflow.userId, userId)))
+            .run();
+        },
+        { behavior: "immediate" },
+      ),
     );
   }
 
@@ -1387,21 +1397,24 @@ export class WorkflowRepository {
     // Soft delete - mark as deleted
     const now = new Date();
 
-    const result = await this.db
-      .update(workflow)
-      .set({
-        deleted: true,
-        deletedAt: now,
-        deletedBy: userId,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(workflow.id, workflowId),
-          eq(workflow.userId, userId),
-          or(eq(workflow.deleted, false), isNull(workflow.deleted)),
+    const result = await executeDrizzleWrite(
+      this.db,
+      this.db
+        .update(workflow)
+        .set({
+          deleted: true,
+          deletedAt: now,
+          deletedBy: userId,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(workflow.id, workflowId),
+            eq(workflow.userId, userId),
+            or(eq(workflow.deleted, false), isNull(workflow.deleted)),
+          ),
         ),
-      );
+    );
 
     return result.changes > 0;
   }
@@ -1410,17 +1423,20 @@ export class WorkflowRepository {
     // Restore soft-deleted workflow
     const now = new Date();
 
-    const result = await this.db
-      .update(workflow)
-      .set({
-        deleted: false,
-        deletedAt: null,
-        deletedBy: null,
-        updatedAt: now,
-      })
-      .where(
-        and(eq(workflow.id, workflowId), eq(workflow.userId, userId), eq(workflow.deleted, true)),
-      );
+    const result = await executeDrizzleWrite(
+      this.db,
+      this.db
+        .update(workflow)
+        .set({
+          deleted: false,
+          deletedAt: null,
+          deletedBy: null,
+          updatedAt: now,
+        })
+        .where(
+          and(eq(workflow.id, workflowId), eq(workflow.userId, userId), eq(workflow.deleted, true)),
+        ),
+    );
 
     return result.changes > 0;
   }
@@ -1686,19 +1702,22 @@ export class WorkflowRepository {
   ): Promise<boolean> {
     const now = new Date();
 
-    const result = await this.db
-      .update(workflow)
-      .set({
-        visibility,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(workflow.id, workflowId),
-          eq(workflow.userId, userId),
-          or(eq(workflow.deleted, false), isNull(workflow.deleted)),
+    const result = await executeDrizzleWrite(
+      this.db,
+      this.db
+        .update(workflow)
+        .set({
+          visibility,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(workflow.id, workflowId),
+            eq(workflow.userId, userId),
+            or(eq(workflow.deleted, false), isNull(workflow.deleted)),
+          ),
         ),
-      );
+    );
 
     return result.changes > 0;
   }
@@ -1720,14 +1739,17 @@ export class WorkflowRepository {
   ): Promise<boolean> {
     const now = new Date();
 
-    const result = await this.db
-      .update(workflow)
-      .set({
-        isValid,
-        validationErrors: JSON.stringify(errors),
-        validatedAt: now,
-      })
-      .where(eq(workflow.id, workflowId));
+    const result = await executeDrizzleWrite(
+      this.db,
+      this.db
+        .update(workflow)
+        .set({
+          isValid,
+          validationErrors: JSON.stringify(errors),
+          validatedAt: now,
+        })
+        .where(eq(workflow.id, workflowId)),
+    );
 
     return result.changes > 0;
   }

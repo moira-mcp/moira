@@ -19,6 +19,7 @@
  * unstartable for everyone.
  */
 
+import { executeDrizzleWrite } from "../database/drizzle-write.js";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import path from "path";
 import { and, eq } from "drizzle-orm";
@@ -241,19 +242,22 @@ export async function installPlaybookCatalog(
     }
     if (decision.advanceBaseline) {
       const now = new Date();
-      await db
-        .insert(managedPlaybookBaseline)
-        .values({
-          ownerId: entry.owner,
-          slug: entry.slug,
-          state: JSON.stringify(incoming),
-          sourceVersion: entry.version,
-          updatedAt: now,
-        })
-        .onConflictDoUpdate({
-          target: [managedPlaybookBaseline.ownerId, managedPlaybookBaseline.slug],
-          set: { state: JSON.stringify(incoming), sourceVersion: entry.version, updatedAt: now },
-        });
+      await executeDrizzleWrite(
+        db,
+        db
+          .insert(managedPlaybookBaseline)
+          .values({
+            ownerId: entry.owner,
+            slug: entry.slug,
+            state: JSON.stringify(incoming),
+            sourceVersion: entry.version,
+            updatedAt: now,
+          })
+          .onConflictDoUpdate({
+            target: [managedPlaybookBaseline.ownerId, managedPlaybookBaseline.slug],
+            set: { state: JSON.stringify(incoming), sourceVersion: entry.version, updatedAt: now },
+          }),
+      );
     }
     if (decision.unresolved) {
       result.conflicts.push({ owner: entry.owner, slug: entry.slug });

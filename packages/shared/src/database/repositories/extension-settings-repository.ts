@@ -11,6 +11,7 @@
  * reinstalling the bundle.
  */
 
+import { executeDrizzleWrite, withDrizzleWrite } from "../drizzle-write.js";
 import { eq, and, like } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { randomUUID } from "node:crypto";
@@ -61,19 +62,22 @@ export class ExtensionSettingsRepository {
    */
   async setValue(userId: string, key: string, value: string, encrypted: boolean): Promise<void> {
     const stored = encrypted ? encryptValue(value) : value;
-    await this.db
-      .insert(extensionSettingValue)
-      .values({
-        userId,
-        settingKey: key,
-        value: stored,
-        encrypted,
-        updatedAt: new Date(),
-      })
-      .onConflictDoUpdate({
-        target: [extensionSettingValue.userId, extensionSettingValue.settingKey],
-        set: { value: stored, encrypted, updatedAt: new Date() },
-      });
+    await executeDrizzleWrite(
+      this.db,
+      this.db
+        .insert(extensionSettingValue)
+        .values({
+          userId,
+          settingKey: key,
+          value: stored,
+          encrypted,
+          updatedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: [extensionSettingValue.userId, extensionSettingValue.settingKey],
+          set: { value: stored, encrypted, updatedAt: new Date() },
+        }),
+    );
   }
 
   /** Commit a value and its audit record together; an audit failure rolls the value back. */
@@ -86,36 +90,41 @@ export class ExtensionSettingsRepository {
   ): Promise<void> {
     const stored = encrypted ? encryptValue(value) : value;
     const now = new Date();
-    this.db.transaction((tx) => {
-      tx.insert(extensionSettingValue)
-        .values({ userId, settingKey: key, value: stored, encrypted, updatedAt: now })
-        .onConflictDoUpdate({
-          target: [extensionSettingValue.userId, extensionSettingValue.settingKey],
-          set: { value: stored, encrypted, updatedAt: now },
-        })
-        .run();
-      tx.insert(auditLog)
-        .values({
-          id: randomUUID(),
-          userId,
-          action: audit.action,
-          resource: audit.resource,
-          resourceId: audit.resourceId,
-          source: audit.source ?? null,
-          metadata: audit.metadata ?? null,
-          changes: audit.changes ?? null,
-          createdAt: now,
-        })
-        .run();
-    });
+    await withDrizzleWrite(this.db, () =>
+      this.db.transaction((tx) => {
+        tx.insert(extensionSettingValue)
+          .values({ userId, settingKey: key, value: stored, encrypted, updatedAt: now })
+          .onConflictDoUpdate({
+            target: [extensionSettingValue.userId, extensionSettingValue.settingKey],
+            set: { value: stored, encrypted, updatedAt: now },
+          })
+          .run();
+        tx.insert(auditLog)
+          .values({
+            id: randomUUID(),
+            userId,
+            action: audit.action,
+            resource: audit.resource,
+            resourceId: audit.resourceId,
+            source: audit.source ?? null,
+            metadata: audit.metadata ?? null,
+            changes: audit.changes ?? null,
+            createdAt: now,
+          })
+          .run();
+      }),
+    );
   }
 
   async deleteValue(userId: string, key: string): Promise<void> {
-    await this.db
-      .delete(extensionSettingValue)
-      .where(
-        and(eq(extensionSettingValue.userId, userId), eq(extensionSettingValue.settingKey, key)),
-      );
+    await executeDrizzleWrite(
+      this.db,
+      this.db
+        .delete(extensionSettingValue)
+        .where(
+          and(eq(extensionSettingValue.userId, userId), eq(extensionSettingValue.settingKey, key)),
+        ),
+    );
   }
 
   /** Commit a reset and its audit record together; an audit failure restores the value. */
@@ -125,26 +134,31 @@ export class ExtensionSettingsRepository {
     audit: ExtensionSettingAuditEntry,
   ): Promise<void> {
     const now = new Date();
-    this.db.transaction((tx) => {
-      tx.delete(extensionSettingValue)
-        .where(
-          and(eq(extensionSettingValue.userId, userId), eq(extensionSettingValue.settingKey, key)),
-        )
-        .run();
-      tx.insert(auditLog)
-        .values({
-          id: randomUUID(),
-          userId,
-          action: audit.action,
-          resource: audit.resource,
-          resourceId: audit.resourceId,
-          source: audit.source ?? null,
-          metadata: audit.metadata ?? null,
-          changes: audit.changes ?? null,
-          createdAt: now,
-        })
-        .run();
-    });
+    await withDrizzleWrite(this.db, () =>
+      this.db.transaction((tx) => {
+        tx.delete(extensionSettingValue)
+          .where(
+            and(
+              eq(extensionSettingValue.userId, userId),
+              eq(extensionSettingValue.settingKey, key),
+            ),
+          )
+          .run();
+        tx.insert(auditLog)
+          .values({
+            id: randomUUID(),
+            userId,
+            action: audit.action,
+            resource: audit.resource,
+            resourceId: audit.resourceId,
+            source: audit.source ?? null,
+            metadata: audit.metadata ?? null,
+            changes: audit.changes ?? null,
+            createdAt: now,
+          })
+          .run();
+      }),
+    );
   }
 
   /** Every stored value of one user, as rows, so the caller can decide about decryption. */

@@ -9,6 +9,7 @@
  * - Permissions: view, start, copy (but not edit)
  */
 
+import { executeDrizzleWrite } from "../drizzle-write.js";
 import * as crypto from "crypto";
 import { eq, and, isNull, desc, sql, aliasedTable } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
@@ -157,14 +158,17 @@ export class WorkflowSharingRepository {
 
     this.logger.debug("createInvite() called", { workflowId, createdBy, ttlMs });
 
-    await this.db.insert(workflowInvite).values({
-      id,
-      workflowId,
-      createdBy,
-      token,
-      expiresAt: new Date(expiresAt),
-      createdAt: new Date(now),
-    });
+    await executeDrizzleWrite(
+      this.db,
+      this.db.insert(workflowInvite).values({
+        id,
+        workflowId,
+        createdBy,
+        token,
+        expiresAt: new Date(expiresAt),
+        createdAt: new Date(now),
+      }),
+    );
 
     // Get creator handle
     const [creatorRow] = await this.db
@@ -325,13 +329,16 @@ export class WorkflowSharingRepository {
   async markInviteUsed(inviteId: string, usedBy: string): Promise<boolean> {
     const now = Date.now();
 
-    const result = await this.db
-      .update(workflowInvite)
-      .set({
-        usedAt: new Date(now),
-        usedBy,
-      })
-      .where(and(eq(workflowInvite.id, inviteId), isNull(workflowInvite.usedAt)));
+    const result = await executeDrizzleWrite(
+      this.db,
+      this.db
+        .update(workflowInvite)
+        .set({
+          usedAt: new Date(now),
+          usedBy,
+        })
+        .where(and(eq(workflowInvite.id, inviteId), isNull(workflowInvite.usedAt))),
+    );
 
     return result.changes > 0;
   }
@@ -340,7 +347,10 @@ export class WorkflowSharingRepository {
    * Delete an invite by ID
    */
   async deleteInvite(inviteId: string): Promise<boolean> {
-    const result = await this.db.delete(workflowInvite).where(eq(workflowInvite.id, inviteId));
+    const result = await executeDrizzleWrite(
+      this.db,
+      this.db.delete(workflowInvite).where(eq(workflowInvite.id, inviteId)),
+    );
 
     return result.changes > 0;
   }
@@ -351,9 +361,10 @@ export class WorkflowSharingRepository {
   async deleteExpiredInvites(): Promise<number> {
     const now = new Date();
 
-    const result = await this.db
-      .delete(workflowInvite)
-      .where(sql`${workflowInvite.expiresAt} < ${now.getTime()}`);
+    const result = await executeDrizzleWrite(
+      this.db,
+      this.db.delete(workflowInvite).where(sql`${workflowInvite.expiresAt} < ${now.getTime()}`),
+    );
 
     return result.changes;
   }
@@ -374,16 +385,19 @@ export class WorkflowSharingRepository {
 
     this.logger.debug("grantAccess() called", { workflowId, userId, grantedBy, inviteId });
 
-    await this.db.insert(accessGrant).values({
-      id,
-      resourceType: RESOURCE_TYPES.workflow,
-      resourceId: workflowId,
-      userId,
-      level: "use",
-      grantedBy,
-      inviteId: inviteId || null,
-      grantedAt: new Date(now),
-    });
+    await executeDrizzleWrite(
+      this.db,
+      this.db.insert(accessGrant).values({
+        id,
+        resourceType: RESOURCE_TYPES.workflow,
+        resourceId: workflowId,
+        userId,
+        level: "use",
+        grantedBy,
+        inviteId: inviteId || null,
+        grantedAt: new Date(now),
+      }),
+    );
 
     this.logger.debug("grantAccess() granted", { id });
 
@@ -552,15 +566,18 @@ export class WorkflowSharingRepository {
    * Revoke access for a user
    */
   async revokeAccess(workflowId: string, userId: string): Promise<boolean> {
-    const result = await this.db
-      .delete(accessGrant)
-      .where(
-        and(
-          WORKFLOW_RESOURCE,
-          eq(accessGrant.resourceId, workflowId),
-          eq(accessGrant.userId, userId),
+    const result = await executeDrizzleWrite(
+      this.db,
+      this.db
+        .delete(accessGrant)
+        .where(
+          and(
+            WORKFLOW_RESOURCE,
+            eq(accessGrant.resourceId, workflowId),
+            eq(accessGrant.userId, userId),
+          ),
         ),
-      );
+    );
 
     return result.changes > 0;
   }
@@ -569,9 +586,12 @@ export class WorkflowSharingRepository {
    * Revoke all access for a workflow
    */
   async revokeAllAccess(workflowId: string): Promise<number> {
-    const result = await this.db
-      .delete(accessGrant)
-      .where(and(WORKFLOW_RESOURCE, eq(accessGrant.resourceId, workflowId)));
+    const result = await executeDrizzleWrite(
+      this.db,
+      this.db
+        .delete(accessGrant)
+        .where(and(WORKFLOW_RESOURCE, eq(accessGrant.resourceId, workflowId))),
+    );
 
     return result.changes;
   }

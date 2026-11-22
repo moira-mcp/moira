@@ -3,6 +3,7 @@
  * Create, list, and revoke persistent API tokens
  */
 
+import { executeDrizzleWrite } from "@mcp-moira/shared";
 import { Router, Request, Response } from "express";
 import { eq, and, isNull, count } from "drizzle-orm";
 import {
@@ -80,16 +81,19 @@ router.post(
     const expiresAt = calculateExpiration(expirationOption);
     const now = new Date().toISOString();
 
-    await db.insert(apiToken).values({
-      id,
-      name: trimmedName,
-      tokenPrefix,
-      tokenHash,
-      userId,
-      scopes: null,
-      expiresAt,
-      createdAt: now,
-    });
+    await executeDrizzleWrite(
+      db,
+      db.insert(apiToken).values({
+        id,
+        name: trimmedName,
+        tokenPrefix,
+        tokenHash,
+        userId,
+        scopes: null,
+        expiresAt,
+        createdAt: now,
+      }),
+    );
 
     const repository = new DatabaseRepository();
     await logAuditEvent(repository, req, {
@@ -188,7 +192,10 @@ router.delete(
 
     // Idempotent: only update if not already revoked
     if (!token.revokedAt) {
-      await db.update(apiToken).set({ revokedAt: now }).where(eq(apiToken.id, id));
+      await executeDrizzleWrite(
+        db,
+        db.update(apiToken).set({ revokedAt: now }).where(eq(apiToken.id, id)),
+      );
 
       const repository = new DatabaseRepository();
       await logAuditEvent(repository, req, {

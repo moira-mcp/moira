@@ -10,6 +10,7 @@
  * - TTL-based expiration with soft delete
  */
 
+import { executeDrizzleWrite } from "../drizzle-write.js";
 import { eq, and, or, isNull, desc, sql, gt, lte, lt } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { artifact, artifactToken } from "../schema.js";
@@ -474,19 +475,22 @@ export class ArtifactRepository {
 
     this.logger.debug("create() called", { userId, name, size, mimeType, executionId });
 
-    await this.db.insert(artifact).values({
-      id,
-      userId,
-      uuid,
-      name,
-      content,
-      size,
-      mimeType,
-      executionId: executionId ?? null,
-      expiresAt,
-      createdAt: now,
-      updatedAt: now,
-    });
+    await executeDrizzleWrite(
+      this.db,
+      this.db.insert(artifact).values({
+        id,
+        userId,
+        uuid,
+        name,
+        content,
+        size,
+        mimeType,
+        executionId: executionId ?? null,
+        expiresAt,
+        createdAt: now,
+        updatedAt: now,
+      }),
+    );
 
     this.logger.debug("create() completed", { id, uuid });
 
@@ -530,16 +534,19 @@ export class ArtifactRepository {
       updateValues.expiresAt = new Date(now.getTime() + ttlMs);
     }
 
-    const result = await this.db
-      .update(artifact)
-      .set(updateValues)
-      .where(
-        and(
-          eq(artifact.uuid, uuid),
-          eq(artifact.userId, userId),
-          or(eq(artifact.deleted, false), isNull(artifact.deleted)),
+    const result = await executeDrizzleWrite(
+      this.db,
+      this.db
+        .update(artifact)
+        .set(updateValues)
+        .where(
+          and(
+            eq(artifact.uuid, uuid),
+            eq(artifact.userId, userId),
+            or(eq(artifact.deleted, false), isNull(artifact.deleted)),
+          ),
         ),
-      );
+    );
 
     const updated = result.changes > 0;
     this.logger.debug("update() result", { uuid, updated });
@@ -555,21 +562,24 @@ export class ArtifactRepository {
   async softDelete(uuid: string, userId: string): Promise<boolean> {
     const now = new Date();
 
-    const result = await this.db
-      .update(artifact)
-      .set({
-        deleted: true,
-        deletedAt: now,
-        deletedBy: userId,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(artifact.uuid, uuid),
-          eq(artifact.userId, userId),
-          or(eq(artifact.deleted, false), isNull(artifact.deleted)),
+    const result = await executeDrizzleWrite(
+      this.db,
+      this.db
+        .update(artifact)
+        .set({
+          deleted: true,
+          deletedAt: now,
+          deletedBy: userId,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(artifact.uuid, uuid),
+            eq(artifact.userId, userId),
+            or(eq(artifact.deleted, false), isNull(artifact.deleted)),
+          ),
         ),
-      );
+    );
 
     return result.changes > 0;
   }
@@ -578,9 +588,10 @@ export class ArtifactRepository {
    * Hard delete an artifact
    */
   async hardDelete(uuid: string, userId: string): Promise<boolean> {
-    const result = await this.db
-      .delete(artifact)
-      .where(and(eq(artifact.uuid, uuid), eq(artifact.userId, userId)));
+    const result = await executeDrizzleWrite(
+      this.db,
+      this.db.delete(artifact).where(and(eq(artifact.uuid, uuid), eq(artifact.userId, userId))),
+    );
 
     return result.changes > 0;
   }
@@ -591,17 +602,20 @@ export class ArtifactRepository {
   async adminSoftDelete(uuid: string, adminUserId: string): Promise<boolean> {
     const now = new Date();
 
-    const result = await this.db
-      .update(artifact)
-      .set({
-        deleted: true,
-        deletedAt: now,
-        deletedBy: adminUserId,
-        updatedAt: now,
-      })
-      .where(
-        and(eq(artifact.uuid, uuid), or(eq(artifact.deleted, false), isNull(artifact.deleted))),
-      );
+    const result = await executeDrizzleWrite(
+      this.db,
+      this.db
+        .update(artifact)
+        .set({
+          deleted: true,
+          deletedAt: now,
+          deletedBy: adminUserId,
+          updatedAt: now,
+        })
+        .where(
+          and(eq(artifact.uuid, uuid), or(eq(artifact.deleted, false), isNull(artifact.deleted))),
+        ),
+    );
 
     return result.changes > 0;
   }
@@ -617,16 +631,19 @@ export class ArtifactRepository {
   async recordReport(uuid: string): Promise<number | null> {
     const now = new Date();
 
-    const result = await this.db
-      .update(artifact)
-      .set({
-        reportCount: sql`${artifact.reportCount} + 1`,
-        lastReportedAt: now,
-        updatedAt: now,
-      })
-      .where(
-        and(eq(artifact.uuid, uuid), or(eq(artifact.deleted, false), isNull(artifact.deleted))),
-      );
+    const result = await executeDrizzleWrite(
+      this.db,
+      this.db
+        .update(artifact)
+        .set({
+          reportCount: sql`${artifact.reportCount} + 1`,
+          lastReportedAt: now,
+          updatedAt: now,
+        })
+        .where(
+          and(eq(artifact.uuid, uuid), or(eq(artifact.deleted, false), isNull(artifact.deleted))),
+        ),
+    );
 
     if (result.changes === 0) {
       return null;
@@ -648,16 +665,19 @@ export class ArtifactRepository {
   async takedown(uuid: string, adminUserId: string, reason: string): Promise<boolean> {
     const now = new Date();
 
-    const result = await this.db
-      .update(artifact)
-      .set({
-        takenDown: true,
-        takenDownAt: now,
-        takenDownBy: adminUserId,
-        takenDownReason: reason,
-        updatedAt: now,
-      })
-      .where(and(eq(artifact.uuid, uuid), eq(artifact.takenDown, false)));
+    const result = await executeDrizzleWrite(
+      this.db,
+      this.db
+        .update(artifact)
+        .set({
+          takenDown: true,
+          takenDownAt: now,
+          takenDownBy: adminUserId,
+          takenDownReason: reason,
+          updatedAt: now,
+        })
+        .where(and(eq(artifact.uuid, uuid), eq(artifact.takenDown, false))),
+    );
 
     return result.changes > 0;
   }
@@ -673,16 +693,19 @@ export class ArtifactRepository {
   ): Promise<number> {
     const now = new Date();
 
-    const result = await this.db
-      .update(artifact)
-      .set({
-        takenDown: true,
-        takenDownAt: now,
-        takenDownBy: adminUserId,
-        takenDownReason: reason,
-        updatedAt: now,
-      })
-      .where(and(eq(artifact.userId, targetUserId), eq(artifact.takenDown, false)));
+    const result = await executeDrizzleWrite(
+      this.db,
+      this.db
+        .update(artifact)
+        .set({
+          takenDown: true,
+          takenDownAt: now,
+          takenDownBy: adminUserId,
+          takenDownReason: reason,
+          updatedAt: now,
+        })
+        .where(and(eq(artifact.userId, targetUserId), eq(artifact.takenDown, false))),
+    );
 
     return result.changes;
   }
@@ -760,14 +783,17 @@ export class ArtifactRepository {
     const now = new Date();
     const expiresAt = new Date(now.getTime() + ttlMs);
 
-    await this.db.insert(artifactToken).values({
-      token,
-      userId,
-      type: "upload",
-      expiresAt,
-      used: false,
-      createdAt: now,
-    });
+    await executeDrizzleWrite(
+      this.db,
+      this.db.insert(artifactToken).values({
+        token,
+        userId,
+        type: "upload",
+        expiresAt,
+        used: false,
+        createdAt: now,
+      }),
+    );
 
     this.logger.debug("createToken() completed", { tokenPrefix: token.substring(0, 8), userId });
 
@@ -811,7 +837,10 @@ export class ArtifactRepository {
    * Mark token as used
    */
   async markTokenUsed(token: string): Promise<void> {
-    await this.db.update(artifactToken).set({ used: true }).where(eq(artifactToken.token, token));
+    await executeDrizzleWrite(
+      this.db,
+      this.db.update(artifactToken).set({ used: true }).where(eq(artifactToken.token, token)),
+    );
   }
 
   /**
@@ -820,7 +849,10 @@ export class ArtifactRepository {
   async cleanupExpiredTokens(): Promise<number> {
     const now = new Date();
 
-    const result = await this.db.delete(artifactToken).where(lt(artifactToken.expiresAt, now));
+    const result = await executeDrizzleWrite(
+      this.db,
+      this.db.delete(artifactToken).where(lt(artifactToken.expiresAt, now)),
+    );
 
     return result.changes;
   }
