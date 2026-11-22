@@ -560,12 +560,10 @@ test("invalid OAuth state and failed OAuth account creation cannot publish a reg
     hooks.account = previous;
   });
   const refused = await oauth();
-  expect(refused.status).toBe(302);
-  expect(new URL(refused.headers.get("location")!, getAuthUrl()).searchParams.has("error")).toBe(
-    true,
-  );
+  expect(refused.status).toBe(400);
+  expect(await refused.json()).toMatchObject({ message: "Fixture refused OAuth account" });
   expect(await getDatabase().select().from(user).where(eq(user.email, providerEmail))).toHaveLength(
-    1,
+    0,
   );
   await Promise.all(notificationTasks);
   expect(events).toEqual([]);
@@ -638,7 +636,7 @@ test.each(["user", "account", "session", "mail"] as const)(
     expect(events).toEqual([]);
     expect(telegramMessages).toEqual([]);
     const accounts = await getDatabase().select().from(user).where(eq(user.email, email));
-    expect(accounts).toHaveLength(stage === "user" ? 0 : 1);
+    expect(accounts).toHaveLength(stage === "mail" ? 1 : 0);
     if (stage === "mail")
       expect(
         await getDatabase().select().from(emailLog).where(eq(emailLog.userId, accounts[0].id)),
@@ -646,27 +644,21 @@ test.each(["user", "account", "session", "mail"] as const)(
   },
 );
 
-test("actual late MCP after-hook APIError with retained OAuth HTTP 302 and issued session does not notify", async () => {
+test("an unregistered OAuth callback is rejected before it can create a session or notify", async () => {
   const registered = await call("/mcp/register", {
     client_name: "Registration failure fixture",
-    redirect_uris: [`${getBaseUrl()}/accepted-fixture-callback`],
+    redirect_uris: ["https://client.example.test/accepted-fixture-callback"],
   });
   expect(registered.status).toBe(201);
   const clientId = (await registered.json()).client_id as string;
   createdClients.push(clientId);
   const prompt = await call(
-    `/mcp/authorize?client_id=${encodeURIComponent(clientId)}&response_type=code&redirect_uri=${encodeURIComponent(`${getBaseUrl()}/refused-fixture-callback`)}`,
+    `/mcp/authorize?client_id=${encodeURIComponent(clientId)}&response_type=code&redirect_uri=https%3A%2F%2Fclient.example.test%2Frefused-fixture-callback`,
   );
-  expect(prompt.status).toBe(302);
-  const response = await oauth(cookies(prompt));
-  expect(response.status).toBe(302);
-  expect(await response.clone().json()).toMatchObject({ message: "Invalid redirect URI" });
-  const observed = await auth.api.getSession({
-    headers: new Headers({ Cookie: cookies(response) }),
-  });
-  expect(observed?.user.email).toBe(providerEmail);
+  expect(prompt.headers.get("location") ?? "").not.toContain("refused-fixture-callback");
+  expect(cookies(prompt)).not.toContain("session_token");
   expect(await getDatabase().select().from(user).where(eq(user.email, providerEmail))).toHaveLength(
-    1,
+    0,
   );
   await Promise.all(notificationTasks);
   expect(events).toEqual([]);
