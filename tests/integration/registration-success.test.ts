@@ -606,6 +606,37 @@ test("invalid OAuth state and failed OAuth account creation cannot publish a reg
   expect(telegramMessages).toEqual([]);
 });
 
+test("only the registration transaction sees its user before a failed credential write rolls back", async () => {
+  const email = `uncommitted-${randomUUID()}@registration.test`;
+  const entered = deferred<boolean>();
+  const finish = deferred<void>();
+  const hooks = (await auth.$context).options.databaseHooks!;
+  const previous = hooks.account;
+  const findUser = () =>
+    getDatabase().select({ id: user.id }).from(user).where(eq(user.email, email));
+  hooks.account = {
+    create: {
+      before: async () => {
+        entered.resolve((await findUser()).length === 1);
+        await finish.promise;
+        throw new APIError("BAD_REQUEST", { message: "Rejected credential fixture" });
+      },
+    },
+  };
+  restoreHooks.push(() => {
+    hooks.account = previous;
+  });
+  const operation = signup(email);
+  try {
+    expect(await Promise.race([entered.promise, operation.then(() => false)])).toBe(true);
+    expect(await findUser()).toHaveLength(0);
+  } finally {
+    finish.resolve();
+  }
+  expect((await operation).status).toBe(400);
+  expect(await findUser()).toHaveLength(0);
+});
+
 test.each(["throw", "reject"] as const)(
   "notification callback %s leaves successful registration and session intact without retry",
   async (failure) => {
