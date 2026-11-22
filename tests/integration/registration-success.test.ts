@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, jest, test } from "
 import { createServer as httpServer } from "node:http";
 import { createServer as smtpServer, type AddressInfo } from "node:net";
 import { randomUUID } from "node:crypto";
+import Database from "better-sqlite3";
 import { eq, inArray } from "drizzle-orm";
 import { github } from "better-auth/social-providers";
 import { APIError } from "better-auth/api";
@@ -469,6 +470,41 @@ test("first real OAuth callback delivers once and repeat provider login does not
   await Promise.all(notificationTasks);
   expect(events).toHaveLength(1);
   expect(telegramMessages).toHaveLength(1);
+});
+
+test("registration succeeds alongside a writer on another service connection", async () => {
+  const db = new Database(process.env.DB_PATH!, { timeout: 0, fileMustExist: true });
+  const auditId = randomUUID();
+  const record = db.prepare("INSERT INTO auditLog (id, action, createdAt) VALUES (?, ?, ?)");
+  const writeAudit = () => record.run(auditId, "test:service_write", Date.now());
+  const context = await auth.$context;
+  const hash = context.password.hash;
+  let writePending = false;
+  const hashing = jest.spyOn(context.password, "hash").mockImplementation(async (password) => {
+    // Sign-up has read the email and is computing the hash when the other service writes.
+    // A writer that cannot acquire SQLite's lock yet can finish after sign-up commits.
+    try {
+      writeAudit();
+    } catch (error) {
+      if (!(error instanceof Error) || !("code" in error) || error.code !== "SQLITE_BUSY")
+        throw error;
+      writePending = true;
+    }
+    return hash(password);
+  });
+  try {
+    const response = await signup();
+    if (writePending) writeAudit();
+    expect(hashing).toHaveBeenCalledTimes(1);
+    expect(response.status).toBe(200);
+    expect((await response.json()).user.id).toEqual(expect.any(String));
+    expect(db.prepare("SELECT id FROM auditLog WHERE id = ?").get(auditId)).toEqual({
+      id: auditId,
+    });
+  } finally {
+    db.prepare("DELETE FROM auditLog WHERE id = ?").run(auditId);
+    db.close();
+  }
 });
 
 test("overlapping real registrations each deliver only their own persisted identity", async () => {
