@@ -442,6 +442,7 @@ function mcpResourceSession(): BetterAuthPlugin {
             userId: row.userId,
             email: row.email,
             clientId: row.clientId,
+            accessToken: bearer,
             accessTokenExpiresAt: row.accessTokenExpiresAt,
             scopes: (JSON.parse(row.scopes) as string[]).join(" "),
           });
