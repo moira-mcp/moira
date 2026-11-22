@@ -7,6 +7,7 @@ import {
   type RequestHandler,
 } from "express";
 import { z } from "zod";
+import { withSqliteWrite } from "@mcp-moira/shared/database/sqlite-write";
 import {
   LocalDeviceError,
   localControlRequestSchema,
@@ -296,8 +297,7 @@ export function createLocalDeviceRoutes(
   );
   router.post(
     "/workspaces/bootstrap",
-    endpoint((req, res) => {
-      const auth = deviceAuth(service, req);
+    endpoint(async (req, res) => {
       const input = z
         .object({
           resourceId: z.string().uuid(),
@@ -305,21 +305,24 @@ export function createLocalDeviceRoutes(
         })
         .strict()
         .parse(req.body);
-      const binding = getSqliteInstance()
-        .prepare(
-          `SELECT 1 FROM codespaceLocalResourceBinding
+      const sqlite = getSqliteInstance();
+      const credential = await withSqliteWrite(() => {
+        const auth = deviceAuth(service, req);
+        const binding = sqlite
+          .prepare(
+            `SELECT 1 FROM codespaceLocalResourceBinding
         WHERE resourceId=? AND userId=? AND deviceId=? AND deviceGeneration=? AND revokedAt IS NULL`,
-        )
-        .get(input.resourceId, auth.userId, auth.deviceId, auth.deviceGeneration);
-      if (!binding) throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Workspace binding refused.");
-      res.json({
-        success: true,
-        data: issueWorkspaceAgentCredential(
+          )
+          .get(input.resourceId, auth.userId, auth.deviceId, auth.deviceGeneration);
+        if (!binding)
+          throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Workspace binding refused.");
+        return issueWorkspaceAgentCredential(
           auth.userId,
           input.resourceId,
           input.environmentIdentity,
-        ),
-      });
+        );
+      }, sqlite);
+      res.json({ success: true, data: credential });
     }),
   );
   router.post(
