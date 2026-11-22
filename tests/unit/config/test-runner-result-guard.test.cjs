@@ -117,8 +117,8 @@ describe("root test runner rejects unsupported success", () => {
       { errors: [{ message: "teardown failed" }] },
       "teardown failed",
     ],
-    ["empty successful report", { passed: 0 }, "no executed passing tests"],
-    ["skipped-only report", { passed: 0, skipped: 3 }, "no executed passing tests"],
+    ["empty successful report", { passed: 0 }, "no executed assertions"],
+    ["skipped-only report", { passed: 0, skipped: 3 }, "no executed assertions"],
     ["missing executor log", { log: "missing" }, "log is unavailable"],
     [
       "exit code only in stdout",
@@ -136,7 +136,9 @@ describe("root test runner rejects unsupported success", () => {
       const { status, summary } = await runFixture(fixture);
       expect(status).toBe(2);
       expect(summary.success).toBe(false);
-      expect(summary.totals.failed).toBe(1);
+      // Testfold preserves assertion counts on native infrastructure failures. A damaged
+      // executor log in an otherwise passing run is reported separately by our afterSuite guard.
+      expect(summary.totals.failed).toBe(Object.hasOwn(fixture, "log") ? 1 : 0);
       expect(summary.suites[0].errorCategory).toBe("infra_error");
       expect(summary.suites[0].failures[0].error).toContain(message);
     },
