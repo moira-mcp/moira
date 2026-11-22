@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { mkdtemp, realpath, rm, readFile } from "node:fs/promises";
 import { controllerFixture } from "../fixtures/local-controller.js";
 import { createWorkspaceRequestId } from "@mcp-moira/shared";
+import { acquireSqliteWriter, type SqliteWriter } from "@mcp-moira/shared/database/sqlite-write";
 import {
   LocalDeviceRepository,
   LocalDeviceService,
@@ -868,6 +869,34 @@ describe("Private repository creation precedes local admission without repeating
     expect((await f.makeService().createRepository("owner", f.input)).status).toBe(
       "setup_required",
     );
+    expect(f.state.posts).toBe(0);
+  });
+  test("withdrawing controller delegation while SQLite admission waits prevents the provider POST", async () => {
+    const f = await fixture();
+    const observed = Promise.withResolvers<SqliteWriter>();
+    const submit = f.repository.submit.bind(f.repository);
+    jest.spyOn(f.repository, "submit").mockImplementationOnce((...args) => {
+      const check = f.repository.assertCurrent.bind(f.repository);
+      jest.spyOn(f.repository, "assertCurrent").mockImplementationOnce(async (...input) => {
+        await check(...input);
+        observed.resolve(await acquireSqliteWriter(sqlite));
+      });
+      return submit(...args);
+    });
+    const pending = f.makeService().createRepository("owner", f.input);
+    const competingWriter = await observed.promise;
+    try {
+      await f.devices.requestSettings("owner", f.deviceId, {
+        requestId: createWorkspaceRequestId(),
+        expectedGeneration: 1,
+        expectedRevision: 1,
+        settings: { ...f.settings, agentRepositoryManagement: null },
+      });
+    } finally {
+      competingWriter.commit();
+    }
+    expect((await pending).status).toBe("setup_required");
+    expect(f.repository.getOwned("owner", f.input.requestId)?.state).toBe("prepared");
     expect(f.state.posts).toBe(0);
   });
   test("settings beyond the physical resource ceiling are refused before GitHub POST", async () => {

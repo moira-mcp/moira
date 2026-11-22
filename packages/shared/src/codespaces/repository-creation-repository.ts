@@ -218,12 +218,15 @@ export class RepositoryCreationRepository {
     readAuthority?: () => RepositoryCreationAuthority,
   ): Promise<void> {
     await this.assertCurrent(record, authority);
-    await withSqliteWrite(() => {
+    const checkedTime = () => {
       if (readAuthority && canonicalJson(readAuthority()) !== canonicalJson(authority))
         throw new LocalDeviceError(
           "LOCAL_UNAUTHORIZED",
           "GitHub repository creation authority changed.",
         );
+      return typeof clock === "number" ? clock : clock();
+    };
+    await withSqliteWrite(() => {
       const device = this.devices.getDeviceIdentity(record.userId, record.deviceId);
       if (
         device.status !== "active" ||
@@ -231,7 +234,7 @@ export class RepositoryCreationRepository {
         device.connectionId !== record.localConnectionId
       )
         throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Repository creation authority changed.");
-      const now = typeof clock === "number" ? clock : clock();
+      const now = checkedTime();
       const changed = this.sqlite
         .prepare(
           "UPDATE codespaceRepositoryRequest SET state='submitted',errorCode=NULL,updatedAt=? WHERE requestId=? AND userId=? AND state='prepared' AND claimId=? AND claimExpiresAt>?",
@@ -243,6 +246,34 @@ export class RepositoryCreationRepository {
           "The repository create attempt was already submitted.",
         );
     }, this.sqlite);
+    // The controller owns the applied delegation. Fetch it after releasing the writer.
+    // Only this caller can prove that the provider has not yet received its request.
+    try {
+      await this.assertCurrent(record, authority);
+      const now = checkedTime();
+      const current = this.getOwned(record.userId, record.requestId);
+      if (
+        current?.state !== "submitted" ||
+        current.claimId !== record.claimId ||
+        current.claimExpiresAt === null ||
+        current.claimExpiresAt <= now
+      )
+        throw new LocalDeviceError("LOCAL_CONFLICT", "The repository creation claim changed.");
+    } catch (error) {
+      await withSqliteWrite(() => {
+        this.sqlite
+          .prepare(
+            "UPDATE codespaceRepositoryRequest SET state='prepared',updatedAt=? WHERE requestId=? AND userId=? AND claimId=? AND state='submitted'",
+          )
+          .run(
+            typeof clock === "number" ? clock : clock(),
+            record.requestId,
+            record.userId,
+            record.claimId,
+          );
+      }, this.sqlite);
+      throw error;
+    }
   }
   recordCreated(
     record: RepositoryCreationRecord,
