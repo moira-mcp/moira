@@ -12,7 +12,7 @@ export {
 } from "./admin-analytics-query.js";
 export { AdminAnalyticsRepository } from "./repositories/admin-analytics-repository.js";
 export { getDatabase, getSqliteInstance, closeDatabase, withReadSnapshot } from "./connection.js";
-export { withSqliteWrite } from "./sqlite-write.js";
+export { withSqliteWrite, type SqliteWriteResult } from "./sqlite-write.js";
 export { executeDrizzleWrite, withDrizzleWrite } from "./drizzle-write.js";
 export {
   executeListQuery,

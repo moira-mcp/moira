@@ -6,7 +6,11 @@ import {
   type DatabaseConnection,
 } from "kysely";
 import type Database from "better-sqlite3";
-import { acquireSqliteWriter, type SqliteWriter } from "../database/sqlite-write.js";
+import {
+  acquireSqliteWriter,
+  withSqliteWrite,
+  type SqliteWriter,
+} from "../database/sqlite-write.js";
 
 class AuthSqliteDriver extends SqliteDriver {
   private transaction?: SqliteWriter;
@@ -34,21 +38,16 @@ class AuthSqliteDriver extends SqliteDriver {
     this.wrapped = {
       streamQuery: underlying.streamQuery.bind(underlying),
       executeQuery: async <R>(query: CompiledQuery) => {
-        if (
-          this.transaction ||
-          query.query.kind === "SelectQueryNode" ||
-          this.sqlite.prepare(query.sql).readonly
-        )
+        if (this.transaction || query.query.kind === "SelectQueryNode")
           return underlying.executeQuery<R>(query);
-        const lease = await acquireSqliteWriter(this.sqlite);
-        try {
-          const result = await underlying.executeQuery<R>(query);
-          lease.commit();
-          return result;
-        } catch (error) {
-          lease.rollback();
-          throw error;
-        }
+        const statement = this.sqlite.prepare(query.sql);
+        if (statement.readonly) return underlying.executeQuery<R>(query);
+        // A single mutation, including RETURNING, executes synchronously inside its reservation.
+        return withSqliteWrite(() => {
+          if (statement.reader) return { rows: statement.all(query.parameters) as R[] };
+          const { changes, lastInsertRowid } = statement.run(query.parameters);
+          return { rows: [], numAffectedRows: BigInt(changes), insertId: BigInt(lastInsertRowid) };
+        }, this.sqlite);
       },
     };
     return this.wrapped;

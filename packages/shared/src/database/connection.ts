@@ -9,7 +9,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import path from "path";
 import "dotenv/config";
 import * as schema from "./schema.js";
-import { asSqliteWriter } from "./sqlite-write.js";
+import { asSqliteWriter, ownsSqliteWriter } from "./sqlite-write.js";
+import { exposePrivateMemory, physicalSqlite } from "./private-memory.js";
 import { createLogger } from "../logging/logger.js";
 import { getDbPath, isLogSqlEnabled, getNodeEnv, isTestEnvironment } from "../config/env.js";
 
@@ -75,6 +76,15 @@ export function getDatabase() {
     sqliteInstance.pragma("foreign_keys = ON");
     sqliteInstance.pragma("busy_timeout = 5000"); // Wait up to 5s for locks
 
+    if (isInMemory) {
+      const live = sqliteInstance;
+      sqliteInstance = exposePrivateMemory(
+        live,
+        () => ownsSqliteWriter(live),
+        registerExecutionManagementFunctions,
+      );
+    }
+
     dbInstance = drizzle(sqliteInstance, { schema, logger: new DrizzleLogger() });
   }
 
@@ -87,7 +97,7 @@ export function getDatabase() {
  */
 export function getSqliteInstance(): Database.Database {
   const scope = transactionOwner.getStore();
-  if (scope?.active) return scope.connection.sqlite;
+  if (scope?.active && !scope.connection.sqlite.memory) return scope.connection.sqlite;
   if (!sqliteInstance) {
     getDatabase(); // Initialize if not yet
   }
@@ -98,7 +108,7 @@ export function getSqliteInstance(): Database.Database {
 export function getAuthConnection(): Connection {
   if (!authConnection) {
     const source = getSqliteInstance();
-    if (source.name === ":memory:") return { sqlite: source, db: getDatabase() };
+    if (source.name === ":memory:") return { sqlite: physicalSqlite(source), db: getDatabase() };
     const sqlite = new Database(source.name, { fileMustExist: true });
     registerExecutionManagementFunctions(sqlite);
     sqlite.pragma("foreign_keys = ON");
