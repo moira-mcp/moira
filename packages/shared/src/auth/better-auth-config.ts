@@ -14,8 +14,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import geoip from "geoip-lite";
 import type { ServiceLogger } from "../logging/logger.js";
 import { createLogger } from "../logging/logger.js";
-import { getSqliteInstance, getDatabase } from "../database/connection.js";
-import { AuthSqliteDialect } from "./sqlite-dialect.js";
+import { getAuthConnection, withAuthTransaction, getDatabase } from "../database/connection.js";
+import { getAuthKysely } from "./sqlite-dialect.js";
 import { getEmailDeliveryStatus, sendEmail } from "../email/index.js";
 import { AuditRepository } from "../database/repositories/audit-repository.js";
 import { logAuditEventDirect } from "../logging/audit-logger.js";
@@ -1031,6 +1031,26 @@ const baseConfig = {
           });
         }
       }
+      // Password hashing can yield to unrelated requests. Complete it before SQLite
+      // acquires the writer; the native endpoint still validates and commits the account.
+      const password = ctx.body?.password;
+      if (ctx.path === "/sign-up/email" && typeof password === "string") {
+        const { minPasswordLength, maxPasswordLength } = ctx.context.password.config;
+        if (password.length >= minPasswordLength && password.length <= maxPasswordLength) {
+          const nativeHash = ctx.context.password.hash;
+          const digest = await nativeHash(password);
+          return {
+            context: {
+              context: {
+                password: {
+                  hash: (value: string) =>
+                    value === password ? Promise.resolve(digest) : nativeHash(value),
+                },
+              },
+            },
+          };
+        }
+      }
     }),
     after: createAuthMiddleware(async (ctx) => {
       if (ctx.path === "/revoke-session") {
@@ -1161,11 +1181,20 @@ const baseConfig = {
  * Create Better Auth instance with service-specific error logging
  */
 export function createAuth(logger: ServiceLogger, registration: AuthRegistrationOptions = {}) {
+  const connection = getAuthConnection();
+  const ownership: BetterAuthPlugin = {
+    id: "moira-auth-transaction-owner",
+    init(ctx) {
+      const transaction = ctx.adapter.transaction.bind(ctx.adapter);
+      ctx.adapter.transaction = (cb) =>
+        transaction((tx) => withAuthTransaction(connection, () => cb(tx)));
+    },
+  };
   const config: BetterAuthOptions = {
     ...baseConfig,
-    plugins: [...baseConfig.plugins, registrationResultObserver()],
+    plugins: [ownership, ...baseConfig.plugins, registrationResultObserver()],
     database: {
-      dialect: new AuthSqliteDialect({ database: getSqliteInstance() }),
+      db: getAuthKysely(connection.sqlite),
       type: "sqlite",
       transaction: true,
     },

@@ -1,10 +1,12 @@
 import {
   CompiledQuery,
+  Kysely,
   SqliteDialect,
   SqliteDriver,
   type DatabaseConnection,
   type SqliteDialectConfig,
 } from "kysely";
+import type Database from "better-sqlite3";
 
 class AuthSqliteDriver extends SqliteDriver {
   override async beginTransaction(connection: DatabaseConnection): Promise<void> {
@@ -14,7 +16,7 @@ class AuthSqliteDriver extends SqliteDriver {
   }
 }
 
-export class AuthSqliteDialect extends SqliteDialect {
+class AuthSqliteDialect extends SqliteDialect {
   constructor(private readonly config: SqliteDialectConfig) {
     super(config);
   }
@@ -22,4 +24,16 @@ export class AuthSqliteDialect extends SqliteDialect {
   override createDriver(): AuthSqliteDriver {
     return new AuthSqliteDriver(this.config);
   }
+}
+
+// Kysely serializes access to a SQLite connection. Auth instances sharing a physical
+// handle (including the HTTP handler and direct API callers) must share that queue.
+const databases = new WeakMap<Database.Database, Kysely<unknown>>();
+export function getAuthKysely(sqlite: Database.Database): Kysely<unknown> {
+  let db = databases.get(sqlite);
+  if (!db) {
+    db = new Kysely({ dialect: new AuthSqliteDialect({ database: sqlite }) });
+    databases.set(sqlite, db);
+  }
+  return db;
 }
