@@ -15,6 +15,7 @@ import geoip from "geoip-lite";
 import type { ServiceLogger } from "../logging/logger.js";
 import { createLogger } from "../logging/logger.js";
 import { getAuthConnection, withAuthTransaction, getDatabase } from "../database/connection.js";
+import { withSqliteWrite } from "../database/sqlite-write.js";
 import { getAuthKysely } from "./sqlite-dialect.js";
 import { getEmailDeliveryStatus, sendEmail } from "../email/index.js";
 import { AuditRepository } from "../database/repositories/audit-repository.js";
@@ -302,17 +303,20 @@ async function inheritMcpCatalogRevisionOnRefresh(ctx: McpTokenRefreshHookContex
     });
   }
 
-  const updated = await db
-    .update(oauthAccessToken)
-    .set({ toolsVersion: predecessor.toolsVersion })
-    .where(
-      and(
-        eq(oauthAccessToken.accessToken, oauthTokenDigest(successorAccessToken)),
-        eq(oauthAccessToken.userId, predecessor.userId),
-        eq(oauthAccessToken.clientId, predecessor.clientId),
-      ),
-    )
-    .returning({ id: oauthAccessToken.id });
+  const updated = await withSqliteWrite(() =>
+    db
+      .update(oauthAccessToken)
+      .set({ toolsVersion: predecessor.toolsVersion })
+      .where(
+        and(
+          eq(oauthAccessToken.accessToken, oauthTokenDigest(successorAccessToken)),
+          eq(oauthAccessToken.userId, predecessor.userId),
+          eq(oauthAccessToken.clientId, predecessor.clientId),
+        ),
+      )
+      .returning({ id: oauthAccessToken.id })
+      .all(),
+  );
   if (updated.length !== 1) {
     throw new APIError("INTERNAL_SERVER_ERROR", {
       message: "OAuth refresh successor was not uniquely available for catalog state inheritance",
@@ -1080,10 +1084,13 @@ const baseConfig = {
           if (isLoadTest) {
             // Load-test identities are an explicit test-only exception to both
             // verification and approval so existing load suites remain usable.
-            await db
-              .update(user)
-              .set({ emailVerified: true, approvedAt: new Date().toISOString() })
-              .where(eq(user.id, newSession.user.id));
+            await withSqliteWrite(() =>
+              db
+                .update(user)
+                .set({ emailVerified: true, approvedAt: new Date().toISOString() })
+                .where(eq(user.id, newSession.user.id))
+                .run(),
+            );
 
             logger.info("Load test user auto-verified", {
               userId: newSession.user.id,
