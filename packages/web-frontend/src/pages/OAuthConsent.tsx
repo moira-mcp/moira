@@ -29,6 +29,7 @@ import { Separator } from "../components/ui/separator";
 import { Check, X, User, Key, LogOut } from "lucide-react";
 import { AuthLayout } from "../components/AuthLayout";
 import { ROUTES } from "../constants/routes";
+import { originalAuthorizationParams } from "../auth/authorization-params";
 
 export const OAuthConsent: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -48,8 +49,7 @@ export const OAuthConsent: React.FC = () => {
       return;
     }
     if (!isPending && !isReadSessionSuspended()) {
-      const params = new URLSearchParams(searchParams);
-      if (switchingOwner) params.delete("consent_code");
+      const params = originalAuthorizationParams(searchParams);
       navigate(`${ROUTES.OAUTH_AUTHORIZE}?${params.toString()}`);
     }
   }, [isPending, session?.user, switchingOwner, navigate, searchParams]);
@@ -93,7 +93,7 @@ const OAuthConsentContent: React.FC<{ onSwitchAccount: () => Promise<void> }> = 
   const [error, setError] = useState<string | null>(null);
 
   // Get OAuth params from URL
-  const consentCode = searchParams.get("consent_code");
+  const signedQuery = searchParams.has("sig") ? searchParams.toString() : null;
   const clientId = searchParams.get("client_id");
   const scope = searchParams.get("scope");
 
@@ -116,8 +116,8 @@ const OAuthConsentContent: React.FC<{ onSwitchAccount: () => Promise<void> }> = 
 
   // Handle consent decision
   const handleConsent = async (accept: boolean) => {
-    if (!consentCode) {
-      setError(t("pages.oauthConsent.missingConsentCode"));
+    if (!signedQuery) {
+      setError(t("pages.oauthConsent.missingParams"));
       return;
     }
 
@@ -134,7 +134,7 @@ const OAuthConsentContent: React.FC<{ onSwitchAccount: () => Promise<void> }> = 
         credentials: "include",
         body: JSON.stringify({
           accept,
-          consent_code: consentCode,
+          oauth_query: signedQuery,
         }),
       });
 
@@ -145,21 +145,16 @@ const OAuthConsentContent: React.FC<{ onSwitchAccount: () => Promise<void> }> = 
         );
       }
 
-      // Response contains redirectURI
+      // Only the provider may choose the registered callback and preserve its state.
       const data = await response.json();
       // This auth mutation retires credentials itself. Confirm the cookie's current owner
       // before applying its redirect, rather than accepting the dispatch credential epoch.
       await authClient.$store.atoms.session.get().refetch();
       const settled = await waitForSessionSettlement(settlementLifetime.current.signal);
       if (!isCurrent() || !settled || settled.error || getReadIdentity() === null) return;
-      if (data.redirectURI) {
-        window.location.href = data.redirectURI;
-      } else if (data.redirectTo) {
-        window.location.href = data.redirectTo;
-      } else {
-        // Fallback - redirect to dashboard
-        navigate(ROUTES.DASHBOARD);
-      }
+      if (data.redirect !== true || typeof data.url !== "string" || !data.url)
+        throw new Error(t("pages.oauthConsent.consentFailed"));
+      window.location.assign(data.url);
     } catch (err) {
       if (!isCurrent()) return;
       setError(err instanceof Error ? err.message : t("pages.oauthConsent.consentFailed"));
@@ -176,7 +171,7 @@ const OAuthConsentContent: React.FC<{ onSwitchAccount: () => Promise<void> }> = 
     return translated === key ? scopeName : translated;
   };
 
-  if (!consentCode || !clientId) {
+  if (!signedQuery || !clientId) {
     return (
       <AuthLayout>
         <Card className="w-full">

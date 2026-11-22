@@ -1,112 +1,93 @@
-/**
- * E2E tests for OAuth Consent Flow
- * Tests consent screen display, approval, denial, and auto-approval
- */
-
-import { test, expect } from "./fixtures.js";
+import { createHash, randomBytes } from "node:crypto";
+import { test, expect, type Page } from "./fixtures.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import {
+  getTestBaseUrl,
+  getTestFetchUrl,
+  getTestRequestOrigin,
+  getAdminCredentials,
+} from "../utils/test-config.js";
 
-const BASE_URL = getTestBaseUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
+const callback = "http://127.0.0.1:18765/callback";
 
-test.describe("OAuth Consent Flow", () => {
-  test("should show consent screen when user is logged in on authorize page", async ({ page }) => {
+async function beginAuthorization(page: Page) {
+  const scope = "openid profile email offline_access";
+  const registration = await page.request.post(`${getTestFetchUrl()}/api/auth/mcp/register`, {
+    headers: { Origin: getTestRequestOrigin() },
+    data: {
+      client_name: "Consent browser test",
+      redirect_uris: [callback],
+      token_endpoint_auth_method: "none",
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      scope,
+    },
+  });
+  expect(registration.status()).toBe(201);
+  const { client_id: clientId } = await registration.json();
+  const state = randomBytes(24).toString("base64url");
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: callback,
+    response_type: "code",
+    scope,
+    state,
+    code_challenge: createHash("sha256")
+      .update(randomBytes(32).toString("base64url"))
+      .digest("base64url"),
+    code_challenge_method: "S256",
+  });
+  // Intercept delivery to the client; the application must choose its registered callback.
+  await page.route(callback + "**", (route) => route.fulfill({ body: "Callback received" }));
+  await page.goto(`${getTestBaseUrl()}/api/auth/mcp/authorize?${params}`);
+  return { clientId, state };
+}
+
+test.describe("OAuth consent", () => {
+  test("shows the registered client and requested permissions and returns the approved authorization code", async ({
+    page,
+  }) => {
     await loginAsAdmin(page);
-    await page.waitForLoadState("domcontentloaded");
-
-    // Now go to authorize page with OAuth params - should show consent screen
-    await page.goto(
-      `${BASE_URL}/oauth/authorize?client_id=test-client&scope=openid%20profile&redirect_uri=http://localhost:8080/callback&response_type=code`,
-    );
-    await page.waitForLoadState("domcontentloaded");
-
-    // Should show consent UI (not login form)
-    await expect(page.locator("text=Authorize Access")).toBeVisible();
-    await expect(page.locator("text=test-client")).toBeVisible();
-
-    // Should show user info
-    const userEmail = await page.locator(`text=${ADMIN_CREDENTIALS.email}`).isVisible();
-    expect(userEmail).toBeTruthy();
-
-    // Should show requested permissions
-    await expect(page.locator("text=Verify your identity")).toBeVisible();
-    await expect(page.locator("text=Access your profile information")).toBeVisible();
-
-    // Should have Allow and Deny buttons
-    await expect(page.locator('button:has-text("Allow")')).toBeVisible();
-    await expect(page.locator('button:has-text("Deny")')).toBeVisible();
-    await expect(page.locator('button:has-text("Switch")')).toBeVisible();
+    const { clientId, state } = await beginAuthorization(page);
+    await expect(page.getByText(clientId, { exact: true })).toBeVisible();
+    await expect(page.getByText(getAdminCredentials().email, { exact: true })).toBeVisible();
+    for (const label of [
+      "Verify your identity",
+      "Access your profile information",
+      "Access your email address",
+      "Access your data when you're not using the app",
+    ])
+      await expect(page.getByText(label, { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Allow" }).click();
+    await page.waitForURL(callback + "**");
+    const query = new URL(page.url()).searchParams;
+    expect(query.get("state")).toBe(state);
+    expect(query.get("code")).toBeTruthy();
   });
 
-  test("should show login form if not authenticated on authorize page", async ({ page }) => {
-    // Go to authorize page without being logged in
-    await page.goto(
-      `${BASE_URL}/oauth/authorize?client_id=test-client&scope=openid&redirect_uri=http://localhost:8080/callback&response_type=code`,
-    );
-    await page.waitForLoadState("domcontentloaded");
-
-    // Page should show OAuth authorize form with login option
-    // Check for email input field (universal indicator of login form)
-    await expect(page.locator('input[type="email"], input[name="email"]').first()).toBeVisible({
-      timeout: 10000,
-    });
-
-    // Check for password input
+  test("anonymous authorization shows the login form", async ({ page }) => {
+    await beginAuthorization(page);
+    await expect(page.locator('input[type="email"]').first()).toBeVisible();
     await expect(page.locator('input[type="password"]')).toBeVisible();
   });
 
-  test("consent screen should handle switch account", async ({ page }) => {
+  test("switching accounts restarts login", async ({ page }) => {
     await loginAsAdmin(page);
-    await page.waitForLoadState("domcontentloaded");
-
-    // Go to authorize page - should show consent
-    await page.goto(
-      `${BASE_URL}/oauth/authorize?client_id=test-client&scope=openid&redirect_uri=http://localhost:8080/callback&response_type=code`,
-    );
-    await page.waitForLoadState("domcontentloaded");
-
-    // Should show consent screen with user info
-    await expect(page.locator(`text=${ADMIN_CREDENTIALS.email}`)).toBeVisible();
-
-    // Click switch account
-    await page.click('button:has-text("Switch")');
-
-    // Should now show login form (user logged out)
-    await page.waitForSelector('input[type="email"]', { timeout: 5000 });
-    await expect(page.locator('input[type="email"]')).toBeVisible();
+    await beginAuthorization(page);
+    await page.getByRole("button", { name: "Switch" }).click();
+    await expect(page.locator('input[type="email"]').first()).toBeVisible();
   });
 
-  test("should display proper scope descriptions on authorize page", async ({ page }) => {
+  test("denial returns the error and original state to the registered callback", async ({
+    page,
+  }) => {
     await loginAsAdmin(page);
-    await page.waitForLoadState("domcontentloaded");
-
-    // Go to authorize page with multiple scopes
-    await page.goto(
-      `${BASE_URL}/oauth/authorize?client_id=test&scope=openid%20profile%20email%20offline_access&redirect_uri=http://localhost:8080/callback&response_type=code`,
-    );
-    await page.waitForLoadState("domcontentloaded");
-
-    // Check all scope descriptions are shown
-    await expect(page.locator("text=Verify your identity")).toBeVisible();
-    await expect(page.locator("text=Access your profile information")).toBeVisible();
-    await expect(page.locator("text=Access your email address")).toBeVisible();
-    await expect(page.locator("text=Access your data when you're not using the app")).toBeVisible();
-  });
-
-  test("deny button should redirect with error", async ({ page }) => {
-    test.slow();
-    await loginAsAdmin(page);
-    await page.waitForLoadState("domcontentloaded");
-
-    // Go to authorize page
-    await page.goto(
-      `${BASE_URL}/oauth/authorize?client_id=test&scope=openid&redirect_uri=http://localhost:8080/callback&response_type=code`,
-    );
-    await page.waitForLoadState("domcontentloaded");
-
-    // Click deny - should redirect to callback with error
-    // Note: we can't actually follow the redirect to localhost:8080, so just verify button exists
-    await expect(page.locator('button:has-text("Deny")')).toBeVisible();
+    const { state } = await beginAuthorization(page);
+    await page.getByRole("button", { name: "Deny" }).click();
+    await page.waitForURL(callback + "**");
+    const query = new URL(page.url()).searchParams;
+    expect(query.get("error")).toBe("access_denied");
+    expect(query.get("state")).toBe(state);
+    expect(query.has("code")).toBe(false);
   });
 });

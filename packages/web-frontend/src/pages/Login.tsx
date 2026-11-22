@@ -18,10 +18,7 @@ export const Login: React.FC = () => {
   const redirectToUrl = useMemo(() => {
     // Check if we have OAuth parameters (client_id, redirect_uri, etc.)
     if (searchParams.has("client_id") && searchParams.has("redirect_uri")) {
-      const params = new URLSearchParams();
-      searchParams.forEach((value, key) => {
-        params.set(key, value);
-      });
+      const params = new URLSearchParams(searchParams);
       // Redirect to OAuth authorize page where consent screen will be shown
       return `${ROUTES.OAUTH_AUTHORIZE}?${params.toString()}`;
     }

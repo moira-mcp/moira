@@ -33,11 +33,17 @@ function sessionFor(id: string) {
     },
   };
 }
+const signedQuery =
+  "client_id=client&scope=openid&resource=https%3A%2F%2Fapi.example%2Fa&resource=https%3A%2F%2Fapi.example%2Fb&exp=123&ba_param=client_id&ba_param=scope&ba_param=resource&sig=signed";
+const originalQuery = signedQuery.split("&exp=")[0];
+const grantResponse = () => Response.json({ redirect: true, url: "#accepted-oauth" });
+let consentBody: unknown;
 let current: ReturnType<typeof sessionFor> | null;
 let finishConsent: (response: Response) => void;
 let holdSessionReads: boolean;
 let sessionReads: Array<{ aborted: boolean; finish: (response: Response) => void }>;
 beforeEach(async () => {
+  window.history.replaceState({}, "", "/");
   globalThis.React = React;
   await i18n.changeLanguage("en");
   current = sessionFor("owner-a");
@@ -71,7 +77,10 @@ beforeEach(async () => {
       current = null;
       return Response.json({ success: true });
     }
-    if (url.includes("/oauth2/consent") && init?.method === "POST") return consent;
+    if (url.includes("/oauth2/consent") && init?.method === "POST") {
+      consentBody = JSON.parse(String(init.body));
+      return consent;
+    }
     throw new Error(`Unexpected request: ${url}`);
   });
   await authClient.$store.atoms.session.get().refetch();
@@ -79,7 +88,7 @@ beforeEach(async () => {
 afterEach(async () => {
   cleanup();
   holdSessionReads = false;
-  finishConsent(Response.json({}));
+  finishConsent(grantResponse());
   current = null;
   await authClient.$store.atoms.session.get().refetch();
   globalThis.fetch = originalFetch;
@@ -98,9 +107,7 @@ function Location() {
 function mountConsent() {
   return render(
     <I18nextProvider i18n={i18n}>
-      <MemoryRouter
-        initialEntries={["/oauth/consent?client_id=client&consent_code=code&scope=openid"]}
-      >
+      <MemoryRouter initialEntries={[`/oauth/consent?${signedQuery}`]}>
         <ReadScopeBoundary>
           <Routes>
             <Route path="/oauth/consent" element={<OAuthConsent />} />
@@ -120,30 +127,27 @@ async function startConsent() {
 }
 test("a current-owner successful auth consent redirects after its own credential invalidation and authoritative recheck", async () => {
   await startConsent();
-  await act(async () => finishConsent(Response.json({})));
+  await act(async () => finishConsent(grantResponse()));
   expect(getReadIdentity()).not.toBeNull();
-  expect(screen.getByTestId("location")).toHaveTextContent(/^\/$/);
+  expect(consentBody).toEqual({ accept: true, oauth_query: signedQuery });
+  expect(window.location.hash).toBe("#accepted-oauth");
 });
 
-test("an initial anonymous consent redirect preserves the original OAuth query", async () => {
+test("an anonymous consent redirect restarts the original request without reusing its signature", async () => {
   current = null;
   await authClient.$store.atoms.session.get().refetch();
   mountConsent();
   await act(async () => {});
-  expect(screen.getByTestId("location").textContent).toBe(
-    "/oauth/authorize?client_id=client&consent_code=code&scope=openid",
-  );
+  expect(screen.getByTestId("location").textContent).toBe(`/oauth/authorize?${originalQuery}`);
 });
 
-test("an explicit account switch redirects with original OAuth parameters and removes the previous consent code", async () => {
+test("an explicit account switch redirects with original OAuth parameters and removes the previous signed consent request", async () => {
   mountConsent();
   await act(async () => {});
   await act(async () =>
     fireEvent.click(screen.getByRole("button", { name: i18n.t("pages.oauthConsent.switch") })),
   );
-  expect(screen.getByTestId("location").textContent).toBe(
-    "/oauth/authorize?client_id=client&scope=openid",
-  );
+  expect(screen.getByTestId("location").textContent).toBe(`/oauth/authorize?${originalQuery}`);
 });
 test.each([200, 400])(
   "a late previous-owner consent response (%s) cannot redirect or publish errors for the replacement",
@@ -172,7 +176,7 @@ test.each(["same owner", "replacement", "error", "unmounted"])(
     await act(async () => {});
     fireEvent.click(screen.getByRole("button", { name: i18n.t("pages.oauthConsent.allow") }));
     holdSessionReads = true;
-    await act(async () => finishConsent(Response.json({})));
+    await act(async () => finishConsent(grantResponse()));
     const canceled = sessionReads.at(-1)!;
     expect(authClient.$store.atoms.session.get().isRefetching).toBe(true);
     await act(async () => revalidateReadSession());
@@ -191,11 +195,7 @@ test.each(["same owner", "replacement", "error", "unmounted"])(
         );
     });
     if (outcome === "unmounted") expect(screen.queryByTestId("location")).toBeNull();
-    else
-      expect(screen.getByTestId("location").textContent).toBe(
-        outcome === "same owner"
-          ? "/"
-          : "/oauth/consent?client_id=client&consent_code=code&scope=openid",
-      );
+    else expect(screen.getByTestId("location").textContent).toBe(`/oauth/consent?${signedQuery}`);
+    expect(window.location.hash).toBe(outcome === "same owner" ? "#accepted-oauth" : "");
   },
 );

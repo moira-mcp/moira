@@ -3,6 +3,7 @@
  */
 
 import { createAuthClient } from "better-auth/react";
+import { oauthProviderClient } from "@better-auth/oauth-provider/client";
 import { getGlobalBroadcastChannel } from "better-auth/client";
 import {
   observeReadSession,
@@ -38,6 +39,7 @@ function changesIdentity(request: { method: string; url: string | URL }): boolea
 
 export const authClient = createAuthClient({
   baseURL: "", // Same domain - better-auth auto-detects
+  plugins: [oauthProviderClient()],
   fetchOptions: {
     async customFetchImpl(input, init) {
       const changing = changesIdentity({ method: init?.method ?? "GET", url: String(input) });
