@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { withSqliteWrite, type SqliteWriteResult } from "../sqlite-write.js";
 import { createHash } from "node:crypto";
 import { canonicalJson } from "../../utils/canonical-json.js";
 import {
@@ -72,6 +73,12 @@ function asAttempt(row: AttemptRow): ExecutionAttempt {
 
 export class ExecutionAttemptRepository {
   constructor(private readonly sqlite: Database.Database) {}
+
+  write<T>(
+    operation: (repository: ExecutionAttemptRepository) => SqliteWriteResult<T>,
+  ): Promise<T> {
+    return withSqliteWrite<T>(() => operation(this), this.sqlite);
+  }
 
   /** Run a write of one existing row and record its change in the feed (same transaction). */
   private tracked<T extends { changes: number }>(executionId: string, write: () => T): T {

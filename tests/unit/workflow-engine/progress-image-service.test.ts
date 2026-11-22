@@ -134,7 +134,7 @@ describe("progress image grants", () => {
     const redemption = await service.redeem("opaque");
     expect(redemption?.referenceId).toContain(`owner-file://controller/${communicationDeviceId}/`);
     expect(await service.redeem("opaque")).toBeNull();
-    expect(service.complete("opaque", redemption!.claimId)).toBe(true);
+    expect(await service.complete("opaque", redemption!.claimId)).toBe(true);
     expect(await service.redeem("opaque")).toBeNull();
   });
 
@@ -238,7 +238,7 @@ describe("progress image grants", () => {
     await service.mint("execution", "owner");
     const redeemed = await service.redeem("opaque");
     expect(titles).toEqual(["A"]);
-    expect(service.complete("opaque", redeemed!.claimId)).toBe(true);
+    expect(await service.complete("opaque", redeemed!.claimId)).toBe(true);
     expect(await service.redeem("opaque")).toBeNull();
   });
 

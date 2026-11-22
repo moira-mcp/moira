@@ -15,6 +15,7 @@ import {
   Component,
   setGlobalService,
   getDatabase,
+  withDrizzleWrite,
   ExecutionNotificationRepository,
   closeDatabase,
   user,
@@ -218,11 +219,13 @@ async function authenticatePrincipal(
       });
       return null;
     }
-    db.update(apiToken)
-      .set({ lastUsedAt: new Date().toISOString() })
-      .where(eq(apiToken.id, tokenRecord.id))
-      .then(() => {})
-      .catch(() => {});
+    void withDrizzleWrite(db, () =>
+      db
+        .update(apiToken)
+        .set({ lastUsedAt: new Date().toISOString() })
+        .where(eq(apiToken.id, tokenRecord.id))
+        .run(),
+    ).catch(() => {});
     return {
       identity: { userId: tokenRecord.userId, email: userData.email },
       credential: {
@@ -231,18 +234,21 @@ async function authenticatePrincipal(
         toolsVersion: tokenRecord.toolsVersion,
         stampRevision: async () => {
           const now = new Date().toISOString();
-          const updated = await db
-            .update(apiToken)
-            .set({ toolsVersion: MCP_TOOLS_REVISION })
-            .where(
-              and(
-                eq(apiToken.id, tokenRecord.id),
-                eq(apiToken.tokenHash, tokenHash),
-                isNull(apiToken.revokedAt),
-                or(isNull(apiToken.expiresAt), gt(apiToken.expiresAt, now)),
-              ),
-            )
-            .returning({ id: apiToken.id });
+          const updated = await withDrizzleWrite(db, () =>
+            db
+              .update(apiToken)
+              .set({ toolsVersion: MCP_TOOLS_REVISION })
+              .where(
+                and(
+                  eq(apiToken.id, tokenRecord.id),
+                  eq(apiToken.tokenHash, tokenHash),
+                  isNull(apiToken.revokedAt),
+                  or(isNull(apiToken.expiresAt), gt(apiToken.expiresAt, now)),
+                ),
+              )
+              .returning({ id: apiToken.id })
+              .all(),
+          );
           return updated.length === 1;
         },
       },
@@ -317,19 +323,22 @@ async function authenticatePrincipal(
       id: tokenData.id,
       toolsVersion: tokenData.toolsVersion,
       stampRevision: async () => {
-        const updated = await db
-          .update(oauthAccessToken)
-          .set({ toolsVersion: MCP_TOOLS_REVISION })
-          .where(
-            and(
-              eq(oauthAccessToken.id, tokenData.id),
-              isNull(oauthAccessToken.revoked),
-              eq(oauthAccessToken.accessToken, oauthTokenDigest(bearerToken)),
-              eq(oauthAccessToken.userId, userId),
-              gt(oauthAccessToken.accessTokenExpiresAt, new Date().toISOString()),
-            ),
-          )
-          .returning({ id: oauthAccessToken.id });
+        const updated = await withDrizzleWrite(db, () =>
+          db
+            .update(oauthAccessToken)
+            .set({ toolsVersion: MCP_TOOLS_REVISION })
+            .where(
+              and(
+                eq(oauthAccessToken.id, tokenData.id),
+                isNull(oauthAccessToken.revoked),
+                eq(oauthAccessToken.accessToken, oauthTokenDigest(bearerToken)),
+                eq(oauthAccessToken.userId, userId),
+                gt(oauthAccessToken.accessTokenExpiresAt, new Date().toISOString()),
+              ),
+            )
+            .returning({ id: oauthAccessToken.id })
+            .all(),
+        );
         return updated.length === 1;
       },
     },

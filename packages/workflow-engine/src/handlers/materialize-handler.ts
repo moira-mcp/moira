@@ -67,11 +67,14 @@ export class MaterializeHandler implements INodeHandler {
       try {
         const basePath = await renderMaterializeBasePath(node, variableRegistry, context);
         const paths = await renderMaterializePaths(node, variableRegistry, context);
-        const token = (this.grants ?? TokenManager.getInstance()).createMaterializeToken(
-          context.executionId,
-          node.id,
-          context.userId,
-          metadataRevision(context),
+        const grants = this.grants ?? TokenManager.getInstance();
+        const token = await TokenManager.write(grants, () =>
+          grants.createMaterializeToken(
+            context.executionId,
+            node.id,
+            context.userId,
+            metadataRevision(context),
+          ),
         );
         const url = `${this.baseUrl().replace(/\/$/, "")}/api/public/executions/materialize/${token}`;
         const command = `mkdir -p -- ${quotePosixShellArgument(basePath)} && curl -sSf -- ${quotePosixShellArgument(url)} | tar -x -C ${quotePosixShellArgument(basePath)}`;

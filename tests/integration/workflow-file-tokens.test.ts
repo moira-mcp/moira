@@ -5,6 +5,7 @@
 
 import { describe, test, expect, beforeEach, afterEach, jest } from "@jest/globals";
 import express from "express";
+import Database from "better-sqlite3";
 import request from "supertest";
 import {
   DatabaseError,
@@ -14,7 +15,11 @@ import {
   type CommunicationOwnerScope,
 } from "@mcp-moira/shared";
 import type { WorkflowExecution, WorkflowGraph } from "@mcp-moira/workflow-engine";
-import { ProgressImageService, type IDataRepository } from "@mcp-moira/workflow-engine";
+import {
+  DatabaseRepository,
+  ProgressImageService,
+  type IDataRepository,
+} from "@mcp-moira/workflow-engine";
 import { createExecutionMaterializeRoutes } from "../../packages/web-backend/src/routes/execution-materialize.js";
 import { communicationOwnerFixture } from "../fixtures/communication-owner.js";
 
@@ -294,6 +299,33 @@ describe("Workflow File Tokens", () => {
       .run();
     expect(tokenManager.claimProgressImageToken(staleRevision)).toBe(false);
     clock.mockRestore();
+  });
+
+  test("finishing a streamed image waits for an independent SQLite writer without blocking its commit", async () => {
+    seedProgressExecution();
+    const token = tokenManager.createProgressImageToken(
+      "progress-token-execution",
+      "progress-token-workflow",
+      testUserId,
+      "2.0.0",
+      3,
+      "{}",
+    );
+    expect(tokenManager.reserveProgressImageToken(token, "download")).toBe(true);
+    const writer = new Database(getSqliteInstance().name, { fileMustExist: true });
+    const service = new ProgressImageService(new DatabaseRepository(), tokenManager);
+    try {
+      writer.exec("BEGIN IMMEDIATE");
+      // The lock can only be released if the download completion yields to this event loop.
+      const pending = service.complete(token, "download");
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(tokenManager.getTokenData(token)?.used).toBe(false);
+      writer.exec("COMMIT");
+      expect(await pending).toBe(true);
+      expect(tokenManager.getTokenData(token)?.used).toBe(true);
+    } finally {
+      writer.close();
+    }
   });
 
   test("atomic image reservation refuses title ABA without claiming or consuming the stale grant", () => {

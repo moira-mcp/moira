@@ -106,20 +106,23 @@ export class ProgressImageService {
       ownerUserId,
       deviceId,
     );
-    const token = this.tokens.createProgressImageToken(
-      execution.executionId,
-      execution.workflowId,
-      execution.userId,
-      graph.metadata.version,
-      execution.revision,
-      JSON.stringify({
-        options: normalized,
-        contextRevision,
-        taskIdentity: execution.taskIdentity ?? null,
-        taskIdentityRevision,
-        deviceId: selected.deviceId,
-      }),
-      ttlMs,
+    const issuedExecution = execution;
+    const token = await TokenManager.write(this.tokens, () =>
+      this.tokens.createProgressImageToken(
+        issuedExecution.executionId,
+        issuedExecution.workflowId,
+        issuedExecution.userId,
+        graph.metadata.version,
+        issuedExecution.revision,
+        JSON.stringify({
+          options: normalized,
+          contextRevision,
+          taskIdentity: issuedExecution.taskIdentity ?? null,
+          taskIdentityRevision,
+          deviceId: selected.deviceId,
+        }),
+        ttlMs,
+      ),
     );
     return {
       downloadUrl: `${this.baseUrl().replace(/\/$/, "")}/api/public/execution-progress-image/${token}`,
@@ -194,11 +197,16 @@ export class ProgressImageService {
     execution = await currentBinding();
     if (!execution) return null;
     const claimId = randomUUID();
-    if (!this.tokens.reserveProgressImageToken(token, claimId)) return null;
+    if (
+      !(await TokenManager.write(this.tokens, () =>
+        this.tokens.reserveProgressImageToken(token, claimId),
+      ))
+    )
+      return null;
     try {
       const statistics = await statisticsForRun(this.statistics, graph, execution);
       if (!(await currentBinding())) {
-        this.tokens.releaseProgressImageToken(token, claimId);
+        await this.release(token, claimId);
         return null;
       }
       const digest = metadataRevision(["progress-image", token]);
@@ -229,7 +237,7 @@ export class ProgressImageService {
           { code: "COMMUNICATION_OUTCOME_UNCONFIRMED", requestId, deviceId },
         );
       if (!(await currentBinding())) {
-        this.tokens.releaseProgressImageToken(token, claimId);
+        await this.release(token, claimId);
         return null;
       }
       return {
@@ -238,7 +246,7 @@ export class ProgressImageService {
         userId: grant.userId,
       };
     } catch (error) {
-      this.tokens.releaseProgressImageToken(token, claimId);
+      await this.release(token, claimId);
       throw error;
     }
   }
@@ -250,11 +258,15 @@ export class ProgressImageService {
     );
   }
 
-  complete(token: string, claimId: string): boolean {
-    return this.tokens.completeProgressImageToken(token, claimId);
+  complete(token: string, claimId: string): Promise<boolean> {
+    return TokenManager.write(this.tokens, () =>
+      this.tokens.completeProgressImageToken(token, claimId),
+    );
   }
 
-  release(token: string, claimId: string): boolean {
-    return this.tokens.releaseProgressImageToken(token, claimId);
+  release(token: string, claimId: string): Promise<boolean> {
+    return TokenManager.write(this.tokens, () =>
+      this.tokens.releaseProgressImageToken(token, claimId),
+    );
   }
 }

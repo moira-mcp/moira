@@ -183,7 +183,7 @@ router.post(
     }
 
     // Mark token as used
-    tokenManager.markTokenAsUsed(token);
+    await TokenManager.write(tokenManager, () => tokenManager.markTokenAsUsed(token));
 
     res.json({
       success: true,
@@ -230,7 +230,7 @@ router.get(
     }
 
     // Mark token as used
-    tokenManager.markTokenAsUsed(token);
+    await TokenManager.write(tokenManager, () => tokenManager.markTokenAsUsed(token));
 
     // Send as formatted JSON file download (2 spaces indent for readability)
     const filename = `${workflowId}.json`;

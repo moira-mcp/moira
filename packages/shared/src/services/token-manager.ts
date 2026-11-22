@@ -5,6 +5,7 @@
  */
 
 import { randomUUID } from "crypto";
+import { withSqliteWrite, type SqliteWriteResult } from "../database/sqlite-write.js";
 import { getSqliteInstance } from "../database/connection.js";
 import { createLogger } from "../logging/logger.js";
 import { DatabaseError, ValidationError } from "../errors/index.js";
@@ -118,6 +119,11 @@ export class TokenManager {
     return TokenManager.instance;
   }
 
+  /** SQLite-backed grants wait for the writer; an injected independent store owns its own storage. */
+  static async write<T>(store: object, operation: () => SqliteWriteResult<T>): Promise<T> {
+    return store instanceof TokenManager ? withSqliteWrite<T>(operation) : operation();
+  }
+
   /**
    * Start periodic cleanup of expired tokens
    */
@@ -125,7 +131,9 @@ export class TokenManager {
     // Clean up expired tokens every 5 minutes
     setInterval(
       () => {
-        this.cleanupExpiredTokens();
+        void withSqliteWrite(() => this.cleanupExpiredTokens()).catch((error) =>
+          logger.error("Could not clean up expired workflow tokens", error),
+        );
       },
       5 * 60 * 1000,
     ).unref?.();

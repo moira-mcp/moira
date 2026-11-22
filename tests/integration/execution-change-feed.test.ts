@@ -388,7 +388,7 @@ describe("every way a run disappears records it as deleted first", () => {
       }
     ).slug;
     const before = feed.latestSeq();
-    new WorkflowReconciliationRepository(getSqliteInstance()).apply({
+    await new WorkflowReconciliationRepository(getSqliteInstance()).apply({
       preconditions: [],
       conflictPreconditions: [],
       baselinePreconditions: [],
