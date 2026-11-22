@@ -7,6 +7,7 @@ import { getRequestContext } from "@mcp-moira/shared";
 import { encodeReference } from "@mcp-moira/shared/workspace-references";
 import { readAuthenticatedMcpRequest } from "../../../packages/mcp-server/src/authenticated-request.js";
 import { handleAuthenticatedMcpRequest } from "../../../packages/mcp-server/src/authenticated-mcp-handler.js";
+import { createMcpLimiter } from "../../../packages/mcp-server/src/middleware/rate-limit-middleware.js";
 import { MCP_TOOLS_REVISION } from "../../../packages/mcp-server/src/tools/tool-definitions.js";
 import { registerTools } from "../../../packages/mcp-server/src/tools/register-tools.js";
 import { TOOL_BINDINGS } from "../../../packages/mcp-server/src/tools/tool-bindings.js";
@@ -19,7 +20,7 @@ afterEach(async () => {
 
 function fixture() {
   const app = express();
-  app.post("/mcp", async (req, res) => {
+  app.post("/mcp", createMcpLimiter({ skipLimits: false }), async (req, res) => {
     const principal = await readAuthenticatedMcpRequest(
       req,
       res,
