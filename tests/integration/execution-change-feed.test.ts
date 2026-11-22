@@ -423,11 +423,11 @@ describe("every way a run disappears records it as deleted first", () => {
 });
 
 describe("a cursor older than what the feed keeps is expired", () => {
-  test("once events after a cursor are trimmed, the cursor is expired; a current one is not", () => {
+  test("once events after a cursor are trimmed, the cursor is expired; a current one is not", async () => {
     const sqlite = getSqliteInstance();
     const writer = new ExecutionChangeRepository(sqlite);
     // Trim everything: nothing is kept, and only the latest number is current.
-    writer.deleteOlderThan(Number.MAX_SAFE_INTEGER);
+    await writer.deleteOlderThan(Number.MAX_SAFE_INTEGER);
     const latest = writer.latestSeq();
     expect(writer.isExpired(latest - 1)).toBe(true);
     expect(writer.isExpired(latest)).toBe(false);

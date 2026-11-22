@@ -116,7 +116,7 @@ export class ScopedCredentialService {
     };
     return { parent, witness };
   }
-  private update(
+  private async update(
     row: StoredScopedCredential,
     state: StoredScopedCredential["state"],
     token: string | null,
@@ -134,15 +134,17 @@ export class ScopedCredentialService {
       },
     );
     if (
-      !this.dependencies.repository.updateScopedCredential({
-        id: row.id,
-        userId: row.userId,
-        provider: row.provider,
-        expectedState: row.state,
-        state,
-        envelope,
-        now: this.now(),
-      })
+      !(await this.dependencies.repository.write((repo) =>
+        repo.updateScopedCredential({
+          id: row.id,
+          userId: row.userId,
+          provider: row.provider,
+          expectedState: row.state,
+          state,
+          envelope,
+          now: this.now(),
+        }),
+      ))
     )
       throw new ScopedCredentialError("SCOPED_CREDENTIAL_CONFLICT");
     return { ...row, state, envelope };
@@ -267,21 +269,23 @@ export class ScopedCredentialService {
     const { vault, client } = this.configuration(),
       id = randomUUID();
     if (
-      !this.dependencies.repository.reserveScopedCredential({
-        id,
-        userId,
-        provider: CODESPACE_PROVIDER_GITHUB,
-        requestId: input.requestId,
-        scopeMetadata: JSON.stringify(witness),
-        envelope: vault.encryptScoped(
-          userId,
-          CODESPACE_PROVIDER_GITHUB,
+      !(await this.dependencies.repository.write((repo) =>
+        repo.reserveScopedCredential({
           id,
-          witness.credentialGeneration,
-          { token: null, expiresAt: null },
-        ),
-        now: this.now(),
-      })
+          userId,
+          provider: CODESPACE_PROVIDER_GITHUB,
+          requestId: input.requestId,
+          scopeMetadata: JSON.stringify(witness),
+          envelope: vault.encryptScoped(
+            userId,
+            CODESPACE_PROVIDER_GITHUB,
+            id,
+            witness.credentialGeneration,
+            { token: null, expiresAt: null },
+          ),
+          now: this.now(),
+        }),
+      ))
     )
       throw new ScopedCredentialError("SCOPED_CREDENTIAL_CONFLICT");
     let row = this.dependencies.repository.getScopedCredential(userId, CODESPACE_PROVIDER_GITHUB, {
@@ -297,14 +301,14 @@ export class ScopedCredentialService {
     } catch (error) {
       if (error instanceof ScopedCredentialIssuanceRefused) {
         try {
-          this.update(row, "refused", null, null);
+          await this.update(row, "refused", null, null);
         } catch {
           // The provider's confirmed refusal remains known even if its receipt cannot advance.
         }
         throw new ScopedCredentialError("SCOPED_CREDENTIAL_ISSUANCE_REFUSED", 403);
       }
       try {
-        this.update(row, "unconfirmed", null, null);
+        await this.update(row, "unconfirmed", null, null);
       } catch {
         // The durable issuing reservation already fences this submitted request.
       }
@@ -312,7 +316,7 @@ export class ScopedCredentialService {
     }
     // The exact known capability enters encrypted custody before any metadata checks.
     try {
-      row = this.update(row, "dispose_pending", candidate.token, candidate.expiresAt);
+      row = await this.update(row, "dispose_pending", candidate.token, candidate.expiresAt);
     } catch {
       // A storage failure cannot turn a known provider capability into a discarded one.
       try {
@@ -322,7 +326,7 @@ export class ScopedCredentialService {
       }
       // Keep the original nonce fenced even if recording confirmed disposal also fails.
       try {
-        this.update(row, "disposed", null, null);
+        await this.update(row, "disposed", null, null);
       } catch {
         /* The original issuing row remains fenced. */
       }
@@ -346,7 +350,7 @@ export class ScopedCredentialService {
         ),
         repositoryFullName: witness.authority.repositoryFullName,
       });
-      this.update(retained, "live", candidate.token, candidate.expiresAt);
+      await this.update(retained, "live", candidate.token, candidate.expiresAt);
       return result;
     } catch {
       await this.dispose(retained);
@@ -365,9 +369,9 @@ export class ScopedCredentialService {
       if (!payload.token)
         throw new ScopedCredentialError("SCOPED_CREDENTIAL_OUTCOME_UNCONFIRMED", 503);
       if (row.state !== "dispose_pending")
-        row = this.update(row, "dispose_pending", payload.token, payload.expiresAt);
+        row = await this.update(row, "dispose_pending", payload.token, payload.expiresAt);
       await client.revokeScopedToken(payload.token);
-      this.update(row, "disposed", null, null);
+      await this.update(row, "disposed", null, null);
     } catch (error) {
       if (
         error instanceof ScopedCredentialError &&

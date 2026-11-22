@@ -56,9 +56,9 @@ export class ExecutionChangeHub {
     this.lastSeq = this.feed.latestSeq();
     // A failed read (a busy or failing database) is logged; the next tick reads again from the same
     // position, so nothing is lost and the process keeps serving.
-    const guarded = (what: string, run: () => unknown) => () => {
+    const guarded = (what: string, run: () => unknown) => async () => {
       try {
-        run();
+        await run();
       } catch (error) {
         logger.error(`Execution change feed ${what} failed`, error);
       }
@@ -84,7 +84,7 @@ export class ExecutionChangeHub {
   }
 
   /** Keep the feed to its fixed retention; older cursors are answered with `reset`. */
-  trim(now: number = Date.now()): number {
+  trim(now: number = Date.now()): Promise<number> {
     return this.feed.deleteOlderThan(now - EXECUTION_CHANGE_RETENTION_MS);
   }
 

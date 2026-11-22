@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import type { ScopedCredentialState } from "./scoped-credential-types.js";
 import { getSqliteInstance } from "../database/connection.js";
+import { withSqliteWrite } from "../database/sqlite-write.js";
 import { assertAccountResourcesRetired } from "../database/account-resource-retirement.js";
 import type {
   CodespaceConnectionErrorCode,
@@ -78,6 +79,12 @@ export function digestCodespaceAuthorizationValue(value: string): string {
 
 export class CodespaceConnectionRepository {
   constructor(private readonly sqlite: Database.Database = getSqliteInstance()) {}
+
+  write<T>(
+    work: (repository: this) => T & (T extends PromiseLike<unknown> ? never : unknown),
+  ): Promise<T> {
+    return withSqliteWrite(() => work(this), this.sqlite);
+  }
 
   getAuthorityGeneration(userId: string, connectionId: string): number {
     const row = this.sqlite
