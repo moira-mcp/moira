@@ -1,5 +1,4 @@
 -- Preserve the populated 1.6 tables until the application migration has converted all credentials.
---> statement-breakpoint
 ALTER TABLE "oauthApplication" RENAME TO "legacyOAuthApplication";
 --> statement-breakpoint
 ALTER TABLE "oauthAccessToken" RENAME TO "legacyOAuthAccessToken";
