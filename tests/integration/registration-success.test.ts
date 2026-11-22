@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, jest, test } from "
 import { createServer as httpServer } from "node:http";
 import { createServer as smtpServer, type AddressInfo } from "node:net";
 import { randomUUID } from "node:crypto";
+import Database from "better-sqlite3";
 import { eq, inArray } from "drizzle-orm";
 import { github } from "better-auth/social-providers";
 import { APIError } from "better-auth/api";
@@ -17,12 +18,13 @@ let getAuthUrl: SharedRuntime["getAuthUrl"];
 let getBaseUrl: SharedRuntime["getBaseUrl"];
 let getAppPrefix: SharedRuntime["getAppPrefix"];
 let getDatabase: SharedRuntime["getDatabase"];
+let withSqliteWrite: SharedRuntime["withSqliteWrite"];
 let closeDatabase: SharedRuntime["closeDatabase"];
 let user: SharedRuntime["user"];
 let emailLog: SharedRuntime["emailLog"];
 let globalSetting: SharedRuntime["globalSetting"];
 let auditLog: SharedRuntime["auditLog"];
-let oauthApplication: SharedRuntime["oauthApplication"];
+let oauthClient: SharedRuntime["oauthClient"];
 let resetFeatureResolver: SharedRuntime["resetFeatureResolver"];
 let DatabaseRepository: EngineRuntime["DatabaseRepository"];
 let TelegramClient: EngineRuntime["TelegramClient"];
@@ -200,12 +202,13 @@ beforeAll(async () => {
       getBaseUrl,
       getAppPrefix,
       getDatabase,
+      withSqliteWrite,
       closeDatabase,
       user,
       emailLog,
       globalSetting,
       auditLog,
-      oauthApplication,
+      oauthClient,
       resetFeatureResolver,
     } = await import("@mcp-moira/shared"));
     ({
@@ -336,9 +339,7 @@ afterAll(async () => {
   await getDatabase().delete(auditLog).where(inArray(auditLog.userId, ids));
   await getDatabase().delete(user).where(inArray(user.id, ids));
   if (createdClients.length)
-    await getDatabase()
-      .delete(oauthApplication)
-      .where(inArray(oauthApplication.clientId, createdClients));
+    await getDatabase().delete(oauthClient).where(inArray(oauthClient.clientId, createdClients));
   await new Promise<void>((resolve, reject) =>
     transport.close((error) => (error ? reject(error) : resolve())),
   );
@@ -473,6 +474,41 @@ test("first real OAuth callback delivers once and repeat provider login does not
   expect(telegramMessages).toHaveLength(1);
 });
 
+test("registration succeeds alongside a writer on another service connection", async () => {
+  const db = new Database(process.env.DB_PATH!, { timeout: 0, fileMustExist: true });
+  const auditId = randomUUID();
+  const record = db.prepare("INSERT INTO auditLog (id, action, createdAt) VALUES (?, ?, ?)");
+  const writeAudit = () => record.run(auditId, "test:service_write", Date.now());
+  const context = await auth.$context;
+  const hash = context.password.hash;
+  let writePending = false;
+  const hashing = jest.spyOn(context.password, "hash").mockImplementation(async (password) => {
+    // Sign-up has read the email and is computing the hash when the other service writes.
+    // A writer that cannot acquire SQLite's lock yet can finish after sign-up commits.
+    try {
+      writeAudit();
+    } catch (error) {
+      if (!(error instanceof Error) || !("code" in error) || error.code !== "SQLITE_BUSY")
+        throw error;
+      writePending = true;
+    }
+    return hash(password);
+  });
+  try {
+    const response = await signup();
+    if (writePending) writeAudit();
+    expect(hashing).toHaveBeenCalledTimes(1);
+    expect(response.status).toBe(200);
+    expect((await response.json()).user.id).toEqual(expect.any(String));
+    expect(db.prepare("SELECT id FROM auditLog WHERE id = ?").get(auditId)).toEqual({
+      id: auditId,
+    });
+  } finally {
+    db.prepare("DELETE FROM auditLog WHERE id = ?").run(auditId);
+    db.close();
+  }
+});
+
 test("overlapping real registrations each deliver only their own persisted identity", async () => {
   const hooks = (await auth.$context).options.databaseHooks!;
   const previous = hooks.user!.create!.after;
@@ -562,16 +598,60 @@ test("invalid OAuth state and failed OAuth account creation cannot publish a reg
     hooks.account = previous;
   });
   const refused = await oauth();
-  expect(refused.status).toBe(302);
-  expect(new URL(refused.headers.get("location")!, getAuthUrl()).searchParams.has("error")).toBe(
-    true,
-  );
+  expect(refused.status).toBe(400);
+  expect(await refused.json()).toMatchObject({ message: "Fixture refused OAuth account" });
   expect(await getDatabase().select().from(user).where(eq(user.email, providerEmail))).toHaveLength(
-    1,
+    0,
   );
   await Promise.all(notificationTasks);
   expect(events).toEqual([]);
   expect(telegramMessages).toEqual([]);
+});
+
+test("only the registration transaction sees its user before a failed credential write rolls back", async () => {
+  const email = `uncommitted-${randomUUID()}@registration.test`;
+  const entered = deferred<boolean>();
+  const finish = deferred<void>();
+  const hooks = (await auth.$context).options.databaseHooks!;
+  const previous = hooks.account;
+  const findUser = () =>
+    getDatabase().select({ id: user.id }).from(user).where(eq(user.email, email));
+  hooks.account = {
+    create: {
+      before: async () => {
+        entered.resolve((await findUser()).length === 1);
+        await finish.promise;
+        throw new APIError("BAD_REQUEST", { message: "Rejected credential fixture" });
+      },
+    },
+  };
+  restoreHooks.push(() => {
+    hooks.account = previous;
+  });
+  const operation = signup(email);
+  const id = randomUUID();
+  let write: Promise<unknown> | undefined;
+  try {
+    expect(await Promise.race([entered.promise, operation.then(() => false)])).toBe(true);
+    expect(await findUser()).toHaveLength(0);
+    write = withSqliteWrite(() =>
+      getDatabase()
+        .insert(auditLog)
+        .values({ id, action: "test:concurrent_writer", createdAt: new Date() })
+        .run(),
+    );
+    // The signup releases its transaction from this process's event loop.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  } finally {
+    finish.resolve();
+  }
+  expect((await operation).status).toBe(400);
+  await write;
+  expect(
+    await getDatabase().select({ id: auditLog.id }).from(auditLog).where(eq(auditLog.id, id)),
+  ).toEqual([{ id }]);
+  await getDatabase().delete(auditLog).where(eq(auditLog.id, id));
+  expect(await findUser()).toHaveLength(0);
 });
 
 test.each(["throw", "reject"] as const)(
@@ -640,7 +720,7 @@ test.each(["user", "account", "session", "mail"] as const)(
     expect(events).toEqual([]);
     expect(telegramMessages).toEqual([]);
     const accounts = await getDatabase().select().from(user).where(eq(user.email, email));
-    expect(accounts).toHaveLength(stage === "user" ? 0 : 1);
+    expect(accounts).toHaveLength(stage === "mail" ? 1 : 0);
     if (stage === "mail")
       expect(
         await getDatabase().select().from(emailLog).where(eq(emailLog.userId, accounts[0].id)),
@@ -648,27 +728,21 @@ test.each(["user", "account", "session", "mail"] as const)(
   },
 );
 
-test("actual late MCP after-hook APIError with retained OAuth HTTP 302 and issued session does not notify", async () => {
+test("an unregistered OAuth callback is rejected before it can create a session or notify", async () => {
   const registered = await call("/mcp/register", {
     client_name: "Registration failure fixture",
-    redirect_uris: [`${getBaseUrl()}/accepted-fixture-callback`],
+    redirect_uris: ["https://client.example.test/accepted-fixture-callback"],
   });
   expect(registered.status).toBe(201);
   const clientId = (await registered.json()).client_id as string;
   createdClients.push(clientId);
   const prompt = await call(
-    `/mcp/authorize?client_id=${encodeURIComponent(clientId)}&response_type=code&redirect_uri=${encodeURIComponent(`${getBaseUrl()}/refused-fixture-callback`)}`,
+    `/mcp/authorize?client_id=${encodeURIComponent(clientId)}&response_type=code&redirect_uri=https%3A%2F%2Fclient.example.test%2Frefused-fixture-callback`,
   );
-  expect(prompt.status).toBe(302);
-  const response = await oauth(cookies(prompt));
-  expect(response.status).toBe(302);
-  expect(await response.clone().json()).toMatchObject({ message: "Invalid redirect URI" });
-  const observed = await auth.api.getSession({
-    headers: new Headers({ Cookie: cookies(response) }),
-  });
-  expect(observed?.user.email).toBe(providerEmail);
+  expect(prompt.headers.get("location") ?? "").not.toContain("refused-fixture-callback");
+  expect(cookies(prompt)).not.toContain("session_token");
   expect(await getDatabase().select().from(user).where(eq(user.email, providerEmail))).toHaveLength(
-    1,
+    0,
   );
   await Promise.all(notificationTasks);
   expect(events).toEqual([]);

@@ -4,6 +4,7 @@
  * Force password reset, revoke OAuth tokens, security activity
  */
 
+import { executeDrizzleWrite } from "@mcp-moira/shared";
 import { Router, Request, Response } from "express";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
 import type { AuthenticatedRequest } from "../types/express-types.js";
@@ -15,6 +16,7 @@ import {
   getDatabase,
   user,
   oauthAccessToken,
+  oauthRefreshToken,
   session,
   oauthConsent,
 } from "@mcp-moira/shared";
@@ -112,22 +114,25 @@ router.post(
     }
 
     // Update user to mark password reset required
-    await db
-      .update(user)
-      .set({
-        passwordResetRequired: true,
-        passwordResetRequestedAt: new Date().toISOString(),
-        passwordResetRequestedBy: currentUserId,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(user.id, id));
+    await executeDrizzleWrite(
+      db,
+      db
+        .update(user)
+        .set({
+          passwordResetRequired: true,
+          passwordResetRequestedAt: new Date().toISOString(),
+          passwordResetRequestedBy: currentUserId,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(user.id, id)),
+    );
 
     // Revoke ALL sessions for the user (force logout from all devices)
     const sessionsBeforeRevoke = await db.select().from(session).where(eq(session.userId, id));
 
     const sessionsCount = sessionsBeforeRevoke.length;
 
-    await db.delete(session).where(eq(session.userId, id));
+    await executeDrizzleWrite(db, db.delete(session).where(eq(session.userId, id)));
 
     // Audit logging
     await logAuditEvent(repository, req, {
@@ -263,7 +268,10 @@ router.delete(
     }
 
     // Delete session
-    await db.delete(session).where(and(eq(session.id, sessionId), eq(session.userId, id)));
+    await executeDrizzleWrite(
+      db,
+      db.delete(session).where(and(eq(session.id, sessionId), eq(session.userId, id))),
+    );
 
     // Audit logging
     const currentUserId = (req as AuthenticatedRequest).userId;
@@ -322,9 +330,16 @@ router.delete(
     const oauthConsentsCount = oauthConsentsBeforeDelete.length;
 
     // Delete all sessions, OAuth tokens, and OAuth consents
-    await db.delete(session).where(eq(session.userId, id));
-    await db.delete(oauthAccessToken).where(eq(oauthAccessToken.userId, id));
-    await db.delete(oauthConsent).where(eq(oauthConsent.userId, id));
+    await executeDrizzleWrite(db, db.delete(session).where(eq(session.userId, id)));
+    await executeDrizzleWrite(
+      db,
+      db.delete(oauthRefreshToken).where(eq(oauthRefreshToken.userId, id)),
+    );
+    await executeDrizzleWrite(
+      db,
+      db.delete(oauthAccessToken).where(eq(oauthAccessToken.userId, id)),
+    );
+    await executeDrizzleWrite(db, db.delete(oauthConsent).where(eq(oauthConsent.userId, id)));
 
     // Audit logging
     const currentUserId = (req as AuthenticatedRequest).userId;
@@ -391,7 +406,7 @@ router.get(
       consentId: consent.id,
       clientId: consent.clientId,
       scopes: consent.scopes,
-      consentGiven: consent.consentGiven,
+      consentGiven: true,
       createdAt: consent.createdAt,
       updatedAt: consent.updatedAt,
       tokens: tokensByClient[consent.clientId] || [],
@@ -444,14 +459,26 @@ router.delete(
     const tokensCount = tokensBeforeDelete.length;
 
     // Delete consent (will cascade delete tokens if FK configured, otherwise delete manually)
-    await db
-      .delete(oauthConsent)
-      .where(and(eq(oauthConsent.userId, id), eq(oauthConsent.clientId, provider)));
+    await executeDrizzleWrite(
+      db,
+      db
+        .delete(oauthConsent)
+        .where(and(eq(oauthConsent.userId, id), eq(oauthConsent.clientId, provider))),
+    );
 
     // Delete associated access tokens
-    await db
-      .delete(oauthAccessToken)
-      .where(and(eq(oauthAccessToken.userId, id), eq(oauthAccessToken.clientId, provider)));
+    await executeDrizzleWrite(
+      db,
+      db
+        .delete(oauthRefreshToken)
+        .where(and(eq(oauthRefreshToken.userId, id), eq(oauthRefreshToken.clientId, provider))),
+    );
+    await executeDrizzleWrite(
+      db,
+      db
+        .delete(oauthAccessToken)
+        .where(and(eq(oauthAccessToken.userId, id), eq(oauthAccessToken.clientId, provider))),
+    );
 
     // Audit logging
     const currentUserId = (req as AuthenticatedRequest).userId;
@@ -511,10 +538,17 @@ router.delete(
     const tokensCount = tokensBeforeDelete.length;
 
     // Delete all consents
-    await db.delete(oauthConsent).where(eq(oauthConsent.userId, id));
+    await executeDrizzleWrite(db, db.delete(oauthConsent).where(eq(oauthConsent.userId, id)));
 
     // Delete all access tokens
-    await db.delete(oauthAccessToken).where(eq(oauthAccessToken.userId, id));
+    await executeDrizzleWrite(
+      db,
+      db.delete(oauthRefreshToken).where(eq(oauthRefreshToken.userId, id)),
+    );
+    await executeDrizzleWrite(
+      db,
+      db.delete(oauthAccessToken).where(eq(oauthAccessToken.userId, id)),
+    );
 
     // Audit logging
     const currentUserId = (req as AuthenticatedRequest).userId;

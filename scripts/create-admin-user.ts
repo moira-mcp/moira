@@ -7,7 +7,7 @@
  */
 
 import Database from "better-sqlite3";
-import crypto from "crypto";
+import { writeAdminCredential } from "./admin-credential.js";
 import path from "path";
 import { hashPassword } from "better-auth/crypto";
 import {
@@ -61,23 +61,7 @@ try {
       ).run(ADMIN_EMAIL, ADMIN_ID);
     }
 
-    const existingAccount = db
-      .prepare("SELECT id FROM account WHERE userId = ? AND providerId = ?")
-      .get(ADMIN_ID, "credential");
-    const createdAccount = !existingAccount;
-
-    if (createdAccount) {
-      db.prepare(
-        `INSERT INTO account (id, userId, accountId, providerId, password, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-      ).run(crypto.randomUUID(), ADMIN_ID, ADMIN_EMAIL, "credential", hashedPassword);
-    } else {
-      db.prepare(
-        `UPDATE account
-            SET accountId = ?, password = ?, updatedAt = datetime('now')
-          WHERE userId = ? AND providerId = 'credential'`,
-      ).run(ADMIN_EMAIL, hashedPassword, ADMIN_ID);
-    }
+    const createdAccount = writeAdminCredential(db, ADMIN_ID, hashedPassword);
 
     return { createdUser, createdAccount };
   });

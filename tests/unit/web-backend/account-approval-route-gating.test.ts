@@ -10,6 +10,10 @@ import { AdminAnalyticsRepository } from "../../../packages/shared/src/database/
 import { ExecutionRepository } from "../../../packages/shared/src/database/repositories/execution-repository.js";
 import { parseUserIdSelection } from "../../../packages/shared/src/database/admin-analytics-query.js";
 import { clampPagination } from "../../../packages/shared/src/database/list-query-builder.js";
+import {
+  executeDrizzleWrite,
+  withDrizzleWrite,
+} from "../../../packages/shared/src/database/drizzle-write.js";
 import { readExecutionManagement } from "../../../packages/workflow-engine/src/utils/execution-management.js";
 
 let sqlite: Database.Database;
@@ -92,6 +96,8 @@ jest.unstable_mockModule("@mcp-moira/workflow-engine", () => ({
 }));
 
 jest.unstable_mockModule("@mcp-moira/shared", () => ({
+  executeDrizzleWrite,
+  withDrizzleWrite,
   AdminAnalyticsRepository,
   ExecutionRepository,
   parseUserIdSelection,

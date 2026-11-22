@@ -3,6 +3,7 @@
  * Drizzle ORM queries for audit trail operations
  */
 
+import { executeDrizzleWrite } from "../drizzle-write.js";
 import { eq, and, count, gte, lte, inArray } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { auditLog } from "../schema.js";
@@ -69,21 +70,24 @@ export class AuditRepository {
     const id = randomUUID();
     const now = new Date();
 
-    await this.db.insert(auditLog).values({
-      id,
-      userId: entry.userId || null,
-      action: entry.action,
-      resource: entry.resource || null,
-      resourceId: entry.resourceId || null,
-      source: entry.source || null,
-      ip: entry.ip || null,
-      country: entry.country || null,
-      userAgent: entry.userAgent || null,
-      metadata: entry.metadata || null,
-      changes: entry.changes || null,
-      dedupeKey: entry.dedupeKey || null,
-      createdAt: now,
-    });
+    await executeDrizzleWrite(
+      this.db,
+      this.db.insert(auditLog).values({
+        id,
+        userId: entry.userId || null,
+        action: entry.action,
+        resource: entry.resource || null,
+        resourceId: entry.resourceId || null,
+        source: entry.source || null,
+        ip: entry.ip || null,
+        country: entry.country || null,
+        userAgent: entry.userAgent || null,
+        metadata: entry.metadata || null,
+        changes: entry.changes || null,
+        dedupeKey: entry.dedupeKey || null,
+        createdAt: now,
+      }),
+    );
 
     this.logger.info("Audit log entry created", {
       id,
@@ -103,25 +107,28 @@ export class AuditRepository {
     entry: Omit<AuditLogEntry, "id" | "createdAt" | "dedupeKey"> & { dedupeKey: string },
   ): Promise<{ id: string; inserted: boolean }> {
     const id = randomUUID();
-    const inserted = await this.db
-      .insert(auditLog)
-      .values({
-        id,
-        userId: entry.userId || null,
-        action: entry.action,
-        resource: entry.resource || null,
-        resourceId: entry.resourceId || null,
-        source: entry.source || null,
-        ip: entry.ip || null,
-        country: entry.country || null,
-        userAgent: entry.userAgent || null,
-        metadata: entry.metadata || null,
-        changes: entry.changes || null,
-        dedupeKey: entry.dedupeKey,
-        createdAt: new Date(),
-      })
-      .onConflictDoNothing({ target: auditLog.dedupeKey })
-      .returning({ id: auditLog.id });
+    const inserted = await executeDrizzleWrite(
+      this.db,
+      this.db
+        .insert(auditLog)
+        .values({
+          id,
+          userId: entry.userId || null,
+          action: entry.action,
+          resource: entry.resource || null,
+          resourceId: entry.resourceId || null,
+          source: entry.source || null,
+          ip: entry.ip || null,
+          country: entry.country || null,
+          userAgent: entry.userAgent || null,
+          metadata: entry.metadata || null,
+          changes: entry.changes || null,
+          dedupeKey: entry.dedupeKey,
+          createdAt: new Date(),
+        })
+        .onConflictDoNothing({ target: auditLog.dedupeKey })
+        .returning({ id: auditLog.id }),
+    );
 
     if (inserted.length === 0) {
       const [existing] = await this.db

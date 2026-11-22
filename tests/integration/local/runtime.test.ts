@@ -485,22 +485,29 @@ describe("Docker Sandboxes lifecycle boundary", () => {
       code: "LOCAL_RUNTIME_UNSAFE",
     });
   });
-  test("settings readiness reads a typed feature flag omitted from the ordinary settings list", async () => {
+  test("settings readiness ignores unset unrelated settings but still requires host-safety values", async () => {
     const fixture = await localFixture(state);
     let socket = "";
+    let omitRequired = false;
     const runtime = simulatedRuntime(fixture.policy, async (request) => {
       if (request.argv[0] === "daemon") return result({ status: "running", socket });
       if (request.argv[0] === "settings" && request.argv[1] === "get")
         return result({ value: safeSettings["feature.network-user-prompts"], source: "override" });
-      return result(
-        Object.entries(safeSettings)
+      return result([
+        ...Object.entries(safeSettings)
           .filter(([key]) => key !== "feature.network-user-prompts")
-          .map(([key, value]) => ({ key, value })),
-      );
+          .map(([key, value]) => ({
+            key,
+            ...(omitRequired && key === "ssh.autoCreate" ? {} : { value }),
+          })),
+        { key: "unrelated.unsetSetting" },
+      ]);
     });
     socket = await ownedSocket(runtime);
     runtime.validateExecutable = async () => undefined;
     await expect(runtime.verifySettings()).resolves.toBeUndefined();
+    omitRequired = true;
+    await expect(runtime.verifySettings()).rejects.toMatchObject({ code: "LOCAL_RUNTIME_UNSAFE" });
   });
   test.each([
     {

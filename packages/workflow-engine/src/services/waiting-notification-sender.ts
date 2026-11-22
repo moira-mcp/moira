@@ -95,7 +95,7 @@ export class WaitingNotificationSender {
               waitKey: row.waitKey,
               error: error instanceof Error ? error.message : String(error),
             });
-            this.queue.hold(row.id, this.now() + FAILED_ROW_RETRY_MS);
+            await this.queue.hold(row.id, this.now() + FAILED_ROW_RETRY_MS);
           }
         }
         if (due.length < BATCH_SIZE) break;
@@ -107,29 +107,29 @@ export class WaitingNotificationSender {
 
   private async deliver(row: ExecutionNotificationRow): Promise<void> {
     if (!this.queue.holdsWait(row.executionId, row.waitKey)) {
-      this.queue.markSuperseded(row.id);
+      await this.queue.markSuperseded(row.id);
       return;
     }
     if (row.waitKey.startsWith("agent:") && row.kind === "first") {
       const previous = this.queue.lastAgentQuestionSentAt(row.executionId, row.id);
       if (previous !== null && this.now() < previous + this.questionPauseMs) {
-        this.queue.hold(row.id, previous + this.questionPauseMs);
+        await this.queue.hold(row.id, previous + this.questionPauseMs);
         return;
       }
     }
     const loaded = await this.load(row.executionId);
     if (!loaded) {
-      this.queue.markSuperseded(row.id);
+      await this.queue.markSuperseded(row.id);
       return;
     }
     const text = waitingNotificationText(loaded.graph, loaded.execution, row);
     if (text === null) {
-      this.queue.markSuperseded(row.id);
+      await this.queue.markSuperseded(row.id);
       return;
     }
     // Loading yields to other writers. The stored wait must still hold immediately before delivery.
     if (!this.queue.holdsWait(row.executionId, row.waitKey)) {
-      this.queue.markSuperseded(row.id);
+      await this.queue.markSuperseded(row.id);
       return;
     }
     let status = "all_failed";
@@ -146,12 +146,12 @@ export class WaitingNotificationSender {
             current.workflowId !== loaded.execution.workflowId ||
             !this.queue.holdsWait(row.executionId, row.waitKey)
           ) {
-            this.queue.markSuperseded(row.id);
+            await this.queue.markSuperseded(row.id);
             return null;
           }
           const currentText = waitingNotificationText(loaded.graph, current, row);
           if (currentText === null) {
-            this.queue.markSuperseded(row.id);
+            await this.queue.markSuperseded(row.id);
             return null;
           }
           return { text: currentText, format: "plain", purpose: "notification" };
@@ -167,14 +167,14 @@ export class WaitingNotificationSender {
         error: error instanceof Error ? error.message : String(error),
       });
     }
-    const sent = this.queue.markSent(row.id, this.now(), status, channels);
+    const sent = await this.queue.markSent(row.id, this.now(), status, channels);
     // A gate with `remindAfter` gets its single reminder queued now, due after the pause; if the wait
     // ends first, the reminder is dropped when it comes due.
     if (sent && row.kind === "first" && row.waitKey.startsWith("gate:")) {
       const gate = gatedNode(loaded.graph, loaded.execution);
       const remindAfter = gate ? humanGateRemindAfterMs(gate.humanGate) : null;
       if (remindAfter !== null) {
-        this.queue.enqueueReminder(row, this.now() + remindAfter, this.now());
+        await this.queue.enqueueReminder(row, this.now() + remindAfter, this.now());
       }
     }
   }

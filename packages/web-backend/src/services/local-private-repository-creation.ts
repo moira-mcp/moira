@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { withSqliteWrite } from "@mcp-moira/shared/database/sqlite-write";
 import {
   LocalDeviceError,
   canonicalJson,
@@ -245,25 +246,25 @@ export class LocalPrivateRepositoryCreationService {
   ): Promise<LocalPrivateRepositoryCreationResult> {
     const input = localPrivateRepositoryCreationInputSchema.parse(value);
     const ledger = this.dependencies.repository;
-    let record = ledger.getOwned(userId, input.requestId);
-    if (record && record.fingerprint !== digestLocalSecret(canonicalJson(input)))
+    let existing = ledger.getOwned(userId, input.requestId);
+    if (existing && existing.fingerprint !== digestLocalSecret(canonicalJson(input)))
       throw new LocalDeviceError("LOCAL_CONFLICT", "Repository creation request identity changed.");
-    if (record?.state === "rejected")
-      return this.result(input, record, "rejected", record.errorCode);
+    if (existing?.state === "rejected")
+      return this.result(input, existing, "rejected", existing.errorCode);
     let context: Awaited<ReturnType<LocalPrivateRepositoryCreationDependencies["authorize"]>>;
     let stage: RepositorySetupStage = "github_connection";
     try {
       context = await this.dependencies.authorize(userId, input.installationId);
       stage = "device_delegation";
-      record = record ?? (await ledger.reserve(userId, input, context.authority, this.now()));
+      existing = existing ?? (await ledger.reserve(userId, input, context.authority, this.now()));
       stage = "authority_validation";
-      await this.current(record, context.authority);
+      await this.current(existing, context.authority);
     } catch (error) {
       if (!(error instanceof LocalDeviceError) && !(error instanceof GitHubCodespaceClientError))
         throw error;
       return this.result(
         input,
-        record,
+        existing,
         "setup_required",
         "LOCAL_GITHUB_SETUP_REQUIRED",
         undefined,
@@ -273,9 +274,12 @@ export class LocalPrivateRepositoryCreationService {
         },
       );
     }
-    const claimed = ledger.claim(userId, input.requestId, this.now());
+    const claimed = await withSqliteWrite(
+      () => ledger.claim(userId, input.requestId, this.now()),
+      ledger.sqlite,
+    );
     if (!claimed) return this.result(input, ledger.getOwned(userId, input.requestId), "pending");
-    record = claimed;
+    let record = claimed;
     try {
       const provider = this.dependencies.provider();
       if (record.state === "prepared") {
@@ -288,7 +292,10 @@ export class LocalPrivateRepositoryCreationService {
         stage = "authority_validation";
         await this.current(record, context.authority);
         if (present) {
-          ledger.mark(record, "rejected", "LOCAL_REPOSITORY_NAME_EXISTS", this.now());
+          await withSqliteWrite(
+            () => ledger.mark(record, "rejected", "LOCAL_REPOSITORY_NAME_EXISTS", this.now()),
+            ledger.sqlite,
+          );
           return this.result(
             input,
             ledger.getOwned(userId, input.requestId),
@@ -296,7 +303,9 @@ export class LocalPrivateRepositoryCreationService {
             "LOCAL_REPOSITORY_NAME_EXISTS",
           );
         }
-        await ledger.submit(record, await this.current(record, context.authority), this.now());
+        await ledger.submit(record, context.authority, this.now, () =>
+          this.dependencies.currentAuthority(userId),
+        );
         record = ledger.getOwned(userId, input.requestId)!;
         let created: GitHubPrivateRepositoryIdentity;
         try {
@@ -311,11 +320,15 @@ export class LocalPrivateRepositoryCreationService {
             [400, 401, 403, 404, 409, 422, 429].includes(error.status)
           ) {
             const setup = [401, 403, 404, 429].includes(error.status);
-            ledger.mark(
-              record,
-              setup ? "prepared" : "rejected",
-              setup ? "LOCAL_GITHUB_SETUP_REQUIRED" : "LOCAL_REPOSITORY_CREATE_REJECTED",
-              this.now(),
+            await withSqliteWrite(
+              () =>
+                ledger.mark(
+                  record,
+                  setup ? "prepared" : "rejected",
+                  setup ? "LOCAL_GITHUB_SETUP_REQUIRED" : "LOCAL_REPOSITORY_CREATE_REJECTED",
+                  this.now(),
+                ),
+              ledger.sqlite,
             );
             return this.result(
               input,
@@ -326,7 +339,10 @@ export class LocalPrivateRepositoryCreationService {
               { stage, providerStatus: error.status },
             );
           }
-          ledger.mark(record, "unknown", "LOCAL_REPOSITORY_CREATE_UNKNOWN", this.now());
+          await withSqliteWrite(
+            () => ledger.mark(record, "unknown", "LOCAL_REPOSITORY_CREATE_UNKNOWN", this.now()),
+            ledger.sqlite,
+          );
           return this.result(
             input,
             ledger.getOwned(userId, input.requestId),
@@ -335,7 +351,10 @@ export class LocalPrivateRepositoryCreationService {
           );
         }
         if (!this.matches(record, created)) {
-          ledger.mark(record, "unknown", "LOCAL_REPOSITORY_CREATE_UNKNOWN", this.now());
+          await withSqliteWrite(
+            () => ledger.mark(record, "unknown", "LOCAL_REPOSITORY_CREATE_UNKNOWN", this.now()),
+            ledger.sqlite,
+          );
           return this.result(
             input,
             ledger.getOwned(userId, input.requestId),
@@ -343,7 +362,10 @@ export class LocalPrivateRepositoryCreationService {
             "LOCAL_REPOSITORY_CREATE_UNKNOWN",
           );
         }
-        ledger.recordCreated(record, created.id, created.fullName, this.now());
+        await withSqliteWrite(
+          () => ledger.recordCreated(record, created.id, created.fullName, this.now()),
+          ledger.sqlite,
+        );
         record = ledger.getOwned(userId, input.requestId)!;
       } else if (record.state === "unknown" || record.state === "submitted") {
         stage = "repository_lookup";
@@ -355,7 +377,10 @@ export class LocalPrivateRepositoryCreationService {
         stage = "authority_validation";
         await this.current(record, context.authority);
         if (!observed || !this.matches(record, observed)) {
-          ledger.mark(record, "unknown", "LOCAL_REPOSITORY_CREATE_UNKNOWN", this.now());
+          await withSqliteWrite(
+            () => ledger.mark(record, "unknown", "LOCAL_REPOSITORY_CREATE_UNKNOWN", this.now()),
+            ledger.sqlite,
+          );
           return this.result(
             input,
             ledger.getOwned(userId, input.requestId),
@@ -363,7 +388,10 @@ export class LocalPrivateRepositoryCreationService {
             "LOCAL_REPOSITORY_CREATE_UNKNOWN",
           );
         }
-        ledger.recordCreated(record, observed.id, observed.fullName, this.now());
+        await withSqliteWrite(
+          () => ledger.recordCreated(record, observed.id, observed.fullName, this.now()),
+          ledger.sqlite,
+        );
         record = ledger.getOwned(userId, input.requestId)!;
       }
       await this.current(record, context.authority);
@@ -383,7 +411,7 @@ export class LocalPrivateRepositoryCreationService {
         );
         // Refresh may legitimately rotate an expiring token; consent and pinned account still hold.
         await ledger.assertCurrent(record, this.dependencies.currentAuthority(userId));
-        ledger.confirmInstallation(record, this.now());
+        await withSqliteWrite(() => ledger.confirmInstallation(record, this.now()), ledger.sqlite);
         record = ledger.getOwned(userId, input.requestId)!;
       }
       stage = "local_admission";
@@ -409,7 +437,10 @@ export class LocalPrivateRepositoryCreationService {
         throw error;
       const retained = ledger.getOwned(userId, input.requestId)!;
       if (retained.state === "submitted" || retained.state === "unknown") {
-        ledger.mark(record, "unknown", "LOCAL_REPOSITORY_CREATE_UNKNOWN", this.now());
+        await withSqliteWrite(
+          () => ledger.mark(record, "unknown", "LOCAL_REPOSITORY_CREATE_UNKNOWN", this.now()),
+          ledger.sqlite,
+        );
         return this.result(
           input,
           retained,
@@ -424,7 +455,10 @@ export class LocalPrivateRepositoryCreationService {
           },
         );
       }
-      ledger.mark(record, retained.state, "LOCAL_GITHUB_SETUP_REQUIRED", this.now());
+      await withSqliteWrite(
+        () => ledger.mark(record, retained.state, "LOCAL_GITHUB_SETUP_REQUIRED", this.now()),
+        ledger.sqlite,
+      );
       return this.result(
         input,
         retained,
@@ -437,7 +471,7 @@ export class LocalPrivateRepositoryCreationService {
         },
       );
     } finally {
-      ledger.releaseClaim(record, this.now());
+      await withSqliteWrite(() => ledger.releaseClaim(record, this.now()), ledger.sqlite);
     }
   }
 }

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
+import { withSqliteWrite, type SqliteWriteResult } from "../database/sqlite-write.js";
 import { canonicalJson } from "../utils/canonical-json.js";
 import { getAccountAccessDenial } from "../auth/account-admission.js";
 import {
@@ -67,6 +68,10 @@ function pairingView(row: PairingRow, now: number): LocalPairingView {
 /** Registration, revocation and routing identity only; settings and grants belong to the owner. */
 export class LocalDeviceRepository {
   constructor(private readonly sqlite: Database.Database) {}
+
+  write<T>(operation: () => SqliteWriteResult<T>): Promise<T> {
+    return withSqliteWrite<T>(operation, this.sqlite);
+  }
 
   assertAdmitted(userId: string): void {
     const user = this.sqlite

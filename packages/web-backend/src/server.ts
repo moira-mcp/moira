@@ -24,6 +24,7 @@ import {
   closeDatabase,
   getBaseUrl,
   getMcpUrl,
+  getAuthUrl,
   getAppPrefix,
   getWebBackendPort,
   getNodeEnv,
@@ -109,7 +110,6 @@ import { getLocalGitIdentityService } from "./services/local-git-identity-factor
 import { createScopedCredentialRouter } from "./routes/scoped-credentials.js";
 import { createGitHubControllerRoutes } from "./routes/github-controller.js";
 import { getScopedCredentialService } from "./services/scoped-credential-factory.js";
-import { mcpClientAutoRegister } from "./middleware/mcp-client-auto-register.js";
 import { auth } from "./auth.js";
 import { getLocalDeviceService } from "./services/codespace-services.js";
 import { ExecutionChangeRepository, getSqliteInstance } from "@mcp-moira/shared";
@@ -306,9 +306,7 @@ class MoiraApiServer {
       const url = req.url || req.originalUrl || "";
       logger.info("Auth request received", {
         method: req.method,
-        url: url,
         path: url.split("?")[0],
-        query: url.includes("?") ? url.split("?")[1] : "",
       });
 
       try {
@@ -346,8 +344,7 @@ class MoiraApiServer {
 
     // Auth admission uses the dedicated limiter defined by createRateLimiters.
     // Auth audit logging handled via Better Auth hooks in auth config
-    // Auto-register unknown MCP OAuth clients before Better Auth processes the request
-    this.app.all("/api/auth/*authPath", authLimiter, mcpClientAutoRegister(), wrappedAuthHandler);
+    this.app.all("/api/auth/*authPath", authLimiter, wrappedAuthHandler);
   }
 
   /**
@@ -373,56 +370,34 @@ class MoiraApiServer {
     }
 
     // OAuth Protected Resource Metadata (RFC9728)
-    this.app.get("/.well-known/oauth-protected-resource", (req, res) => {
-      const baseUrl = getBaseUrl();
+    this.app.get(
+      ["/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"],
+      (_req, res) => {
+        res.json({
+          resource: getMcpUrl(),
+          authorization_servers: [getAuthUrl()],
+          scopes_supported: ["openid", "profile", "email", "offline_access"],
+          bearer_methods_supported: ["header"],
+        });
+      },
+    );
 
-      res.json({
-        resource: getMcpUrl(),
-        authorization_servers: [baseUrl],
-        jwks_uri: `${baseUrl}/api/auth/mcp/jwks`,
-        scopes_supported: ["openid", "profile", "email", "offline_access"],
-        bearer_methods_supported: ["header"],
-        resource_signing_alg_values_supported: ["RS256", "none"],
-      });
-    });
-
-    // OAuth Authorization Server Metadata (RFC8414)
-    this.app.get("/.well-known/oauth-authorization-server", (req, res) => {
-      const baseUrl = getBaseUrl();
-
-      res.json({
-        issuer: baseUrl,
-        authorization_endpoint: `${baseUrl}/oauth/authorize`,
-        token_endpoint: `${baseUrl}/api/auth/mcp/token`,
-        userinfo_endpoint: `${baseUrl}/api/auth/mcp/userinfo`,
-        jwks_uri: `${baseUrl}/api/auth/mcp/jwks`,
-        registration_endpoint: `${baseUrl}/api/auth/mcp/register`,
-        scopes_supported: ["openid", "profile", "email", "offline_access"],
-        response_types_supported: ["code"],
-        response_modes_supported: ["query"],
-        grant_types_supported: ["authorization_code", "refresh_token"],
-        subject_types_supported: ["public"],
-        id_token_signing_alg_values_supported: ["RS256", "none"],
-        token_endpoint_auth_methods_supported: [
-          "client_secret_basic",
-          "client_secret_post",
-          "none",
-        ],
-        code_challenge_methods_supported: ["S256"],
-        claims_supported: [
-          "sub",
-          "iss",
-          "aud",
-          "exp",
-          "nbf",
-          "iat",
-          "jti",
-          "email",
-          "email_verified",
-          "name",
-        ],
-      });
-    });
+    // The provider owns the issuer, endpoints and algorithms advertised at both discovery URLs.
+    this.app.get(
+      [
+        "/.well-known/oauth-authorization-server",
+        "/.well-known/oauth-authorization-server/api/auth",
+      ],
+      async (_req, res) => {
+        const metadata = await auth.handler(
+          new Request(getAuthUrl() + "/.well-known/oauth-authorization-server"),
+        );
+        res
+          .status(metadata.status)
+          .set(Object.fromEntries(metadata.headers))
+          .send(await metadata.text());
+      },
+    );
   }
 
   /**

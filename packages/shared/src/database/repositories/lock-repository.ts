@@ -3,6 +3,7 @@
  * Drizzle ORM queries for lock CRUD operations
  */
 
+import { withDrizzleWrite } from "../drizzle-write.js";
 import { eq, and, like } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { executionLock, workflowExecution } from "../schema.js";
@@ -39,23 +40,25 @@ export class LockRepository {
   constructor(private db: BetterSQLite3Database<typeof schema>) {}
 
   async create(input: CreateLockInput): Promise<void> {
-    this.db.transaction(
-      (tx) => {
-        tx.insert(executionLock)
-          .values({
-            id: input.id,
-            executionId: input.executionId,
-            nodeId: input.nodeId,
-            reason: input.reason,
-            lockedBy: input.lockedBy,
-            pin: input.pin,
-            status: input.status ?? "active",
-            createdAt: input.createdAt,
-          })
-          .run();
-        this.recordLockChange(tx, input.executionId);
-      },
-      { behavior: "immediate" },
+    await withDrizzleWrite(this.db, () =>
+      this.db.transaction(
+        (tx) => {
+          tx.insert(executionLock)
+            .values({
+              id: input.id,
+              executionId: input.executionId,
+              nodeId: input.nodeId,
+              reason: input.reason,
+              lockedBy: input.lockedBy,
+              pin: input.pin,
+              status: input.status ?? "active",
+              createdAt: input.createdAt,
+            })
+            .run();
+          this.recordLockChange(tx, input.executionId);
+        },
+        { behavior: "immediate" },
+      ),
     );
   }
 
@@ -104,21 +107,23 @@ export class LockRepository {
     if (extra?.unlockedAt !== undefined) {
       updates.unlockedAt = extra.unlockedAt;
     }
-    this.db.transaction(
-      (tx) => {
-        const lock = tx
-          .select({ executionId: executionLock.executionId })
-          .from(executionLock)
-          .where(eq(executionLock.id, lockId))
-          .get();
-        const result = tx
-          .update(executionLock)
-          .set(updates)
-          .where(eq(executionLock.id, lockId))
-          .run();
-        if (lock && result.changes > 0) this.recordLockChange(tx, lock.executionId);
-      },
-      { behavior: "immediate" },
+    await withDrizzleWrite(this.db, () =>
+      this.db.transaction(
+        (tx) => {
+          const lock = tx
+            .select({ executionId: executionLock.executionId })
+            .from(executionLock)
+            .where(eq(executionLock.id, lockId))
+            .get();
+          const result = tx
+            .update(executionLock)
+            .set(updates)
+            .where(eq(executionLock.id, lockId))
+            .run();
+          if (lock && result.changes > 0) this.recordLockChange(tx, lock.executionId);
+        },
+        { behavior: "immediate" },
+      ),
     );
   }
 

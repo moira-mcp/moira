@@ -30,6 +30,11 @@ import { CodespaceResourceError } from "./resource-types.js";
 import { scopedCredentialFailureOutcome } from "./scoped-credential-types.js";
 
 const secret = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
+function deviceCredentialDigest(credential: string): string {
+  if (!secret.safeParse(credential).success)
+    throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Device access denied.");
+  return digestLocalSecret(credential);
+}
 const id = z.string().uuid();
 const generation = z.number().int().positive().safe();
 export const localEnrollmentSchema = z
@@ -271,25 +276,32 @@ export class LocalDeviceService {
   }
   async confirmEnrollment(userId: string, pairingId: string, expectedRevision: number) {
     return this.project(
-      this.repository.confirmEnrollment(
-        userId,
-        id.parse(pairingId),
-        generation.parse(expectedRevision),
-        this.now(),
+      await this.repository.write(() =>
+        this.repository.confirmEnrollment(
+          userId,
+          id.parse(pairingId),
+          generation.parse(expectedRevision),
+          this.now(),
+        ),
       ),
     );
   }
   authenticateDevice(credential: string): LocalDeviceAuth {
-    if (!secret.safeParse(credential).success)
-      throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Device access denied.");
-    return this.repository.authenticateDevice(digestLocalSecret(credential), this.now());
+    return this.repository.authenticateDevice(deviceCredentialDigest(credential), this.now());
+  }
+  /** Authenticate and record activity at admission; compound SQLite writers can authenticate synchronously. */
+  async authenticateRequest(credential: string): Promise<LocalDeviceAuth> {
+    const digest = deviceCredentialDigest(credential);
+    return this.repository.write(() => this.repository.authenticateDevice(digest, this.now()));
   }
   async revokeOwned(userId: string, deviceId: string, expectedGeneration: number) {
-    const revoked = this.repository.revokeOwned(
-      userId,
-      id.parse(deviceId),
-      generation.parse(expectedGeneration),
-      this.now(),
+    const revoked = await this.repository.write(() =>
+      this.repository.revokeOwned(
+        userId,
+        id.parse(deviceId),
+        generation.parse(expectedGeneration),
+        this.now(),
+      ),
     );
     // Owner access is fenced even when remote child disposal remains pending.
     await this.retireDeviceCredentials?.(userId, deviceId, { kind: "device" });
@@ -731,13 +743,16 @@ export class LocalDeviceService {
           "The original repository grant is not currently applied on its owner.",
         );
       if (input.creationRequestId) {
-        this.repository.validateRepositoryCreation(userId, original.identity, {
-          creationRequestId: input.creationRequestId,
-          requestId: input.requestId,
-          githubRepositoryId: input.githubRepositoryId,
-          fullName: input.repository.fullName,
+        const creationRequestId = input.creationRequestId;
+        await this.repository.write(() => {
+          this.repository.validateRepositoryCreation(userId, original.identity, {
+            creationRequestId,
+            requestId: input.requestId,
+            githubRepositoryId: input.githubRepositoryId,
+            fullName: input.repository.fullName,
+          });
+          this.repository.releaseRepositoryCreation(userId, creationRequestId, this.now());
         });
-        this.repository.releaseRepositoryCreation(userId, input.creationRequestId, this.now());
       }
       return device;
     }
@@ -795,13 +810,16 @@ export class LocalDeviceService {
         "The repository grant was not applied on its owner.",
       );
     if (input.creationRequestId) {
-      this.repository.validateRepositoryCreation(userId, result, {
-        creationRequestId: input.creationRequestId,
-        requestId: input.requestId,
-        githubRepositoryId: input.githubRepositoryId,
-        fullName: input.repository.fullName,
+      const creationRequestId = input.creationRequestId;
+      await this.repository.write(() => {
+        this.repository.validateRepositoryCreation(userId, result, {
+          creationRequestId,
+          requestId: input.requestId,
+          githubRepositoryId: input.githubRepositoryId,
+          fullName: input.repository.fullName,
+        });
+        this.repository.releaseRepositoryCreation(userId, creationRequestId, this.now());
       });
-      this.repository.releaseRepositoryCreation(userId, input.creationRequestId, this.now());
     }
     return result;
   }

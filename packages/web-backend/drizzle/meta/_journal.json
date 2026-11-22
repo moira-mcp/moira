@@ -484,6 +484,20 @@
       "when": 1792285200000,
       "tag": "0067_revision_payload",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1795046400000,
+      "tag": "0068_oauth_provider",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1795305600000,
+      "tag": "0069_password_credential_identity",
+      "breakpoints": true
     }
   ]
 }

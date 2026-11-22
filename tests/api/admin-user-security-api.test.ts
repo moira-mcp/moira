@@ -6,11 +6,15 @@
  */
 
 import { describe, test, expect, beforeAll } from "@jest/globals";
+import { oauthTokenDigest } from "../../packages/shared/src/auth/oauth-token.js";
 import { randomUUID } from "node:crypto";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import { execSqliteInDocker } from "../utils/docker-command.js";
 import {
   createTestUserViaApi,
+  registerOAuthClient,
+  getAuthorizationCode,
+  exchangeCodeForToken,
   formatSessionCookie,
   getAdminSessionCookie,
   signInUser,
@@ -24,6 +28,22 @@ let targetUserPassword: string;
 let adminCookie: string;
 let adminUserId: string;
 let targetUserId: string;
+
+async function issueTargetGrant() {
+  const client = await registerOAuthClient(BASE_URL);
+  const cookie = await signInUser(BASE_URL, targetUserEmail, targetUserPassword);
+  const authorization = await getAuthorizationCode(BASE_URL, client.client_id, cookie);
+  const tokens = await exchangeCodeForToken(BASE_URL, authorization, client);
+  const id = execSqliteInDocker(
+    `SELECT id FROM oauthAccessToken WHERE token='${oauthTokenDigest(tokens.access_token)}'`,
+  );
+  const consent = execSqliteInDocker(
+    `SELECT id FROM oauthConsent WHERE clientId='${client.client_id}' AND userId='${targetUserId}'`,
+  );
+  expect(id).toBeTruthy();
+  expect(consent).toBeTruthy();
+  return { client, tokens, id, consent };
+}
 
 /** Fresh session cookie for the target user (earlier tests may have revoked the previous one). */
 async function signInTarget(): Promise<string> {
@@ -309,19 +329,16 @@ describe("Admin User Security API", () => {
       };
       const plaintextApiToken = apiTokenData.token;
 
-      const oauthTokenId = randomUUID();
-      const oauthAccessToken = randomUUID();
-      const oauthRefreshToken = randomUUID();
-      const oauthConsentId = randomUUID();
+      const {
+        client: oauthClient,
+        tokens: issued,
+        id: oauthTokenId,
+        consent: oauthConsentId,
+      } = await issueTargetGrant();
+      const oauthClientId = oauthClient.client_id;
+      const { access_token: oauthAccessToken, refresh_token: oauthRefreshToken } = issued;
       const linkedAccountId = randomUUID();
-      const oauthClientId = `temporary-recovery-${randomUUID()}`;
       const now = new Date().toISOString();
-      execSqliteInDocker(
-        `INSERT INTO oauthAccessToken (id, accessToken, refreshToken, accessTokenExpiresAt, refreshTokenExpiresAt, clientId, userId, scopes, createdAt, updatedAt) VALUES ('${oauthTokenId}', '${oauthAccessToken}', '${oauthRefreshToken}', '${new Date(Date.now() + 300_000).toISOString()}', '${new Date(Date.now() + 600_000).toISOString()}', '${oauthClientId}', '${targetUserId}', 'openid email profile', '${now}', '${now}')`,
-      );
-      execSqliteInDocker(
-        `INSERT INTO oauthConsent (id, clientId, userId, scopes, createdAt, updatedAt, consentGiven) VALUES ('${oauthConsentId}', '${oauthClientId}', '${targetUserId}', 'openid email profile', '${now}', '${now}', 1)`,
-      );
       execSqliteInDocker(
         `INSERT INTO account (id, accountId, providerId, userId, accessToken, refreshToken, idToken, accessTokenExpiresAt, refreshTokenExpiresAt, scope, createdAt, updatedAt) VALUES ('${linkedAccountId}', 'linked-${linkedAccountId}', 'github', '${targetUserId}', 'linked-access-secret', 'linked-refresh-secret', 'linked-id-secret', '${new Date(Date.now() + 300_000).toISOString()}', '${new Date(Date.now() + 600_000).toISOString()}', 'user:email', '${now}', '${now}')`,
       );
@@ -387,12 +404,11 @@ describe("Admin User Security API", () => {
       expect(revokedOAuth.status).toBe(401);
       const revokedRefresh = await fetch(`${BASE_URL}/api/auth/mcp/token`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: new URLSearchParams({
           grant_type: "refresh_token",
           refresh_token: oauthRefreshToken,
           client_id: oauthClientId,
-          client_secret: "revoked-client-secret",
+          client_secret: oauthClient.client_secret,
         }),
       });
       expect(revokedRefresh.status).toBe(401);
@@ -458,10 +474,14 @@ describe("Admin User Security API", () => {
       "rolls back every recovery mutation when %s fails",
       async (failurePoint) => {
         const rollbackPassword = `Rollback-${Date.now()}!`;
-        const oauthTokenId = randomUUID();
-        const oauthConsentId = randomUUID();
+        const {
+          client: oauthClient,
+          tokens: issued,
+          id: oauthTokenId,
+          consent: oauthConsentId,
+        } = await issueTargetGrant();
+        const oauthClientId = oauthClient.client_id;
         const linkedAccountId = randomUUID();
-        const oauthClientId = `rollback-recovery-${randomUUID()}`;
         const triggerName = `rollback_recovery_${randomUUID().replaceAll("-", "")}`;
         const now = new Date().toISOString();
 
@@ -478,12 +498,6 @@ describe("Admin User Security API", () => {
         expect(apiTokenResponse.status).toBe(201);
         const rollbackApiToken = ((await apiTokenResponse.json()) as any).data as { id: string };
 
-        execSqliteInDocker(
-          `INSERT INTO oauthAccessToken (id, accessToken, refreshToken, accessTokenExpiresAt, refreshTokenExpiresAt, clientId, userId, scopes, createdAt, updatedAt) VALUES ('${oauthTokenId}', 'rollback-access', 'rollback-refresh', '${new Date(Date.now() + 300_000).toISOString()}', '${new Date(Date.now() + 600_000).toISOString()}', '${oauthClientId}', '${targetUserId}', 'openid email profile', '${now}', '${now}')`,
-        );
-        execSqliteInDocker(
-          `INSERT INTO oauthConsent (id, clientId, userId, scopes, createdAt, updatedAt, consentGiven) VALUES ('${oauthConsentId}', '${oauthClientId}', '${targetUserId}', 'openid email profile', '${now}', '${now}', 1)`,
-        );
         execSqliteInDocker(
           `INSERT INTO account (id, accountId, providerId, userId, accessToken, refreshToken, idToken, accessTokenExpiresAt, refreshTokenExpiresAt, scope, createdAt, updatedAt) VALUES ('${linkedAccountId}', 'linked-${linkedAccountId}', 'github', '${targetUserId}', 'rollback-linked-access', 'rollback-linked-refresh', 'rollback-linked-id', '${new Date(Date.now() + 300_000).toISOString()}', '${new Date(Date.now() + 600_000).toISOString()}', 'user:email', '${now}', '${now}')`,
         );
@@ -538,7 +552,7 @@ describe("Admin User Security API", () => {
           ).toBe("1");
           expect(
             execSqliteInDocker(
-              `SELECT COUNT(*) FROM oauthAccessToken WHERE id = '${oauthTokenId}' AND accessToken = 'rollback-access' AND refreshToken = 'rollback-refresh'`,
+              `SELECT COUNT(*) FROM oauthAccessToken a JOIN oauthRefreshToken r ON r.id=a.refreshId WHERE a.id = '${oauthTokenId}' AND a.token = '${oauthTokenDigest(issued.access_token)}' AND r.token = '${oauthTokenDigest(issued.refresh_token)}'`,
             ),
           ).toBe("1");
           expect(
@@ -564,7 +578,7 @@ describe("Admin User Security API", () => {
         } finally {
           execSqliteInDocker(`DELETE FROM session WHERE id = '${oldSessionId}'`);
           execSqliteInDocker(`DELETE FROM apiToken WHERE id = '${rollbackApiToken.id}'`);
-          execSqliteInDocker(`DELETE FROM oauthAccessToken WHERE id = '${oauthTokenId}'`);
+          execSqliteInDocker(`DELETE FROM oauthClient WHERE clientId = '${oauthClientId}'`);
           execSqliteInDocker(`DELETE FROM oauthConsent WHERE id = '${oauthConsentId}'`);
           execSqliteInDocker(`DELETE FROM account WHERE id = '${linkedAccountId}'`);
         }

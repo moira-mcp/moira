@@ -524,7 +524,7 @@ describe("workflow content history", () => {
       conflicts: [],
       clearConflicts: [],
     };
-    catalog.apply({
+    await catalog.apply({
       ...common,
       workflows: [
         {
@@ -540,7 +540,7 @@ describe("workflow content history", () => {
     });
     expect(snapshots(id).map((row) => row.authorId)).toEqual([OWNER, null]);
     expect(JSON.parse(snapshots(id)[1].content).metadata.description).toBe("catalog");
-    catalog.apply({
+    await catalog.apply({
       ...common,
       workflows: [
         { owner: OWNER, slug: "history-fixture", workflowId: id, state: { lifecycle: "absent" } },

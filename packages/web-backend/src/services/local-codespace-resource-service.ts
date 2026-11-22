@@ -1,3 +1,4 @@
+import { withSqliteWrite } from "@mcp-moira/shared/database/sqlite-write";
 import { createHash } from "node:crypto";
 import type Database from "better-sqlite3";
 import { z } from "zod";
@@ -202,55 +203,53 @@ export class LocalCodespaceResourceService {
           captured.lifecycleAction === "delete" ||
           (captured.lifecycleAction === undefined && space.desiredState === "deleted")
         ) {
-          this.sqlite
-            .transaction(() => {
-              const active = this.devices.repository.getActiveDevice(userId, binding.deviceId);
-              if (
-                active.deviceGeneration !== device.deviceGeneration ||
-                active.connectionId !== device.connectionId
+          await withSqliteWrite(() => {
+            const active = this.devices.repository.getActiveDevice(userId, binding.deviceId);
+            if (
+              active.deviceGeneration !== device.deviceGeneration ||
+              active.connectionId !== device.connectionId
+            )
+              throw new CodespaceResourceError(
+                "CODESPACE_AUTHORIZATION_REQUIRED",
+                "Controller authority changed during retirement.",
+              );
+            const route = this.repository.getOwned(userId, resourceId);
+            if (
+              route?.retiredRequestId === originalId &&
+              route.retiredGeneration === resourceGeneration
+            )
+              return;
+            const current = this.devices.getBinding(userId, resourceId);
+            if (
+              !route ||
+              route.retiredAt !== null ||
+              route.connectionId !== resource.connectionId ||
+              route.routeGeneration !== resource.routeGeneration ||
+              !current ||
+              current.deviceId !== binding.deviceId ||
+              current.repositoryId !== binding.repositoryId ||
+              current.profileId !== binding.profileId ||
+              current.connectionId !== binding.connectionId ||
+              current.deviceGeneration !== binding.deviceGeneration
+            )
+              throw new CodespaceResourceError(
+                "CODESPACE_AUTHORIZATION_REQUIRED",
+                "Local resource authority changed during retirement.",
+              );
+            this.sqlite
+              .prepare(
+                "UPDATE codespaceLocalResourceBinding SET revokedAt=? WHERE resourceId=? AND userId=? AND revokedAt IS NULL",
               )
-                throw new CodespaceResourceError(
-                  "CODESPACE_AUTHORIZATION_REQUIRED",
-                  "Controller authority changed during retirement.",
-                );
-              const route = this.repository.getOwned(userId, resourceId);
-              if (
-                route?.retiredRequestId === originalId &&
-                route.retiredGeneration === resourceGeneration
-              )
-                return;
-              const current = this.devices.getBinding(userId, resourceId);
-              if (
-                !route ||
-                route.retiredAt !== null ||
-                route.connectionId !== resource.connectionId ||
-                route.routeGeneration !== resource.routeGeneration ||
-                !current ||
-                current.deviceId !== binding.deviceId ||
-                current.repositoryId !== binding.repositoryId ||
-                current.profileId !== binding.profileId ||
-                current.connectionId !== binding.connectionId ||
-                current.deviceGeneration !== binding.deviceGeneration
-              )
-                throw new CodespaceResourceError(
-                  "CODESPACE_AUTHORIZATION_REQUIRED",
-                  "Local resource authority changed during retirement.",
-                );
-              this.sqlite
-                .prepare(
-                  "UPDATE codespaceLocalResourceBinding SET revokedAt=? WHERE resourceId=? AND userId=? AND revokedAt IS NULL",
-                )
-                .run(this.now(), resourceId, userId);
-              this.sqlite
-                .prepare("DELETE FROM workspaceAgentCredential WHERE resourceId=? AND userId=?")
-                .run(resourceId, userId);
-              this.repository.retire(userId, resourceId, {
-                requestId: originalId,
-                resourceGeneration,
-                retiredAt: this.now(),
-              });
-            })
-            .immediate();
+              .run(this.now(), resourceId, userId);
+            this.sqlite
+              .prepare("DELETE FROM workspaceAgentCredential WHERE resourceId=? AND userId=?")
+              .run(resourceId, userId);
+            this.repository.retire(userId, resourceId, {
+              requestId: originalId,
+              resourceGeneration,
+              retiredAt: this.now(),
+            });
+          }, this.sqlite);
           return this.getCodespace(userId, resourceId);
         }
       }
@@ -494,84 +493,80 @@ export class LocalCodespaceResourceService {
       repositoryId = localRepositoryTargetId(deviceId, input.repositoryId),
       requestedRef = input.ref,
       operationMarker = input.operationMarker;
-    const existing = this.repository.getOwned(userId, resourceId);
-    if (existing) {
-      const binding = this.devices.getBinding(userId, resourceId);
-      if (
-        existing.repositoryId !== repositoryId ||
-        existing.requestedRef !== requestedRef ||
-        existing.operationMarker !== operationMarker ||
-        existing.routeGeneration !== input.resourceGeneration ||
-        existing.retiredAt !== null ||
-        !binding ||
-        binding.deviceId !== deviceId
-      )
-        throw new CodespaceResourceError(
-          "CODESPACE_GENERATION_CONFLICT",
-          "Resource registration identity changed.",
-        );
-      return {
-        resourceId,
-        repositoryId: input.repositoryId,
-        resourceGeneration: existing.routeGeneration,
-      };
-    }
-    const connection = this.sqlite
-      .prepare(
-        "SELECT credentialGeneration FROM codespaceConnection WHERE id=? AND userId=? AND status='connected'",
-      )
-      .get(device.connectionId, userId) as { credentialGeneration: number } | undefined;
-    if (!connection)
-      throw new CodespaceResourceError(
-        "CODESPACE_AUTHORIZATION_REQUIRED",
-        "Device connection changed.",
-      );
-    const machine = device.owner.local.policy.machine,
-      now = this.now();
-    this.sqlite
-      .transaction(() => {
-        const current = this.devices.getDeviceIdentity(userId, device.deviceId);
+    const machine = device.owner.local.policy.machine;
+    return withSqliteWrite(() => {
+      const existing = this.repository.getOwned(userId, resourceId);
+      if (existing) {
+        const binding = this.devices.getBinding(userId, resourceId);
         if (
-          current.status !== "active" ||
-          current.deviceGeneration !== device.deviceGeneration ||
-          current.connectionId !== device.connectionId
+          existing.repositoryId !== repositoryId ||
+          existing.requestedRef !== requestedRef ||
+          existing.operationMarker !== operationMarker ||
+          existing.routeGeneration !== input.resourceGeneration ||
+          existing.retiredAt !== null ||
+          !binding ||
+          binding.deviceId !== deviceId
         )
           throw new CodespaceResourceError(
             "CODESPACE_GENERATION_CONFLICT",
-            "Device connection changed.",
+            "Resource registration identity changed.",
           );
-        this.repository.reserve({
-          id: resourceId,
-          userId,
-          connectionId: device.connectionId,
-          authorizationGeneration: connection.credentialGeneration,
-          repositoryId,
-          repositoryFullName: repository.fullName,
-          requestedRef,
-          operationMarker,
-          routeGeneration: input.resourceGeneration,
-          createdAt: now,
-          retiredAt: null,
-          retiredGeneration: null,
-          retiredRequestId: null,
-        });
-        this.devices.bindResource({
-          userId,
-          deviceId: device.deviceId,
-          deviceGeneration: device.deviceGeneration,
-          connectionId: device.connectionId,
+        return {
           resourceId,
-          repositoryId: repository.id,
-          profileId: machine.name,
-        });
-      })
-      .immediate();
-
-    return {
-      resourceId,
-      repositoryId: input.repositoryId,
-      resourceGeneration: input.resourceGeneration,
-    };
+          repositoryId: input.repositoryId,
+          resourceGeneration: existing.routeGeneration,
+        };
+      }
+      const connection = this.sqlite
+        .prepare(
+          "SELECT credentialGeneration FROM codespaceConnection WHERE id=? AND userId=? AND status='connected'",
+        )
+        .get(device.connectionId, userId) as { credentialGeneration: number } | undefined;
+      if (!connection)
+        throw new CodespaceResourceError(
+          "CODESPACE_AUTHORIZATION_REQUIRED",
+          "Device connection changed.",
+        );
+      const current = this.devices.getDeviceIdentity(userId, device.deviceId);
+      if (
+        current.status !== "active" ||
+        current.deviceGeneration !== device.deviceGeneration ||
+        current.connectionId !== device.connectionId
+      )
+        throw new CodespaceResourceError(
+          "CODESPACE_GENERATION_CONFLICT",
+          "Device connection changed.",
+        );
+      this.repository.reserve({
+        id: resourceId,
+        userId,
+        connectionId: device.connectionId,
+        authorizationGeneration: connection.credentialGeneration,
+        repositoryId,
+        repositoryFullName: repository.fullName,
+        requestedRef,
+        operationMarker,
+        routeGeneration: input.resourceGeneration,
+        createdAt: this.now(),
+        retiredAt: null,
+        retiredGeneration: null,
+        retiredRequestId: null,
+      });
+      this.devices.repository.bindResource({
+        userId,
+        deviceId: device.deviceId,
+        deviceGeneration: device.deviceGeneration,
+        connectionId: device.connectionId,
+        resourceId,
+        repositoryId: repository.id,
+        profileId: machine.name,
+      });
+      return {
+        resourceId,
+        repositoryId: input.repositoryId,
+        resourceGeneration: input.resourceGeneration,
+      };
+    }, this.sqlite);
   }
   async ensureRunning(userId: string, resourceId: string) {
     const resource = await this.getCodespace(userId, resourceId);

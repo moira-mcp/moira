@@ -33,7 +33,7 @@ export interface ScopedCredentialServiceDependencies {
     config: Extract<CodespaceGitHubConfigStatus, { state: "available" }>,
   ) => GitHubScopedCredentialClient;
   authorize: (bearer: string, input: ScopedCredentialAcquire) => Promise<ScopedCredentialAuthority>;
-  authenticate: (bearer: string) => string;
+  authenticate: (bearer: string) => string | Promise<string>;
   isAuthorityCurrent?: (
     authority: ScopedCredentialAuthority,
     input: ScopedCredentialAcquire,
@@ -116,7 +116,7 @@ export class ScopedCredentialService {
     };
     return { parent, witness };
   }
-  private update(
+  private async update(
     row: StoredScopedCredential,
     state: StoredScopedCredential["state"],
     token: string | null,
@@ -134,15 +134,17 @@ export class ScopedCredentialService {
       },
     );
     if (
-      !this.dependencies.repository.updateScopedCredential({
-        id: row.id,
-        userId: row.userId,
-        provider: row.provider,
-        expectedState: row.state,
-        state,
-        envelope,
-        now: this.now(),
-      })
+      !(await this.dependencies.repository.write((repo) =>
+        repo.updateScopedCredential({
+          id: row.id,
+          userId: row.userId,
+          provider: row.provider,
+          expectedState: row.state,
+          state,
+          envelope,
+          now: this.now(),
+        }),
+      ))
     )
       throw new ScopedCredentialError("SCOPED_CREDENTIAL_CONFLICT");
     return { ...row, state, envelope };
@@ -204,12 +206,19 @@ export class ScopedCredentialService {
       );
     try {
       const current = await this.authority(bearer, input, false);
+      const stored = this.dependencies.repository.getScopedCredential(userId, previous.provider, {
+        credentialId: previous.id,
+      });
+      const now = this.now();
       if (
         !same(current.witness, witness) ||
+        stored?.state !== "live" ||
+        !same(stored.envelope, previous.envelope) ||
         !payload.token ||
         payload.expiresAt === null ||
-        payload.expiresAt <= this.now() ||
-        (witness.authority.useUntil !== null && witness.authority.useUntil <= this.now())
+        payload.expiresAt <= now ||
+        witness.parentExpiresAt <= now ||
+        (witness.authority.useUntil !== null && witness.authority.useUntil <= now)
       )
         throw new ScopedCredentialError("SCOPED_CREDENTIAL_AUTHORITY_REFUSED", 403);
     } catch {
@@ -232,7 +241,7 @@ export class ScopedCredentialService {
     bearer: string,
     input: ScopedCredentialAcquire,
   ): Promise<ScopedCredentialCollection> {
-    const userId = this.dependencies.authenticate(bearer);
+    const userId = await this.dependencies.authenticate(bearer);
     await this.dependencies.authorize(bearer, input);
     const row = this.dependencies.repository.getScopedCredential(
       userId,
@@ -249,7 +258,7 @@ export class ScopedCredentialService {
     return { state: "unconfirmed" };
   }
   async acquire(bearer: string, input: ScopedCredentialAcquire): Promise<ScopedCredentialView> {
-    const userId = this.dependencies.authenticate(bearer);
+    const userId = await this.dependencies.authenticate(bearer);
     const previous = this.dependencies.repository.getScopedCredential(
       userId,
       CODESPACE_PROVIDER_GITHUB,
@@ -267,21 +276,23 @@ export class ScopedCredentialService {
     const { vault, client } = this.configuration(),
       id = randomUUID();
     if (
-      !this.dependencies.repository.reserveScopedCredential({
-        id,
-        userId,
-        provider: CODESPACE_PROVIDER_GITHUB,
-        requestId: input.requestId,
-        scopeMetadata: JSON.stringify(witness),
-        envelope: vault.encryptScoped(
-          userId,
-          CODESPACE_PROVIDER_GITHUB,
+      !(await this.dependencies.repository.write((repo) =>
+        repo.reserveScopedCredential({
           id,
-          witness.credentialGeneration,
-          { token: null, expiresAt: null },
-        ),
-        now: this.now(),
-      })
+          userId,
+          provider: CODESPACE_PROVIDER_GITHUB,
+          requestId: input.requestId,
+          scopeMetadata: JSON.stringify(witness),
+          envelope: vault.encryptScoped(
+            userId,
+            CODESPACE_PROVIDER_GITHUB,
+            id,
+            witness.credentialGeneration,
+            { token: null, expiresAt: null },
+          ),
+          now: this.now(),
+        }),
+      ))
     )
       throw new ScopedCredentialError("SCOPED_CREDENTIAL_CONFLICT");
     let row = this.dependencies.repository.getScopedCredential(userId, CODESPACE_PROVIDER_GITHUB, {
@@ -297,14 +308,14 @@ export class ScopedCredentialService {
     } catch (error) {
       if (error instanceof ScopedCredentialIssuanceRefused) {
         try {
-          this.update(row, "refused", null, null);
+          await this.update(row, "refused", null, null);
         } catch {
           // The provider's confirmed refusal remains known even if its receipt cannot advance.
         }
         throw new ScopedCredentialError("SCOPED_CREDENTIAL_ISSUANCE_REFUSED", 403);
       }
       try {
-        this.update(row, "unconfirmed", null, null);
+        await this.update(row, "unconfirmed", null, null);
       } catch {
         // The durable issuing reservation already fences this submitted request.
       }
@@ -312,7 +323,7 @@ export class ScopedCredentialService {
     }
     // The exact known capability enters encrypted custody before any metadata checks.
     try {
-      row = this.update(row, "dispose_pending", candidate.token, candidate.expiresAt);
+      row = await this.update(row, "dispose_pending", candidate.token, candidate.expiresAt);
     } catch {
       // A storage failure cannot turn a known provider capability into a discarded one.
       try {
@@ -322,7 +333,7 @@ export class ScopedCredentialService {
       }
       // Keep the original nonce fenced even if recording confirmed disposal also fails.
       try {
-        this.update(row, "disposed", null, null);
+        await this.update(row, "disposed", null, null);
       } catch {
         /* The original issuing row remains fenced. */
       }
@@ -335,23 +346,14 @@ export class ScopedCredentialService {
       const current = await this.authority(bearer, input, false);
       if (!same(current.witness, witness))
         throw new ScopedCredentialError("SCOPED_CREDENTIAL_AUTHORITY_REFUSED", 403);
-      const result = scopedCredentialViewSchema.parse({
-        credentialId: id,
-        token: candidate.token,
-        expiresAt: candidate.expiresAt,
-        useUntil: Math.min(
-          candidate.expiresAt!,
-          witness.parentExpiresAt,
-          witness.authority.useUntil ?? candidate.expiresAt!,
-        ),
-        repositoryFullName: witness.authority.repositoryFullName,
-      });
-      this.update(retained, "live", candidate.token, candidate.expiresAt);
-      return result;
+      row = await this.update(retained, "live", candidate.token, candidate.expiresAt);
     } catch {
       await this.dispose(retained);
       throw new ScopedCredentialError("SCOPED_CREDENTIAL_SCOPE_REFUSED", 403);
     }
+    // Admission to the writer may have waited. Apply the ordinary delivery checks
+    // to the committed credential and its current authority before releasing it.
+    return this.existing(bearer, input, row);
   }
   private async dispose(row: StoredScopedCredential) {
     try {
@@ -365,9 +367,9 @@ export class ScopedCredentialService {
       if (!payload.token)
         throw new ScopedCredentialError("SCOPED_CREDENTIAL_OUTCOME_UNCONFIRMED", 503);
       if (row.state !== "dispose_pending")
-        row = this.update(row, "dispose_pending", payload.token, payload.expiresAt);
+        row = await this.update(row, "dispose_pending", payload.token, payload.expiresAt);
       await client.revokeScopedToken(payload.token);
-      this.update(row, "disposed", null, null);
+      await this.update(row, "disposed", null, null);
     } catch (error) {
       if (
         error instanceof ScopedCredentialError &&
@@ -382,7 +384,7 @@ export class ScopedCredentialService {
     credentialId: string,
     input: ScopedCredentialRelease,
   ): Promise<void> {
-    const userId = this.dependencies.authenticate(bearer),
+    const userId = await this.dependencies.authenticate(bearer),
       row = this.dependencies.repository.getScopedCredential(userId, CODESPACE_PROVIDER_GITHUB, {
         credentialId,
       });

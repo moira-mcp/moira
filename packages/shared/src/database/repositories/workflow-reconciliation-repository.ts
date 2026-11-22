@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
+import { withSqliteWrite } from "../sqlite-write.js";
 import { migrateWorkflowGraph } from "@mcp-moira/workflow-engine/migration";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 import { drizzle } from "drizzle-orm/better-sqlite3";
@@ -503,8 +504,8 @@ export class WorkflowReconciliationRepository {
     }));
   }
 
-  apply(plan: WorkflowReconciliationApplyPlan): void {
-    const applyTransaction = this.sqlite.transaction(() => {
+  apply(plan: WorkflowReconciliationApplyPlan): Promise<void> {
+    return withSqliteWrite(() => {
       this.assertConflictPreconditions(plan.conflictPreconditions);
       this.assertBaselinePreconditions(plan.baselinePreconditions);
       this.assertPreconditions(plan.preconditions);
@@ -637,8 +638,7 @@ export class WorkflowReconciliationRepository {
             resolution.createdAt,
           );
       }
-    });
-    applyTransaction();
+    }, this.sqlite);
   }
 
   private assertConflictPreconditions(preconditions: WorkflowConflictPrecondition[]): void {

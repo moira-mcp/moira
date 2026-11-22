@@ -3,6 +3,7 @@
  */
 
 import { getDatabase, getSqliteInstance } from "../database/connection.js";
+import { withSqliteWrite } from "../database/sqlite-write.js";
 import { upgradeStoredWorkflowDefinitions } from "./workflow-definition-upgrade.js";
 import { WorkflowRepository } from "../database/repositories/workflow-repository.js";
 import { ExecutionRepository } from "../database/repositories/execution-repository.js";
@@ -596,7 +597,8 @@ export function getWorkflowMutationService(): WorkflowMutationService {
 export async function initializeWorkflowValidationCache(): Promise<void> {
   // Stored definitions are upgraded to the current schema shape before anything validates or
   // compares them; a row already at the current version is untouched.
-  upgradeStoredWorkflowDefinitions(getSqliteInstance());
+  const sqlite = getSqliteInstance();
+  await withSqliteWrite(() => upgradeStoredWorkflowDefinitions(sqlite), sqlite);
   const mutationService = getWorkflowMutationService();
   await mutationService.initialize();
 }

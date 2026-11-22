@@ -1,3 +1,4 @@
+import { withSqliteWrite } from "@mcp-moira/shared/database/sqlite-write";
 import { createHash, createHmac } from "node:crypto";
 import { z } from "zod";
 import {
@@ -162,7 +163,7 @@ export class GitHubResourceService {
       );
     return current;
   }
-  private async selectDevice(userId: string, deviceId?: string) {
+  private selectDevice(userId: string, deviceId?: string) {
     this.account(userId);
     const candidates = this.devices
       .listRegistered(userId)
@@ -548,46 +549,49 @@ export class GitHubResourceService {
   ) {
     const original = controllerRequestIdSchema.parse(requestId);
     gitFetchRefSchema.parse(ref);
-    const repository = this.listRepositories(userId).find((entry) => entry.id === repositoryId);
-    if (!repository)
-      throw new CodespaceResourceError(
-        "CODESPACE_AUTHORIZATION_REQUIRED",
-        "Repository is not approved",
-      );
-    const device = await this.selectDevice(userId, options.deviceId),
-      connection = new CodespaceConnectionRepository(this.db).getConnection(
+    const resource = await withSqliteWrite(() => {
+      const repository = this.listRepositories(userId).find((entry) => entry.id === repositoryId);
+      if (!repository)
+        throw new CodespaceResourceError(
+          "CODESPACE_AUTHORIZATION_REQUIRED",
+          "Repository is not approved",
+        );
+      const device = this.selectDevice(userId, options.deviceId),
+        connection = new CodespaceConnectionRepository(this.db).getConnection(
+          userId,
+          "github-codespaces",
+        );
+      if (connection?.status !== "connected")
+        throw new CodespaceResourceError(
+          "CODESPACE_AUTHORIZATION_REQUIRED",
+          "Current GitHub connection required",
+        );
+      return this.identities.reserve({
+        id: original.slice(4),
         userId,
-        "github-codespaces",
-      );
-    if (connection?.status !== "connected")
-      throw new CodespaceResourceError(
-        "CODESPACE_AUTHORIZATION_REQUIRED",
-        "Current GitHub connection required",
-      );
-    const resource = this.identities.reserve({
-      id: original.slice(4),
-      userId,
-      connectionId: connection.id,
-      authorizationGeneration: new CodespaceConnectionRepository(this.db).getAuthorityGeneration(
-        userId,
-        connection.id,
-      ),
-      repositoryId: repository.id,
-      repositoryFullName: repository.fullName,
-      requestedRef: ref,
-      devcontainerPath: options.devcontainerPath ?? null,
-      operationMarker: "moira-" + createHash("sha256").update(original).digest("hex").slice(0, 24),
-      providerResourceName: null,
-      externalOwnerId: connection.externalAccountId,
-      billableOwnerId: connection.externalAccountId,
-      deviceId: device.deviceId,
-      deviceGeneration: device.deviceGeneration,
-      deviceConnectionId: device.connectionId,
-      generation: 1,
-      retirement: "uncreated",
-      revokedAt: null,
-      createdAt: Date.now(),
-    });
+        connectionId: connection.id,
+        authorizationGeneration: new CodespaceConnectionRepository(this.db).getAuthorityGeneration(
+          userId,
+          connection.id,
+        ),
+        repositoryId: repository.id,
+        repositoryFullName: repository.fullName,
+        requestedRef: ref,
+        devcontainerPath: options.devcontainerPath ?? null,
+        operationMarker:
+          "moira-" + createHash("sha256").update(original).digest("hex").slice(0, 24),
+        providerResourceName: null,
+        externalOwnerId: connection.externalAccountId,
+        billableOwnerId: connection.externalAccountId,
+        deviceId: device.deviceId,
+        deviceGeneration: device.deviceGeneration,
+        deviceConnectionId: device.connectionId,
+        generation: 1,
+        retirement: "uncreated",
+        revokedAt: null,
+        createdAt: Date.now(),
+      });
+    }, this.db);
     return this.dispatch(
       userId,
       resource,
@@ -610,7 +614,7 @@ export class GitHubResourceService {
     options: { deviceId?: string; requestId: string },
   ) {
     const requestId = controllerRequestIdSchema.parse(options.requestId),
-      device = await this.selectDevice(userId, options.deviceId);
+      device = this.selectDevice(userId, options.deviceId);
     const connection = new CodespaceConnectionRepository(this.db).getConnection(
       userId,
       "github-codespaces",
@@ -624,60 +628,77 @@ export class GitHubResourceService {
       await this.connection.getAccessToken(userId),
       providerName,
     );
-    if (
-      !observed ||
-      observed.ownerId !== connection.externalAccountId ||
-      observed.billableOwnerId !== connection.externalAccountId ||
-      !connection.repositories.some(
-        (grant) =>
-          grant.externalRepositoryId === observed.repositoryId &&
-          grant.fullName.toLowerCase() === observed.repositoryFullName.toLowerCase(),
-      )
-    )
-      throw new CodespaceResourceError(
-        "CODESPACE_AUTHORIZATION_REQUIRED",
-        "Provider identity is not owned and approved",
-      );
-    const existing = this.identities
-      .listOwned(userId)
-      .find((resource) => resource.providerResourceName === providerName);
-    if (existing) {
-      if (existing.id !== requestId.slice(4)) {
-        const error = new CodespaceResourceError(
-          "CODESPACE_GENERATION_CONFLICT",
-          "Provider resource already has a public identity; use that identity and its observed generation",
-        );
-        error.resourceId = existing.id;
-        throw error;
-      }
-      this.assigned(existing, device);
-      return this.getCodespace(userId, existing.id);
-    }
-    const registered = this.identities.reserve({
-      id: requestId.slice(4),
-      userId,
-      connectionId: connection.id,
-      authorizationGeneration: new CodespaceConnectionRepository(this.db).getAuthorityGeneration(
+    const registeredId = await withSqliteWrite(() => {
+      this.account(userId);
+      const current = new CodespaceConnectionRepository(this.db).getConnection(
         userId,
-        connection.id,
-      ),
-      repositoryId: observed.repositoryId,
-      repositoryFullName: observed.repositoryFullName,
-      requestedRef: observed.ref ?? "HEAD",
-      devcontainerPath: null,
-      operationMarker: "moira-" + createHash("sha256").update(requestId).digest("hex").slice(0, 24),
-      providerResourceName: observed.name,
-      externalOwnerId: observed.ownerId,
-      billableOwnerId: observed.billableOwnerId,
-      deviceId: device.deviceId,
-      deviceGeneration: device.deviceGeneration,
-      deviceConnectionId: device.connectionId,
-      generation: 1,
-      retirement: "owned",
-      revokedAt: null,
-      createdAt: observed.createdAt,
-    });
-    return this.getCodespace(userId, registered.id);
+        "github-codespaces",
+      );
+      const assigned = this.devices.getDeviceIdentity(userId, device.deviceId);
+      if (
+        !current ||
+        current.status !== "connected" ||
+        current.id !== connection.id ||
+        current.externalAccountId !== connection.externalAccountId ||
+        assigned.status !== "active" ||
+        assigned.connectionId !== device.connectionId ||
+        assigned.deviceGeneration !== device.deviceGeneration ||
+        !observed ||
+        observed.ownerId !== connection.externalAccountId ||
+        observed.billableOwnerId !== connection.externalAccountId ||
+        !current.repositories.some(
+          (grant) =>
+            grant.externalRepositoryId === observed.repositoryId &&
+            grant.fullName.toLowerCase() === observed.repositoryFullName.toLowerCase(),
+        )
+      )
+        throw new CodespaceResourceError(
+          "CODESPACE_AUTHORIZATION_REQUIRED",
+          "Provider identity is not owned and approved",
+        );
+      const existing = this.identities
+        .listOwned(userId)
+        .find((resource) => resource.providerResourceName === providerName);
+      if (existing) {
+        if (existing.id !== requestId.slice(4)) {
+          const error = new CodespaceResourceError(
+            "CODESPACE_GENERATION_CONFLICT",
+            "Provider resource already has a public identity; use that identity and its observed generation",
+          );
+          error.resourceId = existing.id;
+          throw error;
+        }
+        this.assigned(existing, device);
+        return existing.id;
+      }
+      const registered = this.identities.reserve({
+        id: requestId.slice(4),
+        userId,
+        connectionId: connection.id,
+        authorizationGeneration: new CodespaceConnectionRepository(this.db).getAuthorityGeneration(
+          userId,
+          connection.id,
+        ),
+        repositoryId: observed.repositoryId,
+        repositoryFullName: observed.repositoryFullName,
+        requestedRef: observed.ref ?? "HEAD",
+        devcontainerPath: null,
+        operationMarker:
+          "moira-" + createHash("sha256").update(requestId).digest("hex").slice(0, 24),
+        providerResourceName: observed.name,
+        externalOwnerId: observed.ownerId,
+        billableOwnerId: observed.billableOwnerId,
+        deviceId: device.deviceId,
+        deviceGeneration: device.deviceGeneration,
+        deviceConnectionId: device.connectionId,
+        generation: 1,
+        retirement: "owned",
+        revokedAt: null,
+        createdAt: observed.createdAt,
+      });
+      return registered.id;
+    }, this.db);
+    return this.getCodespace(userId, registeredId);
   }
   async adopt(
     userId: string,
@@ -705,10 +726,7 @@ export class GitHubResourceService {
         "Use the assigned controller and settle its original operation before changing assignment",
         "Use the assigned controller and collect or settle its original operation before changing the controller assignment.",
       );
-    const device = await this.selectDevice(
-      userId,
-      options.deviceId ?? resource.deviceId ?? undefined,
-    );
+    const device = this.selectDevice(userId, options.deviceId ?? resource.deviceId ?? undefined);
     this.assigned(resource, device);
     return this.dispatch(
       userId,
@@ -792,28 +810,33 @@ export class GitHubResourceService {
           ? "Absent workspace cannot be adopted"
           : "Only confirmed known-name absence permits retirement reauthorization",
       );
-    const currentConnection = repository.getConnection(auth.userId, "github-codespaces"),
-      currentDevice = this.devices.getDeviceIdentity(auth.userId, auth.deviceId);
-    this.account(auth.userId);
-    this.assigned(resource, currentDevice);
-    if (
-      currentDevice.status !== "active" ||
-      canonicalJson(resource) !== canonicalJson(this.identities.getOwned(auth.userId, id)) ||
-      currentConnection?.status !== "connected" ||
-      currentConnection.id !== connection.id ||
-      currentConnection.externalAccountId !== connection.externalAccountId ||
-      repository.getAuthorityGeneration(auth.userId, connection.id) !== authorizationGeneration ||
-      !currentConnection.repositories.some(
-        (entry) =>
-          entry.externalRepositoryId === resource.repositoryId && entry.fullName === grant.fullName,
+    const verifyAuthority = () => {
+      const currentConnection = repository.getConnection(auth.userId, "github-codespaces"),
+        currentDevice = this.devices.getDeviceIdentity(auth.userId, auth.deviceId);
+      this.account(auth.userId);
+      this.assigned(resource, currentDevice);
+      if (
+        currentDevice.status !== "active" ||
+        canonicalJson(resource) !== canonicalJson(this.identities.getOwned(auth.userId, id)) ||
+        currentConnection?.status !== "connected" ||
+        currentConnection.id !== connection.id ||
+        currentConnection.externalAccountId !== connection.externalAccountId ||
+        repository.getAuthorityGeneration(auth.userId, connection.id) !== authorizationGeneration ||
+        !currentConnection.repositories.some(
+          (entry) =>
+            entry.externalRepositoryId === resource.repositoryId &&
+            entry.fullName === grant.fullName,
+        )
       )
-    )
-      throw new CodespaceResourceError(
-        "CODESPACE_GENERATION_CONFLICT",
-        "Assignment authority changed during explicit proof",
-      );
+        throw new CodespaceResourceError(
+          "CODESPACE_GENERATION_CONFLICT",
+          "Assignment authority changed during explicit proof",
+        );
+    };
+    verifyAuthority();
     return {
       resource,
+      verifyAuthority,
       connectionId: connection.id,
       authorizationGeneration,
       repositoryFullName: grant.fullName,
@@ -938,59 +961,57 @@ export class GitHubResourceService {
       );
     const renewalCredential = this.renewalCredential(resource, proof),
       enrollmentDigest = this.digest(canonicalJson(proof));
-    return this.db
-      .transaction(() => {
-        this.assigned(this.current(resource), auth);
-        const existing = this.db
-          .prepare(
-            "SELECT resourceGeneration,enrollmentDigest,currentEnvironmentIdentity,currentRequestId FROM githubWorkspaceRenewal WHERE resourceId=?",
-          )
-          .get(id) as
-          | {
-              resourceGeneration: number;
-              enrollmentDigest: string;
-              currentEnvironmentIdentity: string;
-              currentRequestId: string;
-            }
-          | undefined;
-        if (
-          existing?.resourceGeneration === resource.generation &&
-          (existing.enrollmentDigest !== enrollmentDigest ||
-            existing.currentEnvironmentIdentity !== proof.environmentIdentity ||
-            existing.currentRequestId !== proof.requestId)
+    return withSqliteWrite(() => {
+      this.assigned(this.current(resource), auth);
+      const existing = this.db
+        .prepare(
+          "SELECT resourceGeneration,enrollmentDigest,currentEnvironmentIdentity,currentRequestId FROM githubWorkspaceRenewal WHERE resourceId=?",
         )
-          throw new CodespaceResourceError(
-            "CODESPACE_GENERATION_CONFLICT",
-            "Original enrollment proof changed",
-          );
-        this.db
-          .prepare(
-            `INSERT INTO githubWorkspaceRenewal(resourceId,userId,credentialDigest,resourceGeneration,authorizationGeneration,
+        .get(id) as
+        | {
+            resourceGeneration: number;
+            enrollmentDigest: string;
+            currentEnvironmentIdentity: string;
+            currentRequestId: string;
+          }
+        | undefined;
+      if (
+        existing?.resourceGeneration === resource.generation &&
+        (existing.enrollmentDigest !== enrollmentDigest ||
+          existing.currentEnvironmentIdentity !== proof.environmentIdentity ||
+          existing.currentRequestId !== proof.requestId)
+      )
+        throw new CodespaceResourceError(
+          "CODESPACE_GENERATION_CONFLICT",
+          "Original enrollment proof changed",
+        );
+      this.db
+        .prepare(
+          `INSERT INTO githubWorkspaceRenewal(resourceId,userId,credentialDigest,resourceGeneration,authorizationGeneration,
         root,rootDevice,rootInode,release,enrollmentRequestId,enrollmentDigest,currentRequestId,currentEnvironmentIdentity)
         VALUES(@resourceId,@userId,@credentialDigest,@resourceGeneration,@authorizationGeneration,@root,@rootDevice,@rootInode,@release,@requestId,@enrollmentDigest,@requestId,@environmentIdentity)
         ON CONFLICT(resourceId) DO UPDATE SET credentialDigest=excluded.credentialDigest,resourceGeneration=excluded.resourceGeneration,
           authorizationGeneration=excluded.authorizationGeneration,root=excluded.root,rootDevice=excluded.rootDevice,rootInode=excluded.rootInode,
           release=excluded.release,enrollmentRequestId=excluded.enrollmentRequestId,enrollmentDigest=excluded.enrollmentDigest,
           currentRequestId=excluded.currentRequestId,currentEnvironmentIdentity=excluded.currentEnvironmentIdentity`,
-          )
-          .run({
-            ...proof,
-            resourceId: id,
-            userId: auth.userId,
-            credentialDigest: this.digest(renewalCredential),
-            enrollmentDigest,
-          });
-        const credential = createHmac("sha256", renewalCredential)
-          .update(canonicalJson({ purpose: "workspace-life", ...proof }))
-          .digest("base64url");
-        return this.remoteCredential(
-          resource,
-          proof.environmentIdentity,
-          credential,
-          renewalCredential,
-        );
-      })
-      .immediate();
+        )
+        .run({
+          ...proof,
+          resourceId: id,
+          userId: auth.userId,
+          credentialDigest: this.digest(renewalCredential),
+          enrollmentDigest,
+        });
+      const credential = createHmac("sha256", renewalCredential)
+        .update(canonicalJson({ purpose: "workspace-life", ...proof }))
+        .digest("base64url");
+      return this.remoteCredential(
+        resource,
+        proof.environmentIdentity,
+        credential,
+        renewalCredential,
+      );
+    }, this.db);
   }
   async renew(id: string, bearer: string, value: unknown) {
     this.enabled();
@@ -1031,41 +1052,39 @@ export class GitHubResourceService {
         "CODESPACE_GENERATION_CONFLICT",
         "Workspace renewal binding changed; controller proof required",
       );
-    return this.db
-      .transaction(() => {
-        this.current(resource);
-        const current = this.db
-          .prepare("SELECT * FROM githubWorkspaceRenewal WHERE resourceId=? AND credentialDigest=?")
-          .get(id, this.digest(bearer)) as typeof row;
-        if (
-          !current ||
-          current.resourceGeneration !== resource.generation ||
-          (current.currentEnvironmentIdentity === input.environmentIdentity &&
-            current.currentRequestId !== input.requestId)
+    return withSqliteWrite(() => {
+      this.current(resource);
+      const current = this.db
+        .prepare("SELECT * FROM githubWorkspaceRenewal WHERE resourceId=? AND credentialDigest=?")
+        .get(id, this.digest(bearer)) as typeof row;
+      if (
+        !current ||
+        current.resourceGeneration !== resource.generation ||
+        (current.currentEnvironmentIdentity === input.environmentIdentity &&
+          current.currentRequestId !== input.requestId)
+      )
+        throw new CodespaceResourceError(
+          "CODESPACE_GENERATION_CONFLICT",
+          "Original boot enrollment request changed",
+        );
+      this.db
+        .prepare(
+          "UPDATE githubWorkspaceRenewal SET currentRequestId=?,currentEnvironmentIdentity=? WHERE resourceId=?",
         )
-          throw new CodespaceResourceError(
-            "CODESPACE_GENERATION_CONFLICT",
-            "Original boot enrollment request changed",
-          );
-        this.db
-          .prepare(
-            "UPDATE githubWorkspaceRenewal SET currentRequestId=?,currentEnvironmentIdentity=? WHERE resourceId=?",
-          )
-          .run(input.requestId, input.environmentIdentity, id);
-        const credential = createHmac("sha256", bearer)
-          .update(
-            canonicalJson({
-              purpose: "workspace-life",
-              resourceId: id,
-              resourceGeneration: resource.generation,
-              authorizationGeneration: resource.authorizationGeneration,
-              ...input,
-            }),
-          )
-          .digest("base64url");
-        return this.remoteCredential(resource, input.environmentIdentity, credential, bearer);
-      })
-      .immediate();
+        .run(input.requestId, input.environmentIdentity, id);
+      const credential = createHmac("sha256", bearer)
+        .update(
+          canonicalJson({
+            purpose: "workspace-life",
+            resourceId: id,
+            resourceGeneration: resource.generation,
+            authorizationGeneration: resource.authorizationGeneration,
+            ...input,
+          }),
+        )
+        .digest("base64url");
+      return this.remoteCredential(resource, input.environmentIdentity, credential, bearer);
+    }, this.db);
   }
   async startCodespace(
     userId: string,
@@ -1143,10 +1162,10 @@ export class GitHubResourceService {
           "Explicit owner rebind requires its newly admitted generation and verified authority",
         );
       if (input.resourceGeneration > resource.generation || input.retirement === "retired") {
-        new WorkspaceAuthRepository(this.db).revoke(id);
-        this.db
-          .prepare("DELETE FROM githubWorkspaceRenewal WHERE resourceId=? AND userId=?")
-          .run(id, auth.userId);
+        await withSqliteWrite(() => {
+          preview.verifyAuthority();
+          this.revokeWorkspaceCredentials(auth.userId, id);
+        }, this.db);
       }
       await this.retire(auth.userId, id, input.resourceGeneration - 1);
       const current = await this.rebindPreview(auth, id, input.rebindPurpose);
@@ -1161,18 +1180,21 @@ export class GitHubResourceService {
           "CODESPACE_GENERATION_CONFLICT",
           "Explicit rebind authority changed during retirement",
         );
-      return this.identities.rebind(auth.userId, id, {
-        connectionId: preview.connectionId,
-        authorizationGeneration: preview.authorizationGeneration,
-        deviceId: auth.deviceId,
-        deviceGeneration: auth.deviceGeneration,
-        deviceConnectionId: auth.connectionId,
-        expectedGeneration: resource.generation,
-        resourceGeneration: input.resourceGeneration,
-        repositoryFullName: preview.repositoryFullName,
-        providerResourceName: preview.observed?.name ?? resource.providerResourceName!,
-        retirement: input.retirement,
-      });
+      return withSqliteWrite(() => {
+        current.verifyAuthority();
+        return this.identities.rebind(auth.userId, id, {
+          connectionId: preview.connectionId,
+          authorizationGeneration: preview.authorizationGeneration,
+          deviceId: auth.deviceId,
+          deviceGeneration: auth.deviceGeneration,
+          deviceConnectionId: auth.connectionId,
+          expectedGeneration: resource.generation,
+          resourceGeneration: input.resourceGeneration,
+          repositoryFullName: preview.repositoryFullName,
+          providerResourceName: preview.observed?.name ?? resource.providerResourceName!,
+          retirement: input.retirement,
+        });
+      }, this.db);
     }
     const resource = this.authority(auth.userId, id, true);
     this.assigned(resource, auth);
@@ -1216,15 +1238,23 @@ export class GitHubResourceService {
     }
     this.assigned(this.current(resource), auth);
     if (input.resourceGeneration > resource.generation || input.retirement === "retired") {
-      new WorkspaceAuthRepository(this.db).revoke(id);
-      this.db
-        .prepare("DELETE FROM githubWorkspaceRenewal WHERE resourceId=? AND userId=?")
-        .run(id, auth.userId);
+      await withSqliteWrite(() => {
+        this.assigned(this.current(resource), auth);
+        this.revokeWorkspaceCredentials(auth.userId, id);
+      }, this.db);
     }
     if (input.resourceGeneration > 1)
       await this.retire(auth.userId, id, input.resourceGeneration - 1);
-    this.assigned(this.current(resource), auth);
-    return this.identities.advanceAuthority(auth.userId, id, input);
+    return withSqliteWrite(() => {
+      this.assigned(this.current(resource), auth);
+      return this.identities.advanceAuthority(auth.userId, id, input);
+    }, this.db);
+  }
+  private revokeWorkspaceCredentials(userId: string, id: string) {
+    new WorkspaceAuthRepository(this.db).revoke(id);
+    this.db
+      .prepare("DELETE FROM githubWorkspaceRenewal WHERE resourceId=? AND userId=?")
+      .run(id, userId);
   }
   private assigned(
     resource: GitHubResourceIdentity,
@@ -1324,20 +1354,22 @@ export class GitHubResourceService {
           "CODESPACE_BILLING_UNSUPPORTED",
           "Provider payer does not match current account",
         );
-      const settings = this.creationSettings(auth.userId),
-        prepared = input.prepared;
-      if (
-        prepared.retentionMinutes !== settings.retentionMinutes ||
-        (settings.autoStopEnabled
-          ? prepared.idleTimeoutMinutes !== settings.idleTimeoutMinutes
-          : prepared.idleTimeoutMinutes !== CODESPACE_IDLE_TIMEOUT_MINUTES.maximum)
-      )
-        throw new CodespaceResourceError(
-          "CODESPACE_GENERATION_CONFLICT",
-          "Account creation settings changed; inspect the original owner operation",
-        );
-      this.assigned(this.current(resource), auth);
-      this.identities.markCreationSubmitted(auth.userId, id, resource.generation);
+      const prepared = input.prepared;
+      await withSqliteWrite(() => {
+        const settings = this.creationSettings(auth.userId);
+        if (
+          prepared.retentionMinutes !== settings.retentionMinutes ||
+          (settings.autoStopEnabled
+            ? prepared.idleTimeoutMinutes !== settings.idleTimeoutMinutes
+            : prepared.idleTimeoutMinutes !== CODESPACE_IDLE_TIMEOUT_MINUTES.maximum)
+        )
+          throw new CodespaceResourceError(
+            "CODESPACE_GENERATION_CONFLICT",
+            "Account creation settings changed; inspect the original owner operation",
+          );
+        this.assigned(this.current(resource), auth);
+        this.identities.markCreationSubmitted(auth.userId, id, resource.generation);
+      }, this.db);
       const result = await this.client.create(token, {
         repository,
         ref: resource.requestedRef,
@@ -1348,11 +1380,13 @@ export class GitHubResourceService {
         ...(resource.devcontainerPath ? { devcontainerPath: resource.devcontainerPath } : {}),
       });
       try {
-        this.assigned(this.current({ ...resource, retirement: "unknown" }), auth);
-        if (result.outcome === "rejected")
-          this.identities.observeCreation(auth.userId, id, resource.generation, "refused");
-        else if (result.resource)
-          this.identities.observeCreation(auth.userId, id, resource.generation, result.resource);
+        await withSqliteWrite(() => {
+          this.assigned(this.current({ ...resource, retirement: "unknown" }), auth);
+          if (result.outcome === "rejected")
+            this.identities.observeCreation(auth.userId, id, resource.generation, "refused");
+          else if (result.resource)
+            this.identities.observeCreation(auth.userId, id, resource.generation, result.resource);
+        }, this.db);
       } catch (error) {
         if (error instanceof CodespaceResourceError) {
           const reply =

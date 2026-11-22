@@ -24,9 +24,8 @@ export const spaceSchema = z
     id: z.string().uuid(),
     name: z.string().regex(/^moira-[a-f0-9]{32}$/),
     runtimeId: z.string().min(1).max(255).nullable(),
-    admittedMachine: localPolicySchema
-      .innerType()
-      .shape.runtime.pick({ cpuCores: true, memoryBytes: true, dockerBytes: true })
+    admittedMachine: localPolicySchema.shape.runtime
+      .pick({ cpuCores: true, memoryBytes: true, dockerBytes: true })
       .optional(),
     repositoryId: z.string().uuid(),
     admittedRepositoryFullName: repositoryName.optional(),

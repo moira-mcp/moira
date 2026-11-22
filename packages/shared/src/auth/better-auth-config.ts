@@ -5,18 +5,31 @@
 import { betterAuth } from "better-auth";
 import type { BetterAuthOptions, BetterAuthPlugin } from "better-auth";
 import { createAuthMiddleware, APIError, getSessionFromCtx, isAPIError } from "better-auth/api";
-import { mcp } from "better-auth/plugins";
+import { oauthProvider } from "@better-auth/oauth-provider";
+import { createAuthEndpoint } from "better-auth/api";
+import { oauthTokenDigest } from "./oauth-token.js";
+import { normalizeOAuthRequest } from "./oauth-request.js";
 import { timingSafeEqual } from "crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import geoip from "geoip-lite";
 import type { ServiceLogger } from "../logging/logger.js";
 import { createLogger } from "../logging/logger.js";
-import { getSqliteInstance, getDatabase } from "../database/connection.js";
+import { getAuthConnection, withAuthTransaction, getDatabase } from "../database/connection.js";
+import { withSqliteWrite } from "../database/sqlite-write.js";
+import { getAuthKysely } from "./sqlite-dialect.js";
 import { getEmailDeliveryStatus, sendEmail } from "../email/index.js";
 import { AuditRepository } from "../database/repositories/audit-repository.js";
+import { logAuditEventDirect } from "../logging/audit-logger.js";
+import type { DBAdapter } from "@better-auth/core/db/adapter";
 import { AuditAction } from "../audit/actions.js";
-import { user, oauthAccessToken } from "../database/schema.js";
-import { and, eq } from "drizzle-orm";
+import {
+  user,
+  session,
+  oauthAccessToken,
+  oauthRefreshToken,
+  oauthClient,
+} from "../database/schema.js";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { getBaseUrl, getAuthUrl, getMcpUrl, isProduction } from "../config/urls.js";
 import { CLIENT_IP_HEADER, clientIpFromHeaders } from "../http/client-ip.js";
 import {
@@ -186,7 +199,7 @@ const PUBLIC_ACCOUNT_LIFECYCLE_PATHS = new Set([
   "/revoke-session",
   "/.well-known/oauth-authorization-server",
   "/.well-known/oauth-protected-resource",
-  "/mcp/register",
+  "/oauth2/register",
   "/ok",
   "/error",
 ]);
@@ -264,7 +277,7 @@ async function getReturnedOAuthAccessToken(returned: unknown): Promise<string | 
 
 /** Preserve catalog acceptance when Better Auth rotates an OAuth credential on refresh. */
 async function inheritMcpCatalogRevisionOnRefresh(ctx: McpTokenRefreshHookContext): Promise<void> {
-  if (!ctx.path.endsWith("/mcp/token") || ctx.method !== "POST") return;
+  if (ctx.path !== "/oauth2/token" || ctx.method !== "POST") return;
   const body =
     ctx.body && typeof ctx.body === "object"
       ? (ctx.body as { grant_type?: unknown; refresh_token?: unknown })
@@ -277,12 +290,12 @@ async function inheritMcpCatalogRevisionOnRefresh(ctx: McpTokenRefreshHookContex
   const db = getDatabase();
   const [predecessor] = await db
     .select({
-      userId: oauthAccessToken.userId,
-      clientId: oauthAccessToken.clientId,
-      toolsVersion: oauthAccessToken.toolsVersion,
+      userId: oauthRefreshToken.userId,
+      clientId: oauthRefreshToken.clientId,
+      toolsVersion: oauthRefreshToken.toolsVersion,
     })
-    .from(oauthAccessToken)
-    .where(eq(oauthAccessToken.refreshToken, body.refresh_token))
+    .from(oauthRefreshToken)
+    .where(eq(oauthRefreshToken.token, oauthTokenDigest(body.refresh_token)))
     .limit(1);
   if (!predecessor) {
     throw new APIError("INTERNAL_SERVER_ERROR", {
@@ -290,17 +303,20 @@ async function inheritMcpCatalogRevisionOnRefresh(ctx: McpTokenRefreshHookContex
     });
   }
 
-  const updated = await db
-    .update(oauthAccessToken)
-    .set({ toolsVersion: predecessor.toolsVersion })
-    .where(
-      and(
-        eq(oauthAccessToken.accessToken, successorAccessToken),
-        eq(oauthAccessToken.userId, predecessor.userId),
-        eq(oauthAccessToken.clientId, predecessor.clientId),
-      ),
-    )
-    .returning({ id: oauthAccessToken.id });
+  const updated = await withSqliteWrite(() =>
+    db
+      .update(oauthAccessToken)
+      .set({ toolsVersion: predecessor.toolsVersion })
+      .where(
+        and(
+          eq(oauthAccessToken.accessToken, oauthTokenDigest(successorAccessToken)),
+          eq(oauthAccessToken.userId, predecessor.userId),
+          eq(oauthAccessToken.clientId, predecessor.clientId),
+        ),
+      )
+      .returning({ id: oauthAccessToken.id })
+      .all(),
+  );
   if (updated.length !== 1) {
     throw new APIError("INTERNAL_SERVER_ERROR", {
       message: "OAuth refresh successor was not uniquely available for catalog state inheritance",
@@ -344,28 +360,139 @@ function isValidLoadTestRequest(
   }
 }
 
-// The Web UI serves the OAuth authorize/consent pages under the deployment's
-// base-path prefix (getAppPrefix(): "" for self-host root, "/app" for our
-// hosted deploy). Better Auth's mcp/oidc-provider plugin interpolates
-// loginPage/consentPage directly into its own redirects, so these must be
-// prefix-aware here rather than relying on the web backend's compensating
-// GET /oauth/authorize redirect, which only covers requests that hit that
-// exact bare-path route.
-//
-// Note: mcp() overwrites oidcConfig.loginPage with the top-level loginPage,
-// so only the top-level loginPage and oidcConfig.consentPage reach a redirect.
-// Both are set consistently so neither the live nor the shadowed value can
-// drift back to an unprefixed path.
+/** Login and consent stay on the public SPA. Moira uses revocable, database-backed opaque tokens. */
 export function buildMcpPluginOptions() {
-  const appPrefix = getAppPrefix();
-  const loginPage = `${appPrefix}/oauth/authorize`;
-
+  const prefix = getAppPrefix();
+  const resource = getMcpUrl();
   return {
-    loginPage,
-    resource: getMcpUrl(),
-    oidcConfig: {
-      loginPage,
-      consentPage: `${appPrefix}/oauth/consent`,
+    loginPage: `${prefix}/oauth/authorize`,
+    consentPage: `${prefix}/oauth/consent`,
+    disableJwtPlugin: true,
+    allowDynamicClientRegistration: true,
+    clientRegistrationDefaultApplicationType: "infer" as const,
+    allowUnauthenticatedClientRegistration: true,
+    scopes: ["openid", "profile", "email", "offline_access"],
+    clientRegistrationDefaultScopes: ["openid", "profile", "email", "offline_access"],
+    resources: [resource],
+    clientRegistrationDefaultResources: [resource],
+    grantTypes: ["authorization_code", "refresh_token"] as (
+      "authorization_code" | "refresh_token"
+    )[],
+    refreshTokenReuseInterval: 0,
+    refreshTokenExpiresIn: 7 * 24 * 60 * 60,
+  };
+}
+
+export async function findMcpOAuthCredential(bearer: string) {
+  const db = getDatabase();
+  const [row] = await db
+    .select({
+      id: oauthAccessToken.id,
+      toolsVersion: oauthAccessToken.toolsVersion,
+      userId: oauthAccessToken.userId,
+      clientId: oauthAccessToken.clientId,
+      email: user.email,
+      scopes: oauthAccessToken.scopes,
+      resources: oauthAccessToken.resources,
+      accessTokenExpiresAt: oauthAccessToken.accessTokenExpiresAt,
+    })
+    .from(oauthAccessToken)
+    .innerJoin(user, eq(oauthAccessToken.userId, user.id))
+    .innerJoin(oauthClient, eq(oauthClient.clientId, oauthAccessToken.clientId))
+    .leftJoin(session, eq(session.id, oauthAccessToken.sessionId))
+    .where(
+      and(
+        eq(oauthAccessToken.accessToken, oauthTokenDigest(bearer)),
+        isNull(oauthAccessToken.revoked),
+        isNull(oauthAccessToken.confirmation),
+        or(isNull(oauthClient.disabled), eq(oauthClient.disabled, false)),
+        sql`julianday(${oauthAccessToken.accessTokenExpiresAt}) > julianday('now')`,
+        or(
+          isNull(oauthAccessToken.sessionId),
+          sql`julianday(${session.expiresAt}) > julianday('now')`,
+        ),
+      ),
+    )
+    .limit(1);
+  if (
+    !row?.userId ||
+    !row.resources ||
+    !(JSON.parse(row.resources) as string[]).includes(getMcpUrl())
+  )
+    return null;
+  return { ...row, userId: row.userId };
+}
+
+/** Wrap the native provider write only for this consent request. */
+function auditConsentWrites(
+  adapter: DBAdapter,
+  headers?: Headers,
+): Pick<DBAdapter, "create" | "update"> {
+  async function record(model: string, result: unknown, action: AuditAction) {
+    if (model !== "oauthConsent" || !result || typeof result !== "object") return;
+    const consent = result as { id: string; userId: string; clientId: string; scopes: string[] };
+    const ip = clientIpFromHeaders(headers);
+    const geo = ip ? geoip.lookup(ip) : null;
+    await logAuditEventDirect(new AuditRepository(getDatabase()), {
+      action,
+      resource: "oauth_consent",
+      resourceId: consent.id,
+      userId: consent.userId,
+      metadata: { clientId: consent.clientId, scopes: consent.scopes.join(" ") },
+      ip,
+      country: geo?.country,
+      userAgent: headers?.get("user-agent") ?? undefined,
+    });
+  }
+  return {
+    create: async <T extends Record<string, unknown>, R = T>(
+      input: Parameters<typeof adapter.create<T, R>>[0],
+    ) => {
+      const row = await adapter.create<T, R>(input);
+      await record(input.model, row, AuditAction.OAUTH_CONSENT_GRANT);
+      return row;
+    },
+    update: async <T>(input: Parameters<DBAdapter["update"]>[0]) => {
+      const row = await adapter.update<T>(input);
+      await record(input.model, row, AuditAction.OAUTH_CONSENT_UPDATE);
+      return row;
+    },
+  };
+}
+
+/** The legacy MCP resource API reads the same opaque rows issued and revoked by the provider. */
+function mcpResourceSession(): BetterAuthPlugin {
+  return {
+    id: "moira-mcp-resource-session",
+    endpoints: {
+      getMcpSession: createAuthEndpoint(
+        "/mcp/get-session",
+        { method: "GET", requireHeaders: true },
+        async (ctx) => {
+          const bearer = /^Bearer ([^\s]+)$/i.exec(ctx.headers.get("authorization") ?? "")?.[1];
+          if (!bearer)
+            throw new APIError("UNAUTHORIZED", {
+              code: "INVALID_TOKEN",
+              message: "OAuth bearer required",
+            });
+          const row = await findMcpOAuthCredential(bearer);
+          if (!row)
+            throw new APIError("UNAUTHORIZED", {
+              code: "INVALID_TOKEN",
+              message: "Invalid or expired OAuth credential",
+            });
+          await assertMcpOAuthAccountAccess(row.userId);
+          return ctx.json({
+            id: row.id,
+            userId: row.userId,
+            email: row.email,
+            clientId: row.clientId,
+            accessToken: bearer,
+            accessTokenExpiresAt: row.accessTokenExpiresAt,
+            scopes: (JSON.parse(row.scopes) as string[]).join(" "),
+          });
+        },
+      ),
     },
   };
 }
@@ -538,7 +665,7 @@ const baseConfig = {
     },
   },
 
-  plugins: [mcp(buildMcpPluginOptions())],
+  plugins: [oauthProvider(buildMcpPluginOptions()), mcpResourceSession()],
 
   databaseHooks: {
     user: {
@@ -803,19 +930,38 @@ const baseConfig = {
         }
       }
 
+      if (ctx.path === "/oauth2/userinfo") {
+        const bearer = /^Bearer ([^\s]+)$/i.exec(ctx.headers?.get("authorization") ?? "")?.[1];
+        if (bearer) {
+          const [owner] = await getDatabase()
+            .select({ userId: oauthAccessToken.userId })
+            .from(oauthAccessToken)
+            .where(eq(oauthAccessToken.accessToken, oauthTokenDigest(bearer)))
+            .limit(1);
+          if (owner?.userId) await assertMcpOAuthAccountAccess(owner.userId);
+        }
+      }
+
+      // Observe durable writes on this request's adapter. The provider owns consent validation
+      // and can either insert or update a grant after validating the signed OAuth query.
+      if (ctx.path === "/oauth2/consent" || ctx.path === "/oauth2/update-consent") {
+        return {
+          context: { context: { adapter: auditConsentWrites(ctx.context.adapter, ctx.headers) } },
+        };
+      }
       // The MCP plugin writes tokens through its adapter and bypasses
       // databaseHooks.oauthAccessToken. Resolve the owner from the refresh token
       // or authorization code before the plugin consumes either credential.
-      if (ctx.path.endsWith("/mcp/token") && ctx.method === "POST") {
+      if (ctx.path === "/oauth2/token" && ctx.method === "POST") {
         const body = ctx.body as
           { grant_type?: string; refresh_token?: string; code?: string } | undefined;
         let userId: string | undefined;
 
         if (body?.grant_type === "refresh_token" && body.refresh_token) {
           const [tokenData] = await getDatabase()
-            .select({ userId: oauthAccessToken.userId })
-            .from(oauthAccessToken)
-            .where(eq(oauthAccessToken.refreshToken, body.refresh_token))
+            .select({ userId: oauthRefreshToken.userId })
+            .from(oauthRefreshToken)
+            .where(eq(oauthRefreshToken.token, oauthTokenDigest(body.refresh_token)))
             .limit(1);
           if (!tokenData) {
             throw new APIError("UNAUTHORIZED", {
@@ -826,7 +972,7 @@ const baseConfig = {
           userId = tokenData.userId;
         } else if (body?.code) {
           const verificationValue = await ctx.context.internalAdapter.findVerificationValue(
-            body.code,
+            oauthTokenDigest(body.code),
           );
           if (verificationValue) {
             try {
@@ -838,27 +984,6 @@ const baseConfig = {
         }
 
         if (userId) await assertMcpOAuthAccountAccess(userId);
-      }
-
-      // The plugin's bearer introspection endpoint reads oauthAccessToken
-      // directly and otherwise bypasses both cookie-session and token-exchange
-      // checks. Recheck the persisted owner state before disclosing token data.
-      if (ctx.path.endsWith("/mcp/get-session") && ctx.method === "GET") {
-        const accessToken = ctx.headers?.get("authorization")?.replace(/^Bearer\s+/i, "");
-        if (accessToken) {
-          const [tokenData] = await getDatabase()
-            .select({ userId: oauthAccessToken.userId })
-            .from(oauthAccessToken)
-            .where(eq(oauthAccessToken.accessToken, accessToken))
-            .limit(1);
-          if (!tokenData) {
-            throw new APIError("UNAUTHORIZED", {
-              message: "OAuth credential has been revoked or is invalid",
-              code: "INVALID_TOKEN",
-            });
-          }
-          await assertMcpOAuthAccountAccess(tokenData.userId);
-        }
       }
 
       // Validate legal consent on sign-up (saas only). In self-host registration
@@ -910,6 +1035,26 @@ const baseConfig = {
           });
         }
       }
+      // Password hashing can yield to unrelated requests. Complete it before SQLite
+      // acquires the writer; the native endpoint still validates and commits the account.
+      const password = requestBody?.password;
+      if (ctx.path === "/sign-up/email" && typeof password === "string") {
+        const { minPasswordLength, maxPasswordLength } = ctx.context.password.config;
+        if (password.length >= minPasswordLength && password.length <= maxPasswordLength) {
+          const nativeHash = ctx.context.password.hash;
+          const digest = await nativeHash(password);
+          return {
+            context: {
+              context: {
+                password: {
+                  hash: (value: string) =>
+                    value === password ? Promise.resolve(digest) : nativeHash(value),
+                },
+              },
+            },
+          };
+        }
+      }
     }),
     after: createAuthMiddleware(async (ctx) => {
       if (ctx.path === "/revoke-session") {
@@ -939,10 +1084,13 @@ const baseConfig = {
           if (isLoadTest) {
             // Load-test identities are an explicit test-only exception to both
             // verification and approval so existing load suites remain usable.
-            await db
-              .update(user)
-              .set({ emailVerified: true, approvedAt: new Date().toISOString() })
-              .where(eq(user.id, newSession.user.id));
+            await withSqliteWrite(() =>
+              db
+                .update(user)
+                .set({ emailVerified: true, approvedAt: new Date().toISOString() })
+                .where(eq(user.id, newSession.user.id))
+                .run(),
+            );
 
             logger.info("Load test user auto-verified", {
               userId: newSession.user.id,
@@ -1040,10 +1188,23 @@ const baseConfig = {
  * Create Better Auth instance with service-specific error logging
  */
 export function createAuth(logger: ServiceLogger, registration: AuthRegistrationOptions = {}) {
+  const connection = getAuthConnection();
+  const ownership: BetterAuthPlugin = {
+    id: "moira-auth-transaction-owner",
+    init(ctx) {
+      const transaction = ctx.adapter.transaction.bind(ctx.adapter);
+      ctx.adapter.transaction = (cb) =>
+        transaction((tx) => withAuthTransaction(connection, () => cb(tx)));
+    },
+  };
   const config: BetterAuthOptions = {
     ...baseConfig,
-    plugins: [...baseConfig.plugins, registrationResultObserver()],
-    database: getSqliteInstance(),
+    plugins: [ownership, ...baseConfig.plugins, registrationResultObserver()],
+    database: {
+      db: getAuthKysely(connection.sqlite),
+      type: "sqlite",
+      transaction: true,
+    },
     logger: {
       disabled: false,
       level: "error",
@@ -1086,7 +1247,7 @@ export function createAuth(logger: ServiceLogger, registration: AuthRegistration
     registrationCapture.run({ mailFailed: false, consumed: false }, async () => {
       const capture = registrationCapture.getStore()!;
       try {
-        const response = await originalHandler(request);
+        const response = await originalHandler(await normalizeOAuthRequest(request));
         if (registration.onSuccessfulRegistration) {
           try {
             const account = await confirmedRegistration(capture, response, request);

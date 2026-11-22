@@ -3,6 +3,7 @@
  * List all tokens (with user info), filter, search, paginate, and admin revoke
  */
 
+import { executeDrizzleWrite } from "@mcp-moira/shared";
 import { Router, Request, Response } from "express";
 import { eq, and, like, or, desc, asc, count, isNull, isNotNull, sql } from "drizzle-orm";
 import {
@@ -161,7 +162,10 @@ router.delete(
     const now = new Date().toISOString();
 
     if (!token.revokedAt) {
-      await db.update(apiToken).set({ revokedAt: now }).where(eq(apiToken.id, id));
+      await executeDrizzleWrite(
+        db,
+        db.update(apiToken).set({ revokedAt: now }).where(eq(apiToken.id, id)),
+      );
 
       const adminUserId = (req as AuthenticatedRequest).userId;
 

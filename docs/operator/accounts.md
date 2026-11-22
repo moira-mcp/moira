@@ -27,6 +27,8 @@ unset ADMIN_PASSWORD
 
 `ADMIN_PASSWORD` is required. Optional `ADMIN_EMAIL` and `ADMIN_ID` default to `admin@moira.local` and `system-admin`; pass overrides with additional `docker compose exec -e NAME` arguments. `DB_PATH` selects the database. The script creates or repairs the administrator, verifies email, approves the account, clears a block and replaces the credential. It prints account identity, never the password. This is privileged installation recovery, not the ordinary-user API. Source: [create-admin-user.ts](../../scripts/create-admin-user.ts).
 
+Upgrades preserve password hashes and link each password credential to its existing user ID. If migration reports `unambiguous_password_credential_owner`, or recovery reports ambiguous ownership, check the conflicting password accounts against a database backup before retrying. Social login accounts keep their provider-issued identifiers.
+
 ## Block and retire access
 
 Blocking commits the account fence before retiring known scoped GitHub children. A `503 SCOPED_CREDENTIAL_DISPOSAL_PENDING` means the account remains blocked but disposal is unresolved; retain encrypted custody and collect/reconcile the original security request. Do not treat the error as an uncommitted block or delete custody to clear it.

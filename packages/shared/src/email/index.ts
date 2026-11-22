@@ -3,6 +3,7 @@
  * Provides provider-agnostic email sending with logging
  */
 
+import { executeDrizzleWrite } from "../database/drizzle-write.js";
 import type { EmailProvider, EmailOptions, EmailResult, EmailType } from "./email-service.js";
 import { BrevoProvider } from "./brevo-provider.js";
 import { TestEmailProvider } from "./test-provider.js";
@@ -172,16 +173,19 @@ export async function sendEmail(
     const result = await provider.send(options);
 
     // Log successful email
-    await db.insert(emailLog).values({
-      id: logId,
-      userId,
-      type,
-      to: options.to,
-      subject: options.subject,
-      messageId: result.messageId,
-      status: result.delivery === "sent" ? "sent" : "logged",
-      createdAt: now,
-    });
+    await executeDrizzleWrite(
+      db,
+      db.insert(emailLog).values({
+        id: logId,
+        userId,
+        type,
+        to: options.to,
+        subject: options.subject,
+        messageId: result.messageId,
+        status: result.delivery === "sent" ? "sent" : "logged",
+        createdAt: now,
+      }),
+    );
 
     return result;
   } catch (error) {
@@ -200,17 +204,20 @@ export async function sendEmail(
     });
 
     // Log failed email to database
-    await db.insert(emailLog).values({
-      id: logId,
-      userId,
-      type,
-      to: options.to,
-      subject: options.subject,
-      messageId: "",
-      status: "failed",
-      error: `[${errorType}] ${errorMessage}`,
-      createdAt: now,
-    });
+    await executeDrizzleWrite(
+      db,
+      db.insert(emailLog).values({
+        id: logId,
+        userId,
+        type,
+        to: options.to,
+        subject: options.subject,
+        messageId: "",
+        status: "failed",
+        error: `[${errorType}] ${errorMessage}`,
+        createdAt: now,
+      }),
+    );
 
     throw error;
   }

@@ -98,6 +98,22 @@ defines those distinct boundaries.
 
 ## Debug the selected target
 
+For a production image built from this repository, use the accepted source on
+`master`. Start from a clean checkout, verify that `origin` is the intended
+repository and fetch it before comparing commits. Run these checks as a gate
+before starting the production build:
+
+```bash
+git remote get-url origin
+git fetch origin master
+test -z "$(git status --porcelain)"
+test "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)"
+```
+
+Record that full commit and verify it against the deployed container's
+`/app/BUILD_INFO`. For an installation using a released image, select the
+accepted release and verify its recorded source commit instead.
+
 Read the target's `/app/BUILD_INFO` to establish which source it actually runs. Dirty builds use a
 content identity rather than claiming an unchanged clean commit. A passing host test is not proof
 that the running image contains the change.

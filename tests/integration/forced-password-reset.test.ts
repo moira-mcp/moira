@@ -4,7 +4,14 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "@jest/globals";
-import { getDatabase, user, session, oauthConsent, oauthAccessToken } from "@mcp-moira/shared";
+import {
+  getDatabase,
+  user,
+  session,
+  oauthClient,
+  oauthConsent,
+  oauthAccessToken,
+} from "@mcp-moira/shared";
 import { eq } from "drizzle-orm";
 
 describe("Forced Password Reset Flow", () => {
@@ -35,12 +42,16 @@ describe("Forced Password Reset Flow", () => {
 
     testUserId = createdUser.id;
 
+    await db
+      .insert(oauthClient)
+      .values({ id: testUserId, clientId: testUserId, redirectUris: "[]", userId: testUserId });
+
     // Create OAuth tokens that should be revoked
     await db.insert(oauthConsent).values({
       id: `consent-${testUserId}`,
       userId: testUserId,
-      clientId: "test-client",
-      scopes: "read write",
+      clientId: testUserId,
+      scopes: '["read","write"]',
       createdAt: now,
       updatedAt: now,
     });
@@ -48,12 +59,11 @@ describe("Forced Password Reset Flow", () => {
     await db.insert(oauthAccessToken).values({
       id: `token-${testUserId}`,
       userId: testUserId,
-      clientId: "test-client",
-      scopes: "read write",
+      clientId: testUserId,
+      scopes: '["read","write"]',
       accessToken: "test-access-token",
       accessTokenExpiresAt: new Date(Date.now() + 3600000).toISOString(),
       createdAt: now,
-      updatedAt: now,
     });
   });
 

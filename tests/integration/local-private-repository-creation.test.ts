@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { mkdtemp, realpath, rm, readFile } from "node:fs/promises";
 import { controllerFixture } from "../fixtures/local-controller.js";
 import { createWorkspaceRequestId } from "@mcp-moira/shared";
+import { acquireSqliteWriter, type SqliteWriter } from "@mcp-moira/shared/database/sqlite-write";
 import {
   LocalDeviceRepository,
   LocalDeviceService,
@@ -201,7 +202,7 @@ async function fixture() {
       };
     },
   });
-  const makeService = () =>
+  const makeService = (clock = () => now) =>
     new LocalPrivateRepositoryCreationService({
       repository,
       admission,
@@ -221,7 +222,7 @@ async function fixture() {
           throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "No actual installation grant.");
       },
       links: () => ({ settings: config.settingsUrl, installation: config.installationUrl }),
-      now: () => now,
+      now: clock,
     });
   const input = {
     deviceId,
@@ -844,12 +845,61 @@ describe("Private repository creation precedes local admission without repeating
     expect(f.repository.getOwned("owner", f.input.requestId)?.reservationHeld).toBe(1);
     expect(f.state.posts).toBe(1);
   });
+  test.each(["expired claim", "changed account authority"])(
+    "%s after preflight cannot submit a private repository creation",
+    async (change) => {
+      const f = await fixture();
+      let clock = now;
+      const submit = f.repository.submit.bind(f.repository);
+      jest.spyOn(f.repository, "submit").mockImplementationOnce((record, ...rest) => {
+        if (change === "expired claim") clock = record.claimExpiresAt!;
+        else f.authority.credentialGeneration++;
+        return submit(record, ...rest);
+      });
+      const result = await f.makeService(() => clock).createRepository("owner", f.input);
+      expect(result.status).toBe("setup_required");
+      expect(f.repository.getOwned("owner", f.input.requestId)?.state).toBe("prepared");
+      expect(f.state.posts).toBe(0);
+    },
+  );
+
   test("changed credentials during preflight cannot reach POST", async () => {
     const f = await fixture();
     f.state.changedDuringInspection = true;
     expect((await f.makeService().createRepository("owner", f.input)).status).toBe(
       "setup_required",
     );
+    expect(f.state.posts).toBe(0);
+  });
+  test("withdrawing controller delegation while SQLite admission waits prevents the provider POST", async () => {
+    const f = await fixture();
+    let writerAcquired!: (writer: SqliteWriter) => void;
+    const observed = new Promise<SqliteWriter>((resolve) => {
+      writerAcquired = resolve;
+    });
+    const submit = f.repository.submit.bind(f.repository);
+    jest.spyOn(f.repository, "submit").mockImplementationOnce((...args) => {
+      const check = f.repository.assertCurrent.bind(f.repository);
+      jest.spyOn(f.repository, "assertCurrent").mockImplementationOnce(async (...input) => {
+        await check(...input);
+        writerAcquired(await acquireSqliteWriter(sqlite));
+      });
+      return submit(...args);
+    });
+    const pending = f.makeService().createRepository("owner", f.input);
+    const competingWriter = await observed;
+    try {
+      await f.devices.requestSettings("owner", f.deviceId, {
+        requestId: createWorkspaceRequestId(),
+        expectedGeneration: 1,
+        expectedRevision: 1,
+        settings: { ...f.settings, agentRepositoryManagement: null },
+      });
+    } finally {
+      competingWriter.commit();
+    }
+    expect((await pending).status).toBe("setup_required");
+    expect(f.repository.getOwned("owner", f.input.requestId)?.state).toBe("prepared");
     expect(f.state.posts).toBe(0);
   });
   test("settings beyond the physical resource ceiling are refused before GitHub POST", async () => {

@@ -38,6 +38,15 @@ validator, copy an algorithm or defer a synchronous SQL operation into an asynch
 Keep writes, revision guards, change events and notification enqueueing in their owning synchronous
 transactions.
 
+For a runtime SQLite mutation, await admission to the writer before changing data.
+Use `executeDrizzleWrite(db, query)` for an individual Drizzle statement (including
+`RETURNING`), `withDrizzleWrite(db, callback)` for an existing synchronous unit of work,
+or `withSqliteWrite(callback, sqlite)` for a native connection. Pass the connection that
+will execute the mutation. SQLite serializes writers across processes. The application
+waits asynchronously for `BEGIN IMMEDIATE` with a bounded deadline. Only acquisition can
+be retried. Perform database checks that guard the mutation inside the admitted callback,
+and keep network requests, file transfers and user-facing notifications outside it.
+
 The package export maps are the import contract. Implementation entry points include
 [service factories](../../packages/shared/src/services/index.ts),
 [catalog loading](../../packages/shared/src/services/workflow-catalog-loader.ts),
@@ -179,7 +188,12 @@ actions and [workflow CLI](../reference/workflow-cli.md) for local authored file
 MCP and HTTP are separate process entry points sharing domain services and persisted state. MCP
 request context carries authenticated user and detected agent/model for effective text resolution;
 tool registration applies the common input preprocessing instead of each handler parsing its own
-stringified objects. The file default prompt, portable help and typed tool projection each have one
+stringified objects. Typed tool schemas use native Zod 4. The central `getToolJsonSchema` exporter
+publishes the original input schema for discovery, catalog revisions and generated references;
+registration applies preprocessing separately. It preserves each object's unknown-field policy,
+refinements and parse-time defaults, including grouped action branches. JSON Schema expresses the
+structural input contract; runtime refinements still enforce constraints that JSON Schema cannot
+represent. The file default prompt, portable help and typed tool projection each have one
 source owner; [documentation development](documentation.md) explains their delivery paths.
 
 Workspace source bytes and long-running owner operations use their dedicated authenticated

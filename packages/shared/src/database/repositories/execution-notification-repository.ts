@@ -6,6 +6,7 @@
  * read and what the sender writes the outcome to: the row, not the run's visit log, holds the result.
  */
 
+import { withDrizzleWrite } from "../drizzle-write.js";
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNotNull, like, lte, ne, or } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
@@ -74,36 +75,47 @@ export class ExecutionNotificationRepository {
   }
 
   /** The row the sender is about to handle is no longer about a current wait. */
-  markSuperseded(id: string): void {
-    this.db
-      .update(executionNotification)
-      .set({ state: "superseded" })
-      .where(and(eq(executionNotification.id, id), eq(executionNotification.state, "pending")))
-      .run();
+  markSuperseded(id: string): Promise<void> {
+    return withDrizzleWrite(this.db, () => {
+      this.db
+        .update(executionNotification)
+        .set({ state: "superseded" })
+        .where(and(eq(executionNotification.id, id), eq(executionNotification.state, "pending")))
+        .run();
+    });
   }
 
   /** Hold a pending row until `until`. */
-  hold(id: string, until: number): void {
-    this.db
-      .update(executionNotification)
-      .set({ notBefore: until })
-      .where(and(eq(executionNotification.id, id), eq(executionNotification.state, "pending")))
-      .run();
+  hold(id: string, until: number): Promise<void> {
+    return withDrizzleWrite(this.db, () => {
+      this.db
+        .update(executionNotification)
+        .set({ notBefore: until })
+        .where(and(eq(executionNotification.id, id), eq(executionNotification.state, "pending")))
+        .run();
+    });
   }
 
   /** Record the delivery outcome; only a pending row is taken, so a row is sent once. */
-  markSent(id: string, now: number, deliveryStatus: string, deliveredChannels: string[]): boolean {
-    return (
-      this.db
-        .update(executionNotification)
-        .set({
-          state: "sent",
-          sentAt: now,
-          deliveryStatus,
-          deliveredChannels: JSON.stringify(deliveredChannels),
-        })
-        .where(and(eq(executionNotification.id, id), eq(executionNotification.state, "pending")))
-        .run().changes === 1
+  markSent(
+    id: string,
+    now: number,
+    deliveryStatus: string,
+    deliveredChannels: string[],
+  ): Promise<boolean> {
+    return withDrizzleWrite(
+      this.db,
+      () =>
+        this.db
+          .update(executionNotification)
+          .set({
+            state: "sent",
+            sentAt: now,
+            deliveryStatus,
+            deliveredChannels: JSON.stringify(deliveredChannels),
+          })
+          .where(and(eq(executionNotification.id, id), eq(executionNotification.state, "pending")))
+          .run().changes === 1,
     );
   }
 
@@ -131,28 +143,25 @@ export class ExecutionNotificationRepository {
    * Queue the single reminder of a wait, due at `notBefore` (the unique key keeps it single). If the
    * wait has ended by then, the sender drops it like any row whose wait is gone.
    */
-  enqueueReminder(first: ExecutionNotificationRow, notBefore: number, now: number): void {
-    this.db.transaction(
-      () => {
-        // A stop either supersedes this reminder or commits first and prevents its insertion.
-        if (!this.holdsWait(first.executionId, first.waitKey)) return;
-        this.db
-          .insert(executionNotification)
-          .values({
-            id: randomUUID(),
-            executionId: first.executionId,
-            userId: first.userId,
-            waitKey: first.waitKey,
-            kind: "remind",
-            state: "pending",
-            notBefore,
-            createdAt: now,
-          })
-          .onConflictDoNothing()
-          .run();
-      },
-      { behavior: "immediate" },
-    );
+  enqueueReminder(first: ExecutionNotificationRow, notBefore: number, now: number): Promise<void> {
+    return withDrizzleWrite(this.db, () => {
+      // A stop either supersedes this reminder or commits first and prevents its insertion.
+      if (!this.holdsWait(first.executionId, first.waitKey)) return;
+      this.db
+        .insert(executionNotification)
+        .values({
+          id: randomUUID(),
+          executionId: first.executionId,
+          userId: first.userId,
+          waitKey: first.waitKey,
+          kind: "remind",
+          state: "pending",
+          notBefore,
+          createdAt: now,
+        })
+        .onConflictDoNothing()
+        .run();
+    });
   }
 
   /** The stored fields a wait is decided from. */

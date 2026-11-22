@@ -3,6 +3,7 @@
  */
 
 import type Database from "better-sqlite3";
+import { withSqliteWrite } from "../sqlite-write.js";
 import type { ExecutionChangeKind } from "../execution-change.js";
 
 export interface ExecutionChangeEvent {
@@ -67,7 +68,10 @@ export class ExecutionChangeRepository {
   }
 
   /** Remove events older than `at` (epoch ms); returns how many. */
-  deleteOlderThan(at: number): number {
-    return this.sqlite.prepare("DELETE FROM executionChange WHERE at < ?").run(at).changes;
+  deleteOlderThan(at: number): Promise<number> {
+    return withSqliteWrite(
+      () => this.sqlite.prepare("DELETE FROM executionChange WHERE at < ?").run(at).changes,
+      this.sqlite,
+    );
   }
 }

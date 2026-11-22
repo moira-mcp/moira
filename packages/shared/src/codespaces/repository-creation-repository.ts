@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
+import { withSqliteWrite } from "../database/sqlite-write.js";
 import { canonicalJson } from "../utils/canonical-json.js";
 import { LocalDeviceRepository, digestLocalSecret } from "./local-device-repository.js";
 import { LocalDeviceError, type LocalDeviceView } from "./local-device-types.js";
@@ -41,7 +42,7 @@ export interface RepositoryCreationRecord
 export class RepositoryCreationRepository {
   private readonly devices: LocalDeviceRepository;
   constructor(
-    private readonly sqlite: Database.Database,
+    readonly sqlite: Database.Database,
     private readonly readDevice: (userId: string, deviceId: string) => Promise<LocalDeviceView>,
   ) {
     this.devices = new LocalDeviceRepository(sqlite);
@@ -102,59 +103,57 @@ export class RepositoryCreationRepository {
     now: number,
   ): Promise<RepositoryCreationRecord> {
     const observed = await this.readDevice(userId, input.deviceId);
-    return this.sqlite
-      .transaction(() => {
-        const fingerprint = digestLocalSecret(canonicalJson(input));
-        const old = this.getOwned(userId, input.requestId);
-        if (old) {
-          if (old.fingerprint !== fingerprint)
-            throw new LocalDeviceError(
-              "LOCAL_CONFLICT",
-              "Repository creation request identity changed.",
-            );
-          return old;
-        }
-        const { device, delegation } = this.deviceAuthority(userId, input, authority, observed);
-        if (
-          this.sqlite
-            .prepare(
-              "SELECT requestId FROM codespaceRepositoryRequest WHERE requestId=? OR (userId=? AND githubUserId=? AND lower(repositoryName)=lower(?) AND state!='rejected')",
-            )
-            .get(input.requestId, userId, authority.githubUserId, input.repositoryName)
-        )
+    return withSqliteWrite(() => {
+      const fingerprint = digestLocalSecret(canonicalJson(input));
+      const old = this.getOwned(userId, input.requestId);
+      if (old) {
+        if (old.fingerprint !== fingerprint)
           throw new LocalDeviceError(
             "LOCAL_CONFLICT",
-            "A repository creation request already retains this identity.",
+            "Repository creation request identity changed.",
           );
+        return old;
+      }
+      const { device, delegation } = this.deviceAuthority(userId, input, authority, observed);
+      if (
         this.sqlite
           .prepare(
-            `INSERT INTO codespaceRepositoryRequest
+            "SELECT requestId FROM codespaceRepositoryRequest WHERE requestId=? OR (userId=? AND githubUserId=? AND lower(repositoryName)=lower(?) AND state!='rejected')",
+          )
+          .get(input.requestId, userId, authority.githubUserId, input.repositoryName)
+      )
+        throw new LocalDeviceError(
+          "LOCAL_CONFLICT",
+          "A repository creation request already retains this identity.",
+        );
+      this.sqlite
+        .prepare(
+          `INSERT INTO codespaceRepositoryRequest
         (requestId,userId,deviceId,deviceGeneration,localConnectionId,githubConnectionId,githubUserId,owner,credentialGeneration,
          repositoryName,installationId,fingerprint,delegation,marker,admissionRequestId,state,reservationHeld,installationVerified,createdAt,updatedAt)
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'prepared',1,0,?,?)`,
-          )
-          .run(
-            input.requestId,
-            userId,
-            input.deviceId,
-            device.deviceGeneration,
-            device.connectionId,
-            authority.githubConnectionId,
-            authority.githubUserId,
-            authority.owner,
-            authority.credentialGeneration,
-            input.repositoryName,
-            input.installationId,
-            fingerprint,
-            canonicalJson(delegation),
-            randomBytes(32).toString("hex"),
-            randomUUID(),
-            now,
-            now,
-          );
-        return this.getOwned(userId, input.requestId)!;
-      })
-      .immediate();
+        )
+        .run(
+          input.requestId,
+          userId,
+          input.deviceId,
+          device.deviceGeneration,
+          device.connectionId,
+          authority.githubConnectionId,
+          authority.githubUserId,
+          authority.owner,
+          authority.credentialGeneration,
+          input.repositoryName,
+          input.installationId,
+          fingerprint,
+          canonicalJson(delegation),
+          randomBytes(32).toString("hex"),
+          randomUUID(),
+          now,
+          now,
+        );
+      return this.getOwned(userId, input.requestId)!;
+    }, this.sqlite);
   }
   async assertCurrent(
     record: RepositoryCreationRecord,
@@ -215,33 +214,66 @@ export class RepositoryCreationRepository {
   async submit(
     record: RepositoryCreationRecord,
     authority: RepositoryCreationAuthority,
-    now: number,
+    clock: number | (() => number),
+    readAuthority?: () => RepositoryCreationAuthority,
   ): Promise<void> {
     await this.assertCurrent(record, authority);
-    this.sqlite
-      .transaction(() => {
-        const device = this.devices.getDeviceIdentity(record.userId, record.deviceId);
-        if (
-          device.status !== "active" ||
-          device.deviceGeneration !== record.deviceGeneration ||
-          device.connectionId !== record.localConnectionId
+    const checkedTime = () => {
+      if (readAuthority && canonicalJson(readAuthority()) !== canonicalJson(authority))
+        throw new LocalDeviceError(
+          "LOCAL_UNAUTHORIZED",
+          "GitHub repository creation authority changed.",
+        );
+      return typeof clock === "number" ? clock : clock();
+    };
+    await withSqliteWrite(() => {
+      const device = this.devices.getDeviceIdentity(record.userId, record.deviceId);
+      if (
+        device.status !== "active" ||
+        device.deviceGeneration !== record.deviceGeneration ||
+        device.connectionId !== record.localConnectionId
+      )
+        throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Repository creation authority changed.");
+      const now = checkedTime();
+      const changed = this.sqlite
+        .prepare(
+          "UPDATE codespaceRepositoryRequest SET state='submitted',errorCode=NULL,updatedAt=? WHERE requestId=? AND userId=? AND state='prepared' AND claimId=? AND claimExpiresAt>?",
         )
-          throw new LocalDeviceError(
-            "LOCAL_UNAUTHORIZED",
-            "Repository creation authority changed.",
-          );
-        const changed = this.sqlite
+        .run(now, record.requestId, record.userId, record.claimId, now).changes;
+      if (changed !== 1)
+        throw new LocalDeviceError(
+          "LOCAL_CONFLICT",
+          "The repository create attempt was already submitted.",
+        );
+    }, this.sqlite);
+    // The controller owns the applied delegation. Fetch it after releasing the writer.
+    // Only this caller can prove that the provider has not yet received its request.
+    try {
+      await this.assertCurrent(record, authority);
+      const now = checkedTime();
+      const current = this.getOwned(record.userId, record.requestId);
+      if (
+        current?.state !== "submitted" ||
+        current.claimId !== record.claimId ||
+        current.claimExpiresAt === null ||
+        current.claimExpiresAt <= now
+      )
+        throw new LocalDeviceError("LOCAL_CONFLICT", "The repository creation claim changed.");
+    } catch (error) {
+      await withSqliteWrite(() => {
+        this.sqlite
           .prepare(
-            "UPDATE codespaceRepositoryRequest SET state='submitted',errorCode=NULL,updatedAt=? WHERE requestId=? AND userId=? AND state='prepared' AND claimId=? AND claimExpiresAt>?",
+            "UPDATE codespaceRepositoryRequest SET state='prepared',updatedAt=? WHERE requestId=? AND userId=? AND claimId=? AND state='submitted'",
           )
-          .run(now, record.requestId, record.userId, record.claimId, now).changes;
-        if (changed !== 1)
-          throw new LocalDeviceError(
-            "LOCAL_CONFLICT",
-            "The repository create attempt was already submitted.",
+          .run(
+            typeof clock === "number" ? clock : clock(),
+            record.requestId,
+            record.userId,
+            record.claimId,
           );
-      })
-      .immediate();
+      }, this.sqlite);
+      throw error;
+    }
   }
   recordCreated(
     record: RepositoryCreationRecord,

@@ -60,7 +60,9 @@ export async function createWorkflowToken(
     switch (action) {
       case "upload": {
         // Generate upload token
-        const token = tokenManager.createUploadToken(userId, ttlMs);
+        const token = await TokenManager.write(tokenManager, () =>
+          tokenManager.createUploadToken(userId, ttlMs),
+        );
         const uploadUrl = `${baseUrl}/api/public/workflows/upload/${token}`;
 
         // Audit log for token creation
@@ -112,7 +114,9 @@ export async function createWorkflowToken(
         }
 
         // Generate download token using the resolved UUID
-        const token = tokenManager.createDownloadToken(resolved.workflowId, userId, ttlMs);
+        const token = await TokenManager.write(tokenManager, () =>
+          tokenManager.createDownloadToken(resolved.workflowId, userId, ttlMs),
+        );
         const downloadUrl = `${baseUrl}/api/public/workflows/download/${token}`;
 
         // Audit log for token creation

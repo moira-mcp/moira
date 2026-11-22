@@ -3,6 +3,7 @@
  * Validates Better Auth session and attaches userId to request
  */
 
+import { executeDrizzleWrite } from "@mcp-moira/shared";
 import { Request, Response, NextFunction } from "express";
 import { auth } from "../auth.js";
 import { AuthenticatedRequest } from "../types/express-types.js";
@@ -75,7 +76,10 @@ async function validateAuth(
   if (denial === "blocked") {
     // Invalidate current session
     if (session.session?.token) {
-      await db.delete(sessionTable).where(eq(sessionTable.token, session.session.token));
+      await executeDrizzleWrite(
+        db,
+        db.delete(sessionTable).where(eq(sessionTable.token, session.session.token)),
+      );
     }
 
     res.status(403).json({

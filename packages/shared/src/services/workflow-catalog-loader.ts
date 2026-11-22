@@ -579,7 +579,7 @@ export async function installCatalogEntries(
   if (result.conflicts > 0 && !deps.force) {
     // Persist complete conflict evidence, but do not partially advance any
     // workflow or baseline while the catalog as a whole is unresolved.
-    repository.apply({
+    await repository.apply({
       preconditions: applyPlan.preconditions,
       conflictPreconditions: [],
       baselinePreconditions: applyPlan.baselinePreconditions,
@@ -589,7 +589,7 @@ export async function installCatalogEntries(
       clearConflicts: [],
     });
   } else {
-    repository.apply(applyPlan);
+    await repository.apply(applyPlan);
   }
   for (const outcome of result.outcomes) {
     deps.log?.(`  ${outcome.owner}/${outcome.slug}: ${outcome.outcome}`);
@@ -1008,7 +1008,7 @@ export async function applyWorkflowReconciliationStagedArtifact(
       createdAt: Date.now(),
     });
   }
-  repository.apply(applyPlan);
+  await repository.apply(applyPlan);
 }
 
 export async function resolveWorkflowReconciliation(
@@ -1106,7 +1106,7 @@ export async function resolveWorkflowReconciliation(
   // The baseline records the accepted upstream candidate. Selecting/merging the
   // current database graph therefore becomes an intentional user delta against
   // that source and survives an unchanged image on the next startup.
-  repository.apply({
+  await repository.apply({
     preconditions: [
       {
         owner,

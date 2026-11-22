@@ -431,7 +431,7 @@ describe("a new definition re-decides runs already paused on the step", () => {
         }
       ).slug;
 
-      new WorkflowReconciliationRepository(getSqliteInstance()).apply({
+      await new WorkflowReconciliationRepository(getSqliteInstance()).apply({
         preconditions: [],
         conflictPreconditions: [],
         baselinePreconditions: [],

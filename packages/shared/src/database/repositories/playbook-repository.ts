@@ -10,6 +10,7 @@
  * here, explicitly.
  */
 
+import { executeDrizzleWrite } from "../drizzle-write.js";
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, like, or, sql } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
@@ -185,18 +186,21 @@ export class PlaybookRepository {
 
     const id = existing?.id ?? randomUUID();
     if (!existing) {
-      await this.db.insert(playbook).values({
-        id,
-        userId: ownerId,
-        slug,
-        name: name ?? slug,
-        description: description ?? null,
-        visibility: visibility ?? "private",
-        currentRevision: 1,
-        size,
-        createdAt: now,
-        updatedAt: now,
-      });
+      await executeDrizzleWrite(
+        this.db,
+        this.db.insert(playbook).values({
+          id,
+          userId: ownerId,
+          slug,
+          name: name ?? slug,
+          description: description ?? null,
+          visibility: visibility ?? "private",
+          currentRevision: 1,
+          size,
+          createdAt: now,
+          updatedAt: now,
+        }),
+      );
     }
 
     const appended = await this.revisions.append({
@@ -206,17 +210,20 @@ export class PlaybookRepository {
       maxRevisions: MAX_PLAYBOOK_REVISIONS,
     });
 
-    await this.db
-      .update(playbook)
-      .set({
-        ...(name !== undefined ? { name } : {}),
-        ...(description !== undefined ? { description } : {}),
-        ...(visibility !== undefined ? { visibility } : {}),
-        currentRevision: appended.revision,
-        size,
-        updatedAt: now,
-      })
-      .where(eq(playbook.id, id));
+    await executeDrizzleWrite(
+      this.db,
+      this.db
+        .update(playbook)
+        .set({
+          ...(name !== undefined ? { name } : {}),
+          ...(description !== undefined ? { description } : {}),
+          ...(visibility !== undefined ? { visibility } : {}),
+          currentRevision: appended.revision,
+          size,
+          updatedAt: now,
+        })
+        .where(eq(playbook.id, id)),
+    );
 
     this.logger.debug("save() wrote a revision", { id, revision: appended.revision });
     return { id, revision: appended.revision };
@@ -224,10 +231,13 @@ export class PlaybookRepository {
 
   /** Change who may read a playbook. */
   async setVisibility(playbookId: string, visibility: PlaybookVisibility): Promise<void> {
-    await this.db
-      .update(playbook)
-      .set({ visibility, updatedAt: new Date() })
-      .where(eq(playbook.id, playbookId));
+    await executeDrizzleWrite(
+      this.db,
+      this.db
+        .update(playbook)
+        .set({ visibility, updatedAt: new Date() })
+        .where(eq(playbook.id, playbookId)),
+    );
   }
 
   /** Remove a playbook and the history that belongs to it. */
@@ -235,7 +245,10 @@ export class PlaybookRepository {
     // The revision store keeps no foreign key back to this table; removing the history is the
     // owner's job and nothing else does it.
     await this.revisions.deleteHistory(this.revisionTarget(playbookId));
-    const result = await this.db.delete(playbook).where(eq(playbook.id, playbookId));
+    const result = await executeDrizzleWrite(
+      this.db,
+      this.db.delete(playbook).where(eq(playbook.id, playbookId)),
+    );
     return result.changes > 0;
   }
 

@@ -390,7 +390,9 @@ export class SbxRuntime {
     await this.validateExecutable();
     await this.prepareCredentials();
     const entries = z
-      .array(z.object({ key: z.string(), value: z.unknown() }).passthrough())
+      // Unrelated unset settings may omit a value; required safety settings are
+      // checked for their exact typed values below.
+      .array(z.object({ key: z.string(), value: z.unknown().optional() }).passthrough())
       .parse(JSON.parse((await this.call(["settings", "list", "--json"])).toString("utf8")));
     for (const [key, value] of Object.entries(REQUIRED_SETTINGS)) {
       // Feature flags are omitted from the pinned SDK's ordinary settings inventory.

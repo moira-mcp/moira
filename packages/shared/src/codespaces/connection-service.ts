@@ -318,19 +318,21 @@ export class CodespaceConnectionService {
     return { id, envelope };
   }
 
-  private retainCredentialForRevocation(
+  private async retainCredentialForRevocation(
     userId: string,
     config: Extract<CodespaceGitHubConfigStatus, { state: "available" }>,
     credential: CodespaceCredentialPayload,
-  ): string {
+  ): Promise<string> {
     const { id, envelope } = this.encryptForRevocation(userId, config, credential);
-    this.dependencies.repository.storePendingRevocation({
-      id,
-      userId,
-      provider: CODESPACE_PROVIDER_GITHUB,
-      envelope,
-      now: this.now(),
-    });
+    await this.dependencies.repository.write((repo) =>
+      repo.storePendingRevocation({
+        id,
+        userId,
+        provider: CODESPACE_PROVIDER_GITHUB,
+        envelope,
+        now: this.now(),
+      }),
+    );
     return id;
   }
 
@@ -353,10 +355,8 @@ export class CodespaceConnectionService {
       pending.envelope,
     );
     await this.dependencies.client(config).revokeToken(credential.accessToken);
-    this.dependencies.repository.deletePendingRevocation(
-      userId,
-      CODESPACE_PROVIDER_GITHUB,
-      pending.id,
+    await this.dependencies.repository.write((repo) =>
+      repo.deletePendingRevocation(userId, CODESPACE_PROVIDER_GITHUB, pending.id),
     );
   }
 
@@ -365,7 +365,7 @@ export class CodespaceConnectionService {
     config: Extract<CodespaceGitHubConfigStatus, { state: "available" }>,
     credential: CodespaceCredentialPayload,
   ): Promise<void> {
-    const id = this.retainCredentialForRevocation(userId, config, credential);
+    const id = await this.retainCredentialForRevocation(userId, config, credential);
     await this.revokePendingCredential(userId, config, id);
   }
 
@@ -386,12 +386,14 @@ export class CodespaceConnectionService {
     connectionId: string,
     expectedGeneration: number,
   ): Promise<boolean> {
-    const failed = this.dependencies.repository.markExpiredRefreshFailed({
-      userId,
-      connectionId,
-      expectedGeneration,
-      now: this.now(),
-    });
+    const failed = await this.dependencies.repository.write((repo) =>
+      repo.markExpiredRefreshFailed({
+        userId,
+        connectionId,
+        expectedGeneration,
+        now: this.now(),
+      }),
+    );
     if (failed) {
       await this.dependencies.audit?.({
         action: "refresh_failed",
@@ -553,7 +555,10 @@ export class CodespaceConnectionService {
       );
     }
     if (current?.lastErrorCode === "CREDENTIAL_UNREADABLE") {
-      this.dependencies.repository.clearUnreadableCredentialFailure(userId, current.id, this.now());
+      const connectionId = current.id;
+      await this.dependencies.repository.write((repo) =>
+        repo.clearUnreadableCredentialFailure(userId, connectionId, this.now()),
+      );
       current = this.dependencies.repository.getConnection(userId, CODESPACE_PROVIDER_GITHUB);
     }
     if (
@@ -601,16 +606,18 @@ export class CodespaceConnectionService {
       kind === "reauthorize"
         ? { kind, connectionId: current!.id, generation: current!.credentialGeneration }
         : { kind };
-    this.dependencies.repository.storeAuthorizationState({
-      stateHash: digestCodespaceAuthorizationValue(state),
-      userId,
-      sessionTokenHash: digestCodespaceAuthorizationValue(sessionToken),
-      provider: CODESPACE_PROVIDER_GITHUB,
-      redirectPath: config.settingsUrl,
-      intent,
-      expiresAt: now + AUTHORIZATION_STATE_TTL_MS,
-      now,
-    });
+    await this.dependencies.repository.write((repo) =>
+      repo.storeAuthorizationState({
+        stateHash: digestCodespaceAuthorizationValue(state),
+        userId,
+        sessionTokenHash: digestCodespaceAuthorizationValue(sessionToken),
+        provider: CODESPACE_PROVIDER_GITHUB,
+        redirectPath: config.settingsUrl,
+        intent,
+        expiresAt: now + AUTHORIZATION_STATE_TTL_MS,
+        now,
+      }),
+    );
     await this.dependencies.audit?.({
       action: "start",
       userId,
@@ -640,13 +647,15 @@ export class CodespaceConnectionService {
     ) {
       throw new CodespaceConnectionError("AUTHORIZATION_FAILED", "GitHub authorization failed");
     }
-    const consumed = this.dependencies.repository.consumeAuthorizationState({
-      stateHash: digestCodespaceAuthorizationValue(input.state),
-      userId: input.userId,
-      sessionTokenHash: digestCodespaceAuthorizationValue(input.sessionToken),
-      provider: CODESPACE_PROVIDER_GITHUB,
-      now: this.now(),
-    });
+    const consumed = await this.dependencies.repository.write((repo) =>
+      repo.consumeAuthorizationState({
+        stateHash: digestCodespaceAuthorizationValue(input.state),
+        userId: input.userId,
+        sessionTokenHash: digestCodespaceAuthorizationValue(input.sessionToken),
+        provider: CODESPACE_PROVIDER_GITHUB,
+        now: this.now(),
+      }),
+    );
     if (!consumed) {
       throw new CodespaceConnectionError("AUTHORIZATION_FAILED", "GitHub authorization failed");
     }
@@ -684,10 +693,8 @@ export class CodespaceConnectionService {
           previous.envelope,
         );
       } catch {
-        this.dependencies.repository.markCredentialFailed(
-          input.userId,
-          previous.connection.id,
-          this.now(),
+        await this.dependencies.repository.write((repo) =>
+          repo.markCredentialFailed(input.userId, previous.connection.id, this.now()),
         );
         throw new CodespaceConnectionError(
           "AUTH_REFRESH_FAILED",
@@ -734,13 +741,15 @@ export class CodespaceConnectionService {
       connectionId =
         consumed.intent.kind === "reauthorize"
           ? consumed.intent.connectionId
-          : this.dependencies.repository.reserveConnection({
-              userId: input.userId,
-              provider: CODESPACE_PROVIDER_GITHUB,
-              externalAccountId,
-              externalLogin: githubUser.login,
-              now,
-            });
+          : await this.dependencies.repository.write((repo) =>
+              repo.reserveConnection({
+                userId: input.userId,
+                provider: CODESPACE_PROVIDER_GITHUB,
+                externalAccountId,
+                externalLogin: githubUser.login,
+                now,
+              }),
+            );
       const generation = (previous?.envelope.generation ?? 0) + 1;
       // Encrypted now, stored only by the commit below: an authorization that fails before the
       // commit leaves the working credential untouched and nothing queued.
@@ -771,11 +780,14 @@ export class CodespaceConnectionService {
       };
       if (consumed.intent.kind === "reauthorize") {
         await this.dependencies.beforeCredentialRetirement?.(input.userId);
-        const replaced = this.dependencies.repository.replaceConnectedAuthorization({
-          ...connectedInput,
-          expectedGeneration: consumed.intent.generation,
-          expectedExternalAccountId: previous!.connection.externalAccountId,
-        });
+        const expectedGeneration = consumed.intent.generation;
+        const replaced = await this.dependencies.repository.write((repo) =>
+          repo.replaceConnectedAuthorization({
+            ...connectedInput,
+            expectedGeneration,
+            expectedExternalAccountId: previous!.connection.externalAccountId,
+          }),
+        );
         if (!replaced) {
           throw new CodespaceConnectionError(
             "AUTHORIZATION_FAILED",
@@ -783,7 +795,7 @@ export class CodespaceConnectionService {
           );
         }
       } else {
-        this.dependencies.repository.completeConnection(connectedInput);
+        await this.dependencies.repository.write((repo) => repo.completeConnection(connectedInput));
       }
     } catch (error) {
       const current = this.dependencies.repository.getCredential(
@@ -834,22 +846,23 @@ export class CodespaceConnectionService {
           }
         }
         if (connectionId && consumed.intent.kind !== "reauthorize") {
+          const reservedId = connectionId;
           if (previous && previousCredential && previous.connection.id === connectionId) {
             // The credential that worked before is still the stored one: whatever failed (the new
             // credential, or a database error that rolled the commit back) did not touch it, so the
             // connection returns to where it was instead of being marked failed.
-            this.dependencies.repository.restoreReservedConnection({
-              userId: input.userId,
-              connectionId,
-              status: previous.connection.status,
-              lastErrorCode: previous.connection.lastErrorCode,
-              now: this.now(),
-            });
+            await this.dependencies.repository.write((repo) =>
+              repo.restoreReservedConnection({
+                userId: input.userId,
+                connectionId: reservedId,
+                status: previous.connection.status,
+                lastErrorCode: previous.connection.lastErrorCode,
+                now: this.now(),
+              }),
+            );
           } else {
-            this.dependencies.repository.markCredentialFailed(
-              input.userId,
-              connectionId,
-              this.now(),
+            await this.dependencies.repository.write((repo) =>
+              repo.markCredentialFailed(input.userId, reservedId, this.now()),
             );
           }
         }
@@ -1042,16 +1055,18 @@ export class CodespaceConnectionService {
     const grantsChanged =
       grantIdentity(current.installations) !== grantIdentity(installationGrants) ||
       grantIdentity(current.repositories) !== grantIdentity(repositoryGrants);
-    const replaced = this.dependencies.repository.replaceGrants({
-      connectionId: snapshot.id,
-      userId,
-      provider: CODESPACE_PROVIDER_GITHUB,
-      expectedCredentialGeneration: current.credentialGeneration,
-      expectedGrantsVersion,
-      installations: installationGrants,
-      repositories: repositoryGrants,
-      now: this.now(),
-    });
+    const replaced = await this.dependencies.repository.write((repo) =>
+      repo.replaceGrants({
+        connectionId: snapshot.id,
+        userId,
+        provider: CODESPACE_PROVIDER_GITHUB,
+        expectedCredentialGeneration: current.credentialGeneration,
+        expectedGrantsVersion,
+        installations: installationGrants,
+        repositories: repositoryGrants,
+        now: this.now(),
+      }),
+    );
     if (!replaced) {
       const latest = this.dependencies.repository.getConnection(userId, CODESPACE_PROVIDER_GITHUB);
       if (
@@ -1092,11 +1107,13 @@ export class CodespaceConnectionService {
       throw new CodespaceConnectionError("CONNECTION_REQUIRED", "Connect GitHub in Moira settings");
     }
     if (this.hasUnreadableCredential(userId, config)) {
-      this.dependencies.repository.markCredentialFailed(
-        userId,
-        stored.connection.id,
-        this.now(),
-        "CREDENTIAL_UNREADABLE",
+      await this.dependencies.repository.write((repo) =>
+        repo.markCredentialFailed(
+          userId,
+          stored.connection.id,
+          this.now(),
+          "CREDENTIAL_UNREADABLE",
+        ),
       );
       await this.dependencies.audit?.({
         action: "refresh_failed",
@@ -1154,11 +1171,13 @@ export class CodespaceConnectionService {
         stored.envelope,
       );
     } catch {
-      this.dependencies.repository.markCredentialFailed(
-        userId,
-        stored.connection.id,
-        this.now(),
-        "CREDENTIAL_UNREADABLE",
+      await this.dependencies.repository.write((repo) =>
+        repo.markCredentialFailed(
+          userId,
+          stored.connection.id,
+          this.now(),
+          "CREDENTIAL_UNREADABLE",
+        ),
       );
       await this.dependencies.audit?.({
         action: "refresh_failed",
@@ -1260,14 +1279,16 @@ export class CodespaceConnectionService {
     }
     const leaseId = this.randomId();
     const now = this.now();
-    const claimed = this.dependencies.repository.claimRefresh({
-      userId,
-      connectionId,
-      expectedGeneration: current.envelope.generation,
-      leaseId,
-      now,
-      leaseExpiresAt: now + REFRESH_LEASE_MS,
-    });
+    const claimed = await this.dependencies.repository.write((repo) =>
+      repo.claimRefresh({
+        userId,
+        connectionId,
+        expectedGeneration: current.envelope.generation,
+        leaseId,
+        now,
+        leaseExpiresAt: now + REFRESH_LEASE_MS,
+      }),
+    );
     if (!claimed) {
       if (await this.failExpiredRefreshLease(userId, connectionId, current.envelope.generation)) {
         throw this.refreshFailure(userId, connectionId);
@@ -1302,22 +1323,26 @@ export class CodespaceConnectionService {
     try {
       if (credential.refreshTokenExpiresAt <= now) throw new Error("Refresh token expired");
       if (
-        !this.dependencies.repository.markRefreshSubmitted({
-          userId,
-          connectionId,
-          leaseId,
-          expectedGeneration: current.envelope.generation,
-          now: this.now(),
-        })
+        !(await this.dependencies.repository.write((repo) =>
+          repo.markRefreshSubmitted({
+            userId,
+            connectionId,
+            leaseId,
+            expectedGeneration: current.envelope.generation,
+            now: this.now(),
+          }),
+        ))
       ) {
         throw new Error("Refresh lease changed before provider submission");
       }
       refreshSubmitted = true;
       refreshed = await this.dependencies.client(config).refreshToken(credential.refreshToken);
       validateTokenPayload(refreshed, this.now());
-      successorRevocationId = this.retainCredentialForRevocation(userId, config, refreshed);
+      successorRevocationId = await this.retainCredentialForRevocation(userId, config, refreshed);
       successorDispositionProven = true;
-      this.dependencies.repository.clearRefreshRecoveryMarker(userId, connectionId, this.now());
+      await this.dependencies.repository.write((repo) =>
+        repo.clearRefreshRecoveryMarker(userId, connectionId, this.now()),
+      );
       const envelope = vault.encrypt(
         userId,
         CODESPACE_PROVIDER_GITHUB,
@@ -1325,19 +1350,20 @@ export class CodespaceConnectionService {
         current.envelope.generation + 1,
         refreshed,
       );
-      const completed = this.dependencies.repository.completeRefresh({
-        userId,
-        connectionId,
-        leaseId,
-        expectedGeneration: current.envelope.generation,
-        envelope,
-        now: this.now(),
-      });
+      const completed = await this.dependencies.repository.write((repo) =>
+        repo.completeRefresh({
+          userId,
+          connectionId,
+          leaseId,
+          expectedGeneration: current.envelope.generation,
+          envelope,
+          now: this.now(),
+        }),
+      );
       if (!completed) throw new Error("Refresh generation changed");
-      this.dependencies.repository.deletePendingRevocation(
-        userId,
-        CODESPACE_PROVIDER_GITHUB,
-        successorRevocationId,
+      const retainedRevocationId = successorRevocationId;
+      await this.dependencies.repository.write((repo) =>
+        repo.deletePendingRevocation(userId, CODESPACE_PROVIDER_GITHUB, retainedRevocationId),
       );
       successorDispositionProven = true;
       return refreshed.accessToken;
@@ -1346,15 +1372,15 @@ export class CodespaceConnectionService {
         try {
           await this.dependencies.client(config).revokeToken(refreshed.accessToken);
           successorDispositionProven = true;
-          this.dependencies.repository.clearRefreshRecoveryMarker(userId, connectionId, this.now());
+          await this.dependencies.repository.write((repo) =>
+            repo.clearRefreshRecoveryMarker(userId, connectionId, this.now()),
+          );
         } catch {
           try {
             await this.dependencies.client(config).revokeGrant(refreshed.accessToken);
             successorDispositionProven = true;
-            this.dependencies.repository.clearRefreshRecoveryMarker(
-              userId,
-              connectionId,
-              this.now(),
+            await this.dependencies.repository.write((repo) =>
+              repo.clearRefreshRecoveryMarker(userId, connectionId, this.now()),
             );
           } catch {
             // The durable pre-submission marker forces explicit full-grant recovery.
@@ -1362,13 +1388,17 @@ export class CodespaceConnectionService {
         }
       }
       const grantRecoveryRequired = refreshSubmitted && !successorDispositionProven;
-      this.dependencies.repository.markRefreshFailed({
-        userId,
-        connectionId,
-        leaseId,
-        now: this.now(),
-        errorCode: grantRecoveryRequired ? "AUTH_GRANT_REVOCATION_REQUIRED" : "AUTH_REFRESH_FAILED",
-      });
+      await this.dependencies.repository.write((repo) =>
+        repo.markRefreshFailed({
+          userId,
+          connectionId,
+          leaseId,
+          now: this.now(),
+          errorCode: grantRecoveryRequired
+            ? "AUTH_GRANT_REVOCATION_REQUIRED"
+            : "AUTH_REFRESH_FAILED",
+        }),
+      );
       await this.dependencies.audit?.({
         action: "refresh_failed",
         userId,
@@ -1408,10 +1438,8 @@ export class CodespaceConnectionService {
     }
     if (!options.securityOnly) await this.dependencies.beforeDisconnect?.(userId);
     await this.dependencies.beforeCredentialRetirement?.(userId);
-    const stored = this.dependencies.repository.beginDisconnect(
-      userId,
-      CODESPACE_PROVIDER_GITHUB,
-      this.now(),
+    const stored = await this.dependencies.repository.write((repo) =>
+      repo.beginDisconnect(userId, CODESPACE_PROVIDER_GITHUB, this.now()),
     );
     if (!stored) {
       try {
@@ -1436,11 +1464,13 @@ export class CodespaceConnectionService {
         stored.envelope,
       );
     } catch {
-      this.dependencies.repository.markCredentialFailed(
-        userId,
-        stored.connection.id,
-        this.now(),
-        "CREDENTIAL_UNREADABLE",
+      await this.dependencies.repository.write((repo) =>
+        repo.markCredentialFailed(
+          userId,
+          stored.connection.id,
+          this.now(),
+          "CREDENTIAL_UNREADABLE",
+        ),
       );
       await this.dependencies.audit?.({
         action: "disconnect",
@@ -1453,7 +1483,9 @@ export class CodespaceConnectionService {
     }
     try {
       await this.dependencies.client(config).revokeGrant(credential.accessToken);
-      this.dependencies.repository.completeDisconnect(userId, stored.connection.id, this.now());
+      await this.dependencies.repository.write((repo) =>
+        repo.completeDisconnect(userId, stored.connection.id, this.now()),
+      );
       await this.dependencies.audit?.({
         action: "disconnect",
         userId,
@@ -1500,10 +1532,8 @@ export class CodespaceConnectionService {
     if (config.state === "available") {
       unreadable = this.hasUnreadableCredential(userId, config);
       if (!unreadable && snapshot?.lastErrorCode === "CREDENTIAL_UNREADABLE") {
-        this.dependencies.repository.clearUnreadableCredentialFailure(
-          userId,
-          snapshot.id,
-          this.now(),
+        await this.dependencies.repository.write((repo) =>
+          repo.clearUnreadableCredentialFailure(userId, snapshot.id, this.now()),
         );
       }
     }
@@ -1513,12 +1543,14 @@ export class CodespaceConnectionService {
         "The GitHub connection does not require external revocation recovery",
       );
     }
-    const completed = this.dependencies.repository.abandonAfterExternalRevocation({
-      userId,
-      provider: CODESPACE_PROVIDER_GITHUB,
-      connectionId: snapshot?.id,
-      now: this.now(),
-    });
+    const completed = await this.dependencies.repository.write((repo) =>
+      repo.abandonAfterExternalRevocation({
+        userId,
+        provider: CODESPACE_PROVIDER_GITHUB,
+        connectionId: snapshot?.id,
+        now: this.now(),
+      }),
+    );
     if (!completed) {
       throw new CodespaceConnectionError(
         "CREDENTIAL_UNREADABLE",

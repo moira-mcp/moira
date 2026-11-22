@@ -3,6 +3,7 @@
  * Pure HTTP OAuth flow for E2E testing - NO browser automation
  */
 
+import { createHash, randomBytes } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
@@ -11,14 +12,6 @@ import {
   getTestRequestOrigin,
   getAdminCredentials,
 } from "./test-config.js";
-
-/** Thrown when authorize returns invalid_client — signals caller to re-register */
-class InvalidClientError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "InvalidClientError";
-  }
-}
 
 /**
  * Get the session cookie name based on the URL protocol.
@@ -104,8 +97,11 @@ export async function createTestUserViaApi(
     }),
   });
 
-  if (!signUpResponse.ok && signUpResponse.status !== 422) {
-    throw new Error(`Sign-up failed: ${signUpResponse.status}`);
+  if (!signUpResponse.ok) {
+    const { code } = (await signUpResponse.json()) as { code?: string };
+    if (signUpResponse.status !== 422 || code !== "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL") {
+      throw new Error(`Sign-up failed: ${signUpResponse.status} (${code ?? "unknown error"})`);
+    }
   }
 
   // Sign in for an admin session used by subsequent operations
@@ -291,15 +287,17 @@ interface CreateMCPClientOptions {
 /**
  * Register OAuth client with MCP server
  */
-async function registerOAuthClient(baseUrl: string): Promise<OAuthClientData> {
+export async function registerOAuthClient(baseUrl: string): Promise<OAuthClientData> {
   console.log("[OAuth] Step 1: Registering client...");
-  const response = await fetch(`${baseUrl}/api/auth/mcp/register`, {
+  const response = await fetch(`${baseUrl}/api/auth/oauth2/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Origin: getTestRequestOrigin() },
     body: JSON.stringify({
       client_name: "test-mcp-client-" + Date.now(),
       redirect_uris: [OAUTH_REDIRECT_URI],
-      grant_types: ["authorization_code"],
+      application_type: "native",
+      grant_types: ["authorization_code", "refresh_token"],
+      token_endpoint_auth_method: "client_secret_post",
     }),
   });
 
@@ -411,105 +409,95 @@ async function verifyUserEmailViaAdmin(
 /**
  * Get authorization code via OAuth authorize endpoint
  */
-async function getAuthorizationCode(
+export async function getAuthorizationCode(
   baseUrl: string,
   clientId: string,
   sessionCookie: string,
-  maxRetries = 3,
-): Promise<string> {
-  const authorizeUrl = new URL(`${baseUrl}/api/auth/mcp/authorize`);
-  authorizeUrl.searchParams.set("client_id", clientId);
-  authorizeUrl.searchParams.set("redirect_uri", OAUTH_REDIRECT_URI);
-  authorizeUrl.searchParams.set("response_type", "code");
-  authorizeUrl.searchParams.set("state", "test-state");
-  authorizeUrl.searchParams.set("scope", "openid email profile");
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    console.log(`[OAuth] Step 3: Getting authorization code (attempt ${attempt}/${maxRetries})...`);
-
-    const response = await fetch(authorizeUrl.toString(), {
-      method: "GET",
-      headers: {
-        Cookie: formatSessionCookie(baseUrl, sessionCookie),
-      },
-      redirect: "manual",
-    });
-
-    console.log("[OAuth] Authorize status:", response.status);
-
-    if (response.status !== 302) {
-      const error = await response.text();
-      console.error("[OAuth] Expected 302, got:", response.status, error);
-      throw new Error(`Expected 302 redirect, got ${response.status}`);
-    }
-
-    const location = response.headers.get("location");
-    console.log("[OAuth] Authorization redirect received:", Boolean(location));
-
-    if (location && location.includes("code=")) {
-      const locationUrl = new URL(location, baseUrl);
-      const code = locationUrl.searchParams.get("code");
-      if (code) {
-        console.log("[OAuth] ✓ Authorization code received");
-        return code;
-      }
-    }
-
-    // Detect specific error types from redirect
-    if (location && location.includes("error=invalid_client")) {
-      // Client registration not visible yet (SQLite WAL timing) — caller must re-register
-      throw new InvalidClientError(
-        `OAuth client not found (invalid_client). Location: ${location}`,
-      );
-    }
-
-    // Session not recognized — retry with backoff (concurrent DB writes can delay session visibility)
-    if (attempt < maxRetries) {
-      const delay = attempt * 500;
-      console.warn(
-        `[OAuth] No code in redirect (session not recognized), retrying in ${delay}ms...`,
-      );
-      await new Promise((r) => setTimeout(r, delay));
-    } else {
-      console.error("[OAuth] No code in redirect after all retries. Location:", location);
-      throw new Error(`No authorization code in redirect. Location: ${location}`);
-    }
+  prompt?: "consent",
+) {
+  const verifier = randomBytes(32).toString("base64url");
+  const challenge = createHash("sha256").update(verifier).digest("base64url");
+  const state = randomBytes(24).toString("base64url");
+  const authorizeUrl = new URL(baseUrl + "/api/auth/oauth2/authorize");
+  authorizeUrl.search = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: OAUTH_REDIRECT_URI,
+    response_type: "code",
+    state,
+    scope: "openid email profile offline_access",
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+    ...(prompt ? { prompt } : {}),
+  }).toString();
+  const cookie = formatSessionCookie(baseUrl, sessionCookie);
+  const response = await fetch(authorizeUrl, {
+    headers: { Cookie: cookie, Accept: "application/json" },
+    redirect: "manual",
+  });
+  let location: string | null = null;
+  if (
+    response.status === 200 &&
+    response.headers.get("content-type")?.includes("application/json")
+  ) {
+    const body = (await response.json()) as { redirect?: unknown; url?: unknown };
+    if (body.redirect === true && typeof body.url === "string") location = body.url;
+  } else if (response.status >= 300 && response.status < 400) {
+    location = response.headers.get("location");
   }
-
-  throw new Error("Unreachable");
+  if (!location)
+    throw new Error("OAuth authorization returned no redirect target: " + response.status);
+  let next = new URL(location, baseUrl);
+  if (next.pathname.endsWith("/oauth/consent")) {
+    if (
+      ![new URL(baseUrl).origin, getTestRequestOrigin()].includes(next.origin) ||
+      next.searchParams.get("state") !== state ||
+      !next.searchParams.has("sig")
+    ) {
+      throw new Error("Unexpected OAuth consent origin, state or signature");
+    }
+    const consent = await fetch(baseUrl + "/api/auth/oauth2/consent", {
+      method: "POST",
+      headers: {
+        Cookie: cookie,
+        Origin: getTestRequestOrigin(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ accept: true, oauth_query: next.searchParams.toString() }),
+    });
+    if (!consent.ok) throw new Error("Consent failed: " + consent.status);
+    const body = (await consent.json()) as { url: string };
+    next = new URL(body.url, baseUrl);
+  }
+  const code = next.searchParams.get("code");
+  if (
+    next.origin + next.pathname !== OAUTH_REDIRECT_URI ||
+    next.searchParams.get("state") !== state ||
+    !code
+  ) {
+    throw new Error("Expected the registered OAuth callback with the requested state and a code");
+  }
+  return { code, verifier };
 }
 
-/**
- * Exchange authorization code for access token
- */
-async function exchangeCodeForToken(
+export async function exchangeCodeForToken(
   baseUrl: string,
-  code: string,
-  clientId: string,
-  clientSecret: string,
-): Promise<string> {
-  console.log("[OAuth] Step 4: Exchanging code for token...");
-  const response = await fetch(`${baseUrl}/api/auth/mcp/token`, {
+  authorization: { code: string; verifier: string },
+  client: OAuthClientData,
+) {
+  const response = await fetch(baseUrl + "/api/auth/oauth2/token", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Origin: getTestRequestOrigin() },
-    body: JSON.stringify({
+    headers: { Origin: getTestRequestOrigin() },
+    body: new URLSearchParams({
       grant_type: "authorization_code",
-      code,
-      client_id: clientId,
-      client_secret: clientSecret,
+      code: authorization.code,
+      code_verifier: authorization.verifier,
       redirect_uri: OAUTH_REDIRECT_URI,
+      client_id: client.client_id,
+      client_secret: client.client_secret,
     }),
   });
-
-  if (!response.ok) {
-    const error = await response.text();
-    console.error("[OAuth] Token exchange failed:", response.status, error);
-    throw new Error(`Token exchange failed (${response.status}): ${error}`);
-  }
-
-  const tokenData = (await response.json()) as { access_token: string };
-  console.log("[OAuth] ✓ Access token received");
-  return tokenData.access_token;
+  if (!response.ok) throw new Error("OAuth exchange failed: " + response.status);
+  return (await response.json()) as { access_token: string; refresh_token: string };
 }
 
 /**
@@ -565,54 +553,18 @@ export async function createAuthenticatedMCPClient(
     console.log("[mcp-auth] ✓ Email verified for user");
   }
 
-  // Step 1+2+3: Register client, sign in, get auth code (with retry on race conditions)
-  // Assigned inside the retry loop below; the loop either assigns it or throws.
-  let authCode = "";
-  let ownerSessionCookie = "";
-  let clientData: { client_id: string; client_secret: string } | null = null;
-  const maxOAuthAttempts = 3;
-  for (let oauthAttempt = 1; oauthAttempt <= maxOAuthAttempts; oauthAttempt++) {
-    try {
-      // Register new client on first attempt or after invalid_client
-      if (!clientData) {
-        clientData = await registerOAuthClient(fetchUrl);
-        console.log("[mcp-auth] ✓ OAuth client registered:", clientData.client_id);
-      }
-      const sessionCookie = await signInUser(fetchUrl, credentials.email, credentials.password);
-      ownerSessionCookie = sessionCookie;
-      console.log("[mcp-auth] ✓ Signed in, got session cookie");
-      authCode = await getAuthorizationCode(fetchUrl, clientData.client_id, sessionCookie);
-      console.log("[mcp-auth] ✓ Authorization code received");
-      break;
-    } catch (err) {
-      if (oauthAttempt < maxOAuthAttempts) {
-        if (err instanceof InvalidClientError) {
-          // Client not visible in DB yet (WAL timing) — re-register with new client
-          console.warn(`[mcp-auth] invalid_client (attempt ${oauthAttempt}), re-registering...`);
-          clientData = null;
-          await new Promise((r) => setTimeout(r, 1000 * oauthAttempt));
-          continue;
-        }
-        if (String(err).includes("No authorization code")) {
-          console.warn(
-            `[mcp-auth] No auth code (attempt ${oauthAttempt}), retrying with fresh sign-in...`,
-          );
-          await new Promise((r) => setTimeout(r, 1000));
-          continue;
-        }
-      }
-      throw err;
-    }
-  }
-
-  // Step 4: Exchange code for access token
-  const accessToken = await exchangeCodeForToken(
+  const registration = await registerOAuthClient(fetchUrl);
+  const ownerSessionCookie = await signInUser(fetchUrl, credentials.email, credentials.password);
+  const authorization = await getAuthorizationCode(
     fetchUrl,
-    authCode,
-    clientData!.client_id,
-    clientData!.client_secret,
+    registration.client_id,
+    ownerSessionCookie,
   );
-  console.log("[mcp-auth] ✓ Access token received");
+  const { access_token: accessToken } = await exchangeCodeForToken(
+    fetchUrl,
+    authorization,
+    registration,
+  );
 
   // Step 5: Connect MCP client with retry — SQLite WAL may delay session visibility
   const maxConnectRetries = 5;

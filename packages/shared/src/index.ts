@@ -3,8 +3,10 @@
  */
 
 // Auth
+export { oauthTokenDigest } from "./auth/oauth-token.js";
 export {
   createAuth,
+  findMcpOAuthCredential,
   type SuccessfulRegistration,
   type AuthRegistrationOptions,
 } from "./auth/better-auth-config.js";

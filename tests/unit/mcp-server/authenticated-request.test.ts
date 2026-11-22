@@ -123,7 +123,9 @@ describe("authenticated incremental MCP controls", () => {
       method: "tools/call",
       params: { name: "communication", arguments: { action: "send", message: text } },
     };
-    expect(PUBLIC_TOOL_SCHEMAS.communication.parse(input.params.arguments).message).toBe(text);
+    expect(PUBLIC_TOOL_SCHEMAS.communication.parse(input.params.arguments)).toEqual(
+      input.params.arguments,
+    );
     const response = await request(app)
       .post("/mcp")
       .set(headers)

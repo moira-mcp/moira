@@ -9,7 +9,8 @@ import type { Request } from "express";
 import {
   getDatabase,
   oauthAccessToken,
-  oauthApplication,
+  oauthTokenDigest,
+  oauthClient,
   type McpPromptContext,
 } from "@mcp-moira/shared";
 
@@ -101,16 +102,16 @@ export async function getOAuthAppNameFromToken(accessToken: string): Promise<str
   const [tokenData] = await database
     .select({ clientId: oauthAccessToken.clientId })
     .from(oauthAccessToken)
-    .where(eq(oauthAccessToken.accessToken, accessToken))
+    .where(eq(oauthAccessToken.accessToken, oauthTokenDigest(accessToken)))
     .limit(1);
 
   if (!tokenData?.clientId) return null;
 
   // Get application name from clientId
   const [appData] = await database
-    .select({ name: oauthApplication.name })
-    .from(oauthApplication)
-    .where(eq(oauthApplication.clientId, tokenData.clientId))
+    .select({ name: oauthClient.name })
+    .from(oauthClient)
+    .where(eq(oauthClient.clientId, tokenData.clientId))
     .limit(1);
 
   return appData?.name || null;

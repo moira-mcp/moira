@@ -370,7 +370,9 @@ export class DatabaseRepository implements IDataRepository {
     expectedRevision: number,
     reason: string,
   ): Promise<{ changed: boolean; revision: number }> {
-    return this.executionAttemptRepo.stopExecution(executionId, userId, expectedRevision, reason);
+    return this.executionAttemptRepo.write((repo) =>
+      repo.stopExecution(executionId, userId, expectedRevision, reason),
+    );
   }
 
   async setExecutionParent(
@@ -422,27 +424,27 @@ export class DatabaseRepository implements IDataRepository {
   }
 
   async createPresentedExecutionAttempt(attempt: PresentedExecutionAttempt): Promise<void> {
-    this.executionAttemptRepo.createPresented(attempt);
+    return this.executionAttemptRepo.write((repo) => repo.createPresented(attempt));
   }
 
   async ensureCurrentPresentedExecutionAttempt(
     attempt: PresentedExecutionAttempt,
   ): Promise<ExecutionAttempt> {
-    return this.executionAttemptRepo.ensureCurrentPresented(attempt);
+    return this.executionAttemptRepo.write((repo) => repo.ensureCurrentPresented(attempt));
   }
 
   async supersedePresentedExecutionAttempt(attempt: PresentedExecutionAttempt): Promise<void> {
-    this.executionAttemptRepo.supersedePresented(attempt);
+    return this.executionAttemptRepo.write((repo) => repo.supersedePresented(attempt));
   }
 
   async prepareStartExecutionAttempt(attempt: PreparedStartExecutionAttempt): Promise<void> {
-    this.executionAttemptRepo.prepareStart(attempt);
+    return this.executionAttemptRepo.write((repo) => repo.prepareStart(attempt));
   }
 
   async claimStartExecutionAttempt(
     input: ClaimStartExecutionAttemptInput,
   ): Promise<ExecutionAttemptClaimResult> {
-    return this.executionAttemptRepo.claimStart(input);
+    return this.executionAttemptRepo.write((repo) => repo.claimStart(input));
   }
 
   async completeStartAttemptPrecondition(
@@ -451,7 +453,9 @@ export class DatabaseRepository implements IDataRepository {
     response: string,
     now: number,
   ): Promise<StartPreconditionCompletionResult> {
-    return this.executionAttemptRepo.completeStartPrecondition(attemptId, userId, response, now);
+    return this.executionAttemptRepo.write((repo) =>
+      repo.completeStartPrecondition(attemptId, userId, response, now),
+    );
   }
 
   async getBlockingStartExecutionAttempt(
@@ -467,11 +471,8 @@ export class DatabaseRepository implements IDataRepository {
     expectedRevision: number,
     error: import("@mcp-moira/shared").ExecutionError,
   ): Promise<boolean> {
-    return this.executionAttemptRepo.cancelWithStartAttempt(
-      executionId,
-      userId,
-      expectedRevision,
-      error,
+    return this.executionAttemptRepo.write((repo) =>
+      repo.cancelWithStartAttempt(executionId, userId, expectedRevision, error),
     );
   }
 
@@ -485,7 +486,9 @@ export class DatabaseRepository implements IDataRepository {
     response: string,
     now: number,
   ): Promise<boolean> {
-    return this.executionAttemptRepo.updatePresentedResponse(attemptId, userId, response, now);
+    return this.executionAttemptRepo.write((repo) =>
+      repo.updatePresentedResponse(attemptId, userId, response, now),
+    );
   }
 
   async getCurrentExecutionAttempt(
@@ -498,7 +501,7 @@ export class DatabaseRepository implements IDataRepository {
   async claimExecutionAttempt(
     input: Parameters<ExecutionAttemptRepository["claim"]>[0],
   ): Promise<ExecutionAttemptClaimResult> {
-    return this.executionAttemptRepo.claim(input);
+    return this.executionAttemptRepo.write((repo) => repo.claim(input));
   }
 
   async heartbeatExecutionAttempt(
@@ -508,17 +511,19 @@ export class DatabaseRepository implements IDataRepository {
     now: number,
     leaseMs: number,
   ): Promise<boolean> {
-    return this.executionAttemptRepo.heartbeat(attemptId, ownerId, fence, now, leaseMs);
+    return this.executionAttemptRepo.write((repo) =>
+      repo.heartbeat(attemptId, ownerId, fence, now, leaseMs),
+    );
   }
 
   async completeExecutionAttempt(input: CompleteExecutionAttemptInput): Promise<boolean> {
-    return this.executionAttemptRepo.complete(input);
+    return this.executionAttemptRepo.write((repo) => repo.complete(input));
   }
 
   async recoverExecutionToNode(
     input: RecoverExecutionToNodeInput,
   ): Promise<RecoverExecutionToNodeResult> {
-    return this.executionAttemptRepo.recoverToNode(input);
+    return this.executionAttemptRepo.write((repo) => repo.recoverToNode(input));
   }
 
   async markExecutionAttemptOutcomeUnknown(
@@ -527,15 +532,17 @@ export class DatabaseRepository implements IDataRepository {
     fence: number,
     now: number,
   ): Promise<boolean> {
-    return this.executionAttemptRepo.markOutcomeUnknown(attemptId, ownerId, fence, now);
+    return this.executionAttemptRepo.write((repo) =>
+      repo.markOutcomeUnknown(attemptId, ownerId, fence, now),
+    );
   }
 
   async reconcileExpiredExecutionAttempts(now: number): Promise<ReconciledExecutionAttemptCounts> {
-    return this.executionAttemptRepo.reconcileExpired(now);
+    return this.executionAttemptRepo.write((repo) => repo.reconcileExpired(now));
   }
 
   async cleanupExecutionAttempts(now: number): Promise<number> {
-    return this.executionAttemptRepo.cleanup(now);
+    return this.executionAttemptRepo.write((repo) => repo.cleanup(now));
   }
 
   // === Settings Operations ===

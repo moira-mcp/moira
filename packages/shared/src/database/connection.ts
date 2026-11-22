@@ -5,15 +5,21 @@
 
 import { drizzle, BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
+import { AsyncLocalStorage } from "node:async_hooks";
 import path from "path";
 import "dotenv/config";
 import * as schema from "./schema.js";
+import { asSqliteWriter, ownsSqliteWriter } from "./sqlite-write.js";
+import { exposePrivateMemory, physicalSqlite } from "./private-memory.js";
 import { createLogger } from "../logging/logger.js";
 import { getDbPath, isLogSqlEnabled, getNodeEnv, isTestEnvironment } from "../config/env.js";
 
 let dbInstance: BetterSQLite3Database<typeof schema> | null = null;
 let sqliteInstance: Database.Database | null = null;
 const managementFunctions = new WeakSet<Database.Database>();
+type Connection = { sqlite: Database.Database; db: BetterSQLite3Database<typeof schema> };
+let authConnection: Connection | undefined;
+const transactionOwner = new AsyncLocalStorage<{ connection: Connection; active: boolean }>();
 
 /** Unicode case folding shared by singleton and independent overview connections. */
 export function registerExecutionManagementFunctions(sqlite: Database.Database): void {
@@ -41,6 +47,8 @@ class DrizzleLogger {
  * Type-safe queries with schema
  */
 export function getDatabase() {
+  const scope = transactionOwner.getStore();
+  if (scope?.active) return scope.connection.db;
   if (!dbInstance) {
     const dbPath = getDbPath();
 
@@ -68,6 +76,15 @@ export function getDatabase() {
     sqliteInstance.pragma("foreign_keys = ON");
     sqliteInstance.pragma("busy_timeout = 5000"); // Wait up to 5s for locks
 
+    if (isInMemory) {
+      const live = sqliteInstance;
+      sqliteInstance = exposePrivateMemory(
+        live,
+        () => ownsSqliteWriter(live),
+        registerExecutionManagementFunctions,
+      );
+    }
+
     dbInstance = drizzle(sqliteInstance, { schema, logger: new DrizzleLogger() });
   }
 
@@ -79,10 +96,39 @@ export function getDatabase() {
  * Same instance as Drizzle uses
  */
 export function getSqliteInstance(): Database.Database {
+  const scope = transactionOwner.getStore();
+  if (scope?.active && !scope.connection.sqlite.memory) return scope.connection.sqlite;
   if (!sqliteInstance) {
     getDatabase(); // Initialize if not yet
   }
   return sqliteInstance!;
+}
+
+/** Keep unrelated application writes outside Better Auth's asynchronous transactions. */
+export function getAuthConnection(): Connection {
+  if (!authConnection) {
+    const source = getSqliteInstance();
+    if (source.name === ":memory:") return { sqlite: physicalSqlite(source), db: getDatabase() };
+    const sqlite = new Database(source.name, { fileMustExist: true });
+    registerExecutionManagementFunctions(sqlite);
+    sqlite.pragma("foreign_keys = ON");
+    sqlite.pragma("synchronous = NORMAL");
+    sqlite.pragma("busy_timeout = 5000");
+    authConnection = { sqlite, db: drizzle(sqlite, { schema, logger: new DrizzleLogger() }) };
+  }
+  return authConnection;
+}
+
+export async function withAuthTransaction<T>(
+  connection: Connection,
+  work: () => Promise<T>,
+): Promise<T> {
+  const scope = { connection, active: true };
+  try {
+    return await asSqliteWriter(connection.sqlite, () => transactionOwner.run(scope, work));
+  } finally {
+    scope.active = false;
+  }
 }
 
 /**
@@ -117,6 +163,10 @@ export async function withReadSnapshot<T>(
  * Close database connection (for graceful shutdown)
  */
 export function closeDatabase(): void {
+  if (authConnection) {
+    authConnection.sqlite.close();
+    authConnection = undefined;
+  }
   if (sqliteInstance) {
     sqliteInstance.close();
     sqliteInstance = null;

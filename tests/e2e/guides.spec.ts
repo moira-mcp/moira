@@ -56,7 +56,7 @@ const FLOW_SHARED_START = [
 // A reader of the public Quick Task can copy it and learns that the owner edits.
 const FLOW_READER_STEPS = [...FLOW_SHARED_START, "template", "edit-reader", "explore"];
 // The owner of a private copy sets who sees it and edits it.
-const FLOW_OWNER_STEPS = [...FLOW_SHARED_START, "visibility", "edit", "explore"];
+const FLOW_OWNER_STEPS = [...FLOW_SHARED_START, "visibility", "edit", "history", "explore"];
 const SETTINGS_STEPS = [
   "nav",
   "account",

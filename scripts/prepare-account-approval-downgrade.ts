@@ -47,6 +47,17 @@ try {
         "DELETE FROM oauthAccessToken WHERE userId IN (SELECT id FROM user WHERE approvedAt IS NULL)",
       )
       .run().changes;
+    if (
+      sqlite
+        .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='oauthRefreshToken'")
+        .get()
+    ) {
+      sqlite
+        .prepare(
+          "DELETE FROM oauthRefreshToken WHERE userId IN (SELECT id FROM user WHERE approvedAt IS NULL)",
+        )
+        .run();
+    }
     const oauthConsents = sqlite
       .prepare(
         "DELETE FROM oauthConsent WHERE userId IN (SELECT id FROM user WHERE approvedAt IS NULL)",

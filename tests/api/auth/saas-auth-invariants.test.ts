@@ -4,15 +4,20 @@
  */
 
 import { afterEach, beforeAll, describe, expect, test } from "@jest/globals";
-import { randomUUID } from "node:crypto";
 import { getTestBaseUrl } from "../../utils/test-config.js";
 import { execSqliteInDocker, waitForDockerLog } from "../../utils/docker-command.js";
-import { formatSessionCookie, getAdminSessionCookie } from "../../utils/mcp-auth.js";
+import {
+  exchangeCodeForToken,
+  formatSessionCookie,
+  getAdminSessionCookie,
+  getAuthorizationCode,
+  registerOAuthClient,
+  signInUser,
+} from "../../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
 const OAUTH_REDIRECT_URI = "http://localhost:3333/oauth/callback";
 const createdUserIds = new Set<string>();
-const createdVerificationCodes = new Set<string>();
 
 function cookieFrom(response: Response): string {
   return (response.headers.get("set-cookie") || "").split(";")[0];
@@ -42,11 +47,6 @@ describe("SaaS authentication invariants", () => {
   });
 
   afterEach(async () => {
-    if (createdVerificationCodes.size > 0) {
-      const identifiers = [...createdVerificationCodes].map((code) => `'${code}'`).join(", ");
-      execSqliteInDocker(`DELETE FROM verification WHERE identifier IN (${identifiers})`);
-      createdVerificationCodes.clear();
-    }
     if (createdUserIds.size === 0) return;
     const adminCookie = await signInAdmin();
     for (const userId of createdUserIds) {
@@ -168,66 +168,40 @@ describe("SaaS authentication invariants", () => {
     expect(token.status).toBe(403);
     expect(await token.json()).toMatchObject({ error: { code: "EMAIL_NOT_VERIFIED" } });
 
-    const registerClient = await fetch(`${BASE_URL}/api/auth/mcp/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        client_name: `saas-invariants-${Date.now()}`,
-        redirect_uris: [OAUTH_REDIRECT_URI],
-        grant_types: ["authorization_code", "refresh_token"],
-      }),
-    });
-    expect(registerClient.status).toBe(201);
-    const client = (await registerClient.json()) as {
-      client_id: string;
-      client_secret: string;
-    };
-
-    const seedAuthorizationCode = () => {
-      const code = randomUUID();
-      createdVerificationCodes.add(code);
-      const codeVerifier = randomUUID();
-      const verificationValue = JSON.stringify({
-        clientId: client.client_id,
-        redirectURI: OAUTH_REDIRECT_URI,
-        userId: statusBody.data.id,
-        scope: ["openid", "email", "profile"],
-        codeChallenge: codeVerifier,
-        codeChallengeMethod: "plain",
-      }).replace(/'/g, "''");
-      const now = new Date().toISOString();
-      execSqliteInDocker(
-        `INSERT INTO verification (id, identifier, value, expiresAt, createdAt, updatedAt) VALUES ('${randomUUID()}', '${code}', '${verificationValue}', '${new Date(Date.now() + 300_000).toISOString()}', '${now}', '${now}')`,
+    const adminCookie = await signInAdmin();
+    const verify = () =>
+      fetch(`${BASE_URL}/api/admin/users/${statusBody.data.id}/verify-email`, {
+        method: "POST",
+        headers: { Cookie: adminCookie },
+      });
+    expect((await verify()).status).toBe(200);
+    const client = await registerOAuthClient(BASE_URL);
+    const authorizeUser = async () =>
+      getAuthorizationCode(
+        BASE_URL,
+        client.client_id,
+        await signInUser(BASE_URL, email, "testpassword123"),
       );
-      return { code, codeVerifier };
-    };
-    const seedOAuthToken = () => {
-      const accessToken = randomUUID();
-      const refreshToken = randomUUID();
-      const now = new Date().toISOString();
-      execSqliteInDocker(
-        `INSERT INTO oauthAccessToken (id, accessToken, refreshToken, accessTokenExpiresAt, refreshTokenExpiresAt, clientId, userId, scopes, createdAt, updatedAt) VALUES ('${randomUUID()}', '${accessToken}', '${refreshToken}', '${new Date(Date.now() + 300_000).toISOString()}', '${new Date(Date.now() + 600_000).toISOString()}', '${client.client_id}', '${statusBody.data.id}', 'openid email profile offline_access', '${now}', '${now}')`,
-      );
-      return { accessToken, refreshToken };
-    };
-    const exchangeCode = ({ code, codeVerifier }: { code: string; codeVerifier: string }) =>
+    const exchangeCode = (authorization: Awaited<ReturnType<typeof getAuthorizationCode>>) =>
       fetch(`${BASE_URL}/api/auth/mcp/token`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        headers: { Origin: BASE_URL },
+        body: new URLSearchParams({
           grant_type: "authorization_code",
-          code,
+          code: authorization.code,
           client_id: client.client_id,
           client_secret: client.client_secret,
           redirect_uri: OAUTH_REDIRECT_URI,
-          code_verifier: codeVerifier,
+          code_verifier: authorization.verifier,
         }),
       });
+    const issued = await exchangeCodeForToken(BASE_URL, await authorizeUser(), client);
+    const heldCode = await authorizeUser();
     const exchangeRefresh = (refreshToken: string) =>
       fetch(`${BASE_URL}/api/auth/mcp/token`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        headers: { Origin: BASE_URL },
+        body: new URLSearchParams({
           grant_type: "refresh_token",
           refresh_token: refreshToken,
           client_id: client.client_id,
@@ -258,39 +232,33 @@ describe("SaaS authentication invariants", () => {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
 
-    const unverifiedCode = await exchangeCode(seedAuthorizationCode());
+    // A provider-issued grant can outlive changes to this test account's admission state.
+    // Keep credentials untouched while exercising each gate, including block precedence.
+    execSqliteInDocker(`UPDATE user SET emailVerified = 0 WHERE id = '${statusBody.data.id}'`);
+    const unverifiedCode = await exchangeCode(heldCode);
     expect(unverifiedCode.status).toBe(403);
     expect(await unverifiedCode.json()).toMatchObject({ code: "EMAIL_NOT_VERIFIED" });
-    const unverifiedOAuthToken = seedOAuthToken();
-    const unverifiedRefresh = await exchangeRefresh(unverifiedOAuthToken.refreshToken);
+    const unverifiedRefresh = await exchangeRefresh(issued.refresh_token);
     expect(unverifiedRefresh.status).toBe(403);
     expect(await unverifiedRefresh.json()).toMatchObject({ code: "EMAIL_NOT_VERIFIED" });
-    const unverifiedMcp = await callMcp(unverifiedOAuthToken.accessToken);
+    const unverifiedMcp = await callMcp(issued.access_token);
     expect(unverifiedMcp.status).toBe(403);
     expect(await unverifiedMcp.json()).toMatchObject({ error_code: "EMAIL_NOT_VERIFIED" });
-    const unverifiedSession = await getMcpSession(unverifiedOAuthToken.accessToken);
+    const unverifiedSession = await getMcpSession(issued.access_token);
     expect(unverifiedSession.status).toBe(403);
     expect(await unverifiedSession.json()).toMatchObject({ code: "EMAIL_NOT_VERIFIED" });
 
-    const adminCookie = await signInAdmin();
-    const block = await fetch(`${BASE_URL}/api/admin/users/${statusBody.data.id}/block`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: adminCookie },
-      body: JSON.stringify({ reason: "saas-oauth-block-precedence" }),
-    });
-    expect(block.status).toBe(200);
-
-    const blockedCode = await exchangeCode(seedAuthorizationCode());
+    execSqliteInDocker(`UPDATE user SET blocked = 1 WHERE id = '${statusBody.data.id}'`);
+    const blockedCode = await exchangeCode(heldCode);
     expect(blockedCode.status).toBe(403);
     expect(await blockedCode.json()).toMatchObject({ code: "ACCOUNT_BLOCKED" });
-    const blockedOAuthToken = seedOAuthToken();
-    const blockedRefresh = await exchangeRefresh(blockedOAuthToken.refreshToken);
+    const blockedRefresh = await exchangeRefresh(issued.refresh_token);
     expect(blockedRefresh.status).toBe(403);
     expect(await blockedRefresh.json()).toMatchObject({ code: "ACCOUNT_BLOCKED" });
-    const blockedMcp = await callMcp(blockedOAuthToken.accessToken);
+    const blockedMcp = await callMcp(issued.access_token);
     expect(blockedMcp.status).toBe(403);
     expect(await blockedMcp.json()).toMatchObject({ error_code: "ACCOUNT_BLOCKED" });
-    const blockedSession = await getMcpSession(blockedOAuthToken.accessToken);
+    const blockedSession = await getMcpSession(issued.access_token);
     expect(blockedSession.status).toBe(403);
     expect(await blockedSession.json()).toMatchObject({ code: "ACCOUNT_BLOCKED" });
 
@@ -299,13 +267,8 @@ describe("SaaS authentication invariants", () => {
       headers: { Cookie: adminCookie },
     });
     expect(unblock.status).toBe(200);
-    const verifyEmail = await fetch(
-      `${BASE_URL}/api/admin/users/${statusBody.data.id}/verify-email`,
-      { method: "POST", headers: { Cookie: adminCookie } },
-    );
-    expect(verifyEmail.status).toBe(200);
-
-    const verifiedCode = await exchangeCode(seedAuthorizationCode());
+    expect((await verify()).status).toBe(200);
+    const verifiedCode = await exchangeCode(heldCode);
     expect(verifiedCode.status).toBe(200);
     const verifiedCodeBody = (await verifiedCode.json()) as { access_token?: string };
     expect(verifiedCodeBody.access_token).toEqual(expect.any(String));
@@ -318,8 +281,18 @@ describe("SaaS authentication invariants", () => {
       accessToken: verifiedCodeBody.access_token,
     });
 
-    const verifiedRefresh = await exchangeRefresh(seedOAuthToken().refreshToken);
+    const verifiedRefresh = await exchangeRefresh(issued.refresh_token);
     expect(verifiedRefresh.status).toBe(200);
     expect(await verifiedRefresh.json()).toMatchObject({ access_token: expect.any(String) });
+
+    // The actual administrative block also retires issued credentials; the gate-only
+    // state above tests policy independently of this retirement operation.
+    const block = await fetch(`${BASE_URL}/api/admin/users/${statusBody.data.id}/block`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: adminCookie },
+      body: JSON.stringify({ reason: "saas-oauth-block-precedence" }),
+    });
+    expect(block.status).toBe(200);
+    expect(await block.json()).toMatchObject({ data: { id: statusBody.data.id, blocked: true } });
   });
 });

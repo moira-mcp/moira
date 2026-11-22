@@ -66,13 +66,15 @@ export function createExecutionMaterializeRoutes(
           return;
         }
         const selected = await owner.select(current.userId);
-        const assignment = tokens.bindMaterializeArchive(
-          token,
-          current.executionId,
-          current.nodeId,
-          current.userId,
-          current.contextRevision,
-          { owner: selected, requestId: createWorkspaceRequestId() },
+        const assignment = await TokenManager.write(tokens, () =>
+          tokens.bindMaterializeArchive(
+            token,
+            current.executionId,
+            current.nodeId,
+            current.userId,
+            current.contextRevision,
+            { owner: selected, requestId: createWorkspaceRequestId() },
+          ),
         );
         if (!assignment) {
           denyMaterialize(res, "authorization_lost");

@@ -545,10 +545,20 @@ describe("CodespaceConnectionService with real SQLite persistence", () => {
       accessTokenExpiresAt: 2_000_000,
       refreshTokenExpiresAt: 9_000_000,
     });
+    const write = repository.write.bind(repository);
     const replace = repository.replaceConnectedAuthorization.bind(repository);
+    let replacing = false;
     repository.replaceConnectedAuthorization = (input) => {
-      replace(input);
-      throw new Error("process stopped after commit");
+      replacing = true;
+      return replace(input);
+    };
+    repository.write = async (work) => {
+      const result = await write(work);
+      if (replacing) {
+        replacing = false;
+        throw new Error("process stopped after commit");
+      }
+      return result;
     };
 
     await expect(
@@ -674,12 +684,22 @@ describe("CodespaceConnectionService with real SQLite persistence", () => {
     // Observe the database immediately after the transaction, before post-commit cleanup runs.
     const commit = repository.completeConnection.bind(repository);
     let queuedAtCommit: string[] = [];
+    const write = repository.write.bind(repository);
+    let completing = false;
     repository.completeConnection = (input) => {
-      commit(input);
-      queuedAtCommit = repository
-        .getPendingRevocations("user-a", "github-codespaces")
-        .map((row) => row.id);
-      throw new Error("process stopped after commit");
+      completing = true;
+      return commit(input);
+    };
+    repository.write = async (work) => {
+      const result = await write(work);
+      if (completing) {
+        completing = false;
+        queuedAtCommit = repository
+          .getPendingRevocations("user-a", "github-codespaces")
+          .map((row) => row.id);
+        throw new Error("process stopped after commit");
+      }
+      return result;
     };
     const reconnect = new CodespaceConnectionService({
       repository,

@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ZodTypeAny } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
+import { z, type ZodTypeAny } from "zod";
 import type { McpPromptContext } from "@mcp-moira/shared";
 import { WORKSPACE_TOOL_DEFINITIONS } from "./workspace-tool-contract.js";
 import { toolDescriptions } from "./tool-descriptions.js";
@@ -563,10 +562,9 @@ function canonicalize(value: unknown): unknown {
 }
 
 export function getToolJsonSchema(definition: Pick<ToolDefinition, "schema" | "_meta">) {
-  const schema = zodToJsonSchema(definition.schema as ZodTypeAny, {
-    $refStrategy: "none",
-    strictUnions: true,
-    pipeStrategy: "input",
+  const schema = z.toJSONSchema(definition.schema, {
+    io: "input",
+    target: "draft-7",
   });
   const fileParams = definition._meta?.["openai/fileParams"];
   if (Array.isArray(fileParams)) {

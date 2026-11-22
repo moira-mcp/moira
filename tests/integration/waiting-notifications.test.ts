@@ -829,7 +829,7 @@ describe("waiting-for-you notifications", () => {
       expect(injected).toBe(true);
       expect(deliveredFor(executionId)).toEqual([]);
       const first = rows(executionId).find((row) => row.waitKey.startsWith("gate:"))!;
-      queue().enqueueReminder(first, clock + 30 * MINUTE, clock);
+      await queue().enqueueReminder(first, clock + 30 * MINUTE, clock);
       expect(rows(executionId)).toHaveLength(2);
     },
   );

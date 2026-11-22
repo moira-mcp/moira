@@ -143,8 +143,8 @@ export function addQuotesToUnquotedKeys(input: string): string {
  * when calling MCP tools. The preprocessing runs inside Zod's parse pipeline
  * (via z.preprocess), so it happens BEFORE schema validation.
  *
- * JSON Schema generation (zodToJsonSchema) is unaffected — it unwraps
- * ZodEffects and uses the inner schema for the advertised type.
+ * The public JSON Schema is exported from the original tool schema, before
+ * preprocessing, so clients still discover the structured input contract.
  */
 export function wrapSchemaWithAutoparse(
   inputSchema: Record<string, z.ZodTypeAny>,
@@ -157,17 +157,21 @@ export function wrapSchemaWithAutoparse(
 }
 
 /**
- * Prepare a tool's typed schema for SDK registration. A plain object contributes its
- * auto-parsing shape; a strict object stays a strict object so unknown fields are
- * rejected at the MCP boundary instead of being silently stripped by the SDK's
- * default object; any other schema is registered as is.
+ * Preserve the original object's unknown-key policy and refinements when preparing
+ * its fields for SDK registration, including grouped tool union branches.
  */
-export function wrapToolSchemaWithAutoparse(
-  inputSchema: z.ZodTypeAny,
-): Record<string, z.ZodTypeAny> | z.ZodTypeAny {
+export function wrapToolSchemaWithAutoparse(inputSchema: z.ZodTypeAny): z.ZodTypeAny {
+  if (inputSchema instanceof z.ZodUnion) {
+    return inputSchema.clone({
+      ...inputSchema.def,
+      options: inputSchema.options.map((option) =>
+        option instanceof z.ZodType ? wrapToolSchemaWithAutoparse(option) : option,
+      ),
+    });
+  }
   if (!(inputSchema instanceof z.ZodObject)) return inputSchema;
   const shape = wrapSchemaWithAutoparse(inputSchema.shape);
-  return inputSchema._def.unknownKeys === "strict" ? z.object(shape).strict() : shape;
+  return inputSchema.safeExtend(shape);
 }
 
 /**
@@ -175,42 +179,22 @@ export function wrapToolSchemaWithAutoparse(
  * an object or array type. Handles optional/default wrappers.
  */
 function wrapFieldWithAutoparse(schema: z.ZodTypeAny): z.ZodTypeAny {
-  // Skip types that natively accept strings
-  if (schema instanceof z.ZodString || schema instanceof z.ZodAny) {
-    return schema;
-  }
-
-  // Skip unions that include string (e.g., z.union([z.string(), z.array(...)]))
-  if (schema instanceof z.ZodUnion) {
-    const options = (schema as z.ZodUnion<[z.ZodTypeAny, ...z.ZodTypeAny[]]>)._def.options;
-    const hasString = options.some((opt: z.ZodTypeAny) => opt instanceof z.ZodString);
-    if (hasString) return schema;
-  }
-
-  // Unwrap optional: wrap inner, then re-apply .optional()
-  if (schema instanceof z.ZodOptional) {
-    const inner = (schema as z.ZodOptional<z.ZodTypeAny>).unwrap();
-    const wrapped = wrapFieldWithAutoparse(inner);
-    if (wrapped === inner) return schema;
-    const optional = wrapped.optional();
-    return schema.description ? optional.describe(schema.description) : optional;
-  }
-
-  // Unwrap default: wrap inner, then re-apply .default()
-  if (schema instanceof z.ZodDefault) {
-    const inner = schema.removeDefault();
-    const defaultValue = schema._def.defaultValue();
-    const wrapped = wrapFieldWithAutoparse(inner);
-    if (wrapped === inner) return schema;
-    const withDefault = wrapped.default(defaultValue);
-    return schema.description ? withDefault.describe(schema.description) : withDefault;
+  // Unwrap only for classification. Validation must keep the original wrappers,
+  // including lazy default factories and optional/null semantics.
+  let structured: z.core.$ZodType = schema;
+  while (
+    structured instanceof z.ZodOptional ||
+    structured instanceof z.ZodDefault ||
+    structured instanceof z.ZodNullable
+  ) {
+    structured = structured.unwrap();
   }
 
   // Object and array schemas: wrap with z.preprocess to auto-parse strings
   if (
-    schema instanceof z.ZodObject ||
-    schema instanceof z.ZodArray ||
-    schema instanceof z.ZodRecord
+    structured instanceof z.ZodObject ||
+    structured instanceof z.ZodArray ||
+    structured instanceof z.ZodRecord
   ) {
     const preprocessed = z.preprocess((val: unknown) => {
       if (typeof val === "string") {

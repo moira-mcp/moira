@@ -24,9 +24,6 @@ const { ReadScopeBoundary } =
   await import("../../../packages/web-frontend/src/auth/ReadScopeBoundary");
 const { authClient } = await import("../../../packages/web-frontend/src/auth/better-auth-client");
 const { apiClient } = await import("../../../packages/web-frontend/src/services/api-client");
-const { revalidateReadSession, getReadIdentity } =
-  await import("../../../packages/web-frontend/src/services/read-scope");
-
 const originalFetch = globalThis.fetch;
 const originalReact = globalThis.React;
 function sessionFor(id: string) {
@@ -43,81 +40,20 @@ function sessionFor(id: string) {
   };
 }
 let current: ReturnType<typeof sessionFor> | null;
-let holdOldCheck = false;
-let holdOldSave = false;
-let finishCheck!: (response: Response) => void;
-let finishSave!: (response: Response) => void;
-let checkStarted: Promise<void>;
-let saveStarted: Promise<void>;
 let consoleError: ReturnType<typeof jest.spyOn>;
-let holdSessionReads: boolean;
-let sessionReads: Array<{ aborted: boolean; finish: (response: Response) => void }>;
-function json(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
 beforeEach(async () => {
   globalThis.React = React;
   await i18n.changeLanguage("en");
   current = sessionFor("owner-a");
-  holdOldCheck = false;
-  holdOldSave = false;
-  holdSessionReads = false;
-  sessionReads = [];
-  let startedCheck!: () => void;
-  let startedSave!: () => void;
-  checkStarted = new Promise((resolve) => {
-    startedCheck = resolve;
-  });
-  saveStarted = new Promise((resolve) => {
-    startedSave = resolve;
-  });
-  const pendingCheck = new Promise<Response>((resolve) => {
-    finishCheck = resolve;
-  });
-  const pendingSave = new Promise<Response>((resolve) => {
-    finishSave = resolve;
-  });
-  globalThis.fetch = jest.fn<typeof fetch>().mockImplementation(async (input, init) => {
+  globalThis.fetch = jest.fn<typeof fetch>().mockImplementation(async (input) => {
     const url = String(input);
-    if (url.includes("/get-session")) {
-      if (!holdSessionReads) return json(current);
-      return new Promise<Response>((resolve, reject) => {
-        const read = {
-          aborted: false,
-          finish: (response: Response) => {
-            init?.signal?.removeEventListener("abort", abort);
-            resolve(response);
-          },
-        };
-        const abort = () => {
-          read.aborted = true;
-          reject(new DOMException("Session read canceled", "AbortError"));
-        };
-        sessionReads.push(read);
-        init?.signal?.addEventListener("abort", abort, { once: true });
-        if (init?.signal?.aborted) abort();
-      });
-    }
+    if (url.includes("/get-session")) return Response.json(current);
     if (url.includes("/sign-in/email"))
-      return json({ code: "INVALID_EMAIL_OR_PASSWORD", message: "Invalid email or password" }, 401);
-    if (url.includes("/oauth/consent/check")) {
-      if (current?.user.id === "owner-a" && holdOldCheck) {
-        startedCheck();
-        return pendingCheck;
-      }
-      return json({ data: { hasConsent: false } });
-    }
-    if (url.endsWith("/oauth/consent") && init?.method === "POST") {
-      if (current?.user.id === "owner-a" && holdOldSave) {
-        startedSave();
-        return pendingSave;
-      }
-      return json({ success: true });
-    }
-    throw new Error(`Unexpected auth/consent request: ${url}`);
+      return Response.json(
+        { code: "INVALID_EMAIL_OR_PASSWORD", message: "Invalid email or password" },
+        { status: 401 },
+      );
+    throw new Error(`Unexpected auth request: ${url}`);
   });
   jest.spyOn(apiClient, "getUserInfo").mockImplementation(async () => ({
     id: current!.user.id,
@@ -136,9 +72,6 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   cleanup();
-  holdSessionReads = false;
-  finishCheck(json({ data: { hasConsent: false } }));
-  finishSave(json({ success: true }));
   current = null;
   await authClient.$store.atoms.session.get().refetch();
   globalThis.fetch = originalFetch;
@@ -146,12 +79,13 @@ afterEach(async () => {
   jest.restoreAllMocks();
 });
 
-function mount() {
+function mount(extraQuery = "") {
   return render(
     <I18nextProvider i18n={i18n}>
       <MemoryRouter
         initialEntries={[
-          "/oauth/authorize?client_id=owned-client&scope=openid&redirect_uri=https%3A%2F%2Fclient.example%2Fcallback&response_type=code",
+          "/oauth/authorize?client_id=owned-client&scope=openid&redirect_uri=https%3A%2F%2Fclient.example%2Fcallback&response_type=code" +
+            extraQuery,
         ]}
       >
         <AuthProvider>
@@ -162,11 +96,6 @@ function mount() {
       </MemoryRouter>
     </I18nextProvider>,
   );
-}
-async function switchOwner() {
-  current = sessionFor("owner-b");
-  await act(async () => authClient.$store.atoms.session.get().refetch());
-  await screen.findByText("owner-b@example.test");
 }
 function navigationAttempts() {
   // JSDOM reports native href navigation through its virtual console. This observes the
@@ -181,47 +110,23 @@ function navigationAttempts() {
         String(value.message).includes("Not implemented: navigation"),
     );
 }
-test("late previous-owner existing consent cannot auto-authorize the replacement account", async () => {
-  holdOldCheck = true;
+test("an authenticated caller resumes authorization at the provider without writing a grant", async () => {
   mount();
-  await checkStarted;
-  await switchOwner();
-  const allow = screen.getByRole("button", { name: i18n.t("pages.oauthAuthorize.allow") });
-  expect(allow).toBeEnabled();
-  await act(async () => finishCheck(json({ data: { hasConsent: true } })));
-  expect(navigationAttempts()).toEqual([]);
-  expect(screen.getByText("owner-b@example.test")).toBeVisible();
-  expect(screen.getByRole("button", { name: i18n.t("pages.oauthAuthorize.allow") })).toBeEnabled();
-});
-test("late previous-owner consent save cannot redirect or keep replacement controls submitting", async () => {
-  holdOldSave = true;
-  mount();
-  fireEvent.click(
-    await screen.findByRole("button", { name: i18n.t("pages.oauthAuthorize.allow") }),
-  );
-  await saveStarted;
-  await switchOwner();
-  await act(async () => finishSave(json({ success: true })));
-  expect(navigationAttempts()).toEqual([]);
-  expect(screen.getByRole("button", { name: i18n.t("pages.oauthAuthorize.allow") })).toBeEnabled();
-});
-test("successful owned consent save still redirects after a same-account credential renewal", async () => {
-  holdOldSave = true;
-  mount();
-  fireEvent.click(
-    await screen.findByRole("button", { name: i18n.t("pages.oauthAuthorize.allow") }),
-  );
-  await saveStarted;
-  current = {
-    ...sessionFor("owner-a"),
-    session: { ...sessionFor("owner-a").session, id: "renewed-owner-a-session" },
-  };
-  await act(async () => authClient.$store.atoms.session.get().refetch());
-  expect(screen.getByText("owner-a@example.test")).toBeVisible();
-  await act(async () => finishSave(json({ success: true })));
-  // Unlike a former owner's reply, this owned accepted operation must reach native href.
+  await act(async () => {});
   expect(navigationAttempts()).toHaveLength(1);
+  expect(
+    jest
+      .mocked(globalThis.fetch)
+      .mock.calls.some(([url]) => String(url).includes("/api/oauth/consent")),
+  ).toBe(false);
 });
+
+test("a signed login prompt still shows authentication for a browser with an existing session", async () => {
+  mount("&prompt=login&ba_param=client_id&sig=signed");
+  expect(await screen.findByLabelText("Email")).toBeVisible();
+  expect(navigationAttempts()).toHaveLength(0);
+});
+
 test("anonymous OAuth login remains a live public form during a failed real auth operation", async () => {
   current = null;
   await authClient.$store.atoms.session.get().refetch();
@@ -237,39 +142,3 @@ test("anonymous OAuth login remains a live public form during a failed real auth
   expect(email).toBeVisible();
   expect(email).toHaveValue("typed@example.test");
 });
-
-test.each(["same owner", "replacement", "error", "unmounted"])(
-  "owned consent save waits for the actual %s session after its refetch is canceled",
-  async (outcome) => {
-    holdOldSave = true;
-    const mounted = mount();
-    fireEvent.click(
-      await screen.findByRole("button", { name: i18n.t("pages.oauthAuthorize.allow") }),
-    );
-    await saveStarted;
-    current = {
-      ...sessionFor("owner-a"),
-      session: { ...sessionFor("owner-a").session, id: "renewed-owner-a-session" },
-    };
-    await act(async () => authClient.$store.atoms.session.get().refetch());
-    holdSessionReads = true;
-    await act(async () => finishSave(json({ success: true })));
-    const canceled = sessionReads.at(-1)!;
-    expect(authClient.$store.atoms.session.get().isRefetching).toBe(true);
-    await act(async () => revalidateReadSession());
-    expect(canceled.aborted).toBe(true);
-    expect(getReadIdentity()).toBeNull();
-    expect(navigationAttempts()).toEqual([]);
-    if (outcome === "replacement") current = sessionFor("owner-b");
-    if (outcome === "unmounted") mounted.unmount();
-    holdSessionReads = false;
-    await act(async () => {
-      for (const read of sessionReads.filter((read) => !read.aborted))
-        read.finish(
-          outcome === "error" ? json({ message: "Session check unavailable" }, 500) : json(current),
-        );
-    });
-    expect(navigationAttempts()).toHaveLength(outcome === "same owner" ? 1 : 0);
-    if (outcome === "replacement") expect(screen.getByText("owner-b@example.test")).toBeVisible();
-  },
-);

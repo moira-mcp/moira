@@ -25,6 +25,18 @@ describe("AuditRepository", () => {
     closeDatabase();
   });
 
+  test("a repository supplied with a transaction writes before its owner rolls back", async () => {
+    let inserted!: Promise<string>;
+    expect(() =>
+      db.transaction((tx) => {
+        inserted = new AuditRepository(tx).log({ userId: testUserId, action: "test:rollback" });
+        throw new Error("abort the operation");
+      }),
+    ).toThrow("abort the operation");
+    const id = await inserted;
+    expect(await repository.get(id)).toBeNull();
+  });
+
   test("log() creates audit entry", async () => {
     const entry = {
       userId: testUserId,

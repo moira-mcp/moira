@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AuthLayout } from "@/components/AuthLayout";
 import { validateReturnUrl } from "../utils/return-url";
+import { originalAuthorizationParams } from "../auth/authorization-params";
 import { ROUTES } from "../constants/routes";
 import { useFeatures } from "../hooks/useFeatures";
 import { apiClient } from "../services/api-client";
@@ -213,10 +214,7 @@ const RegistrationSuccessContent: React.FC = () => {
         if (!isCurrent()) return;
         if (hasOAuthFlow) {
           // Continue OAuth flow - redirect to authorize with preserved params
-          const params = new URLSearchParams();
-          searchParams.forEach((value, key) => {
-            params.set(key, value);
-          });
+          const params = originalAuthorizationParams(searchParams);
           navigate(`${ROUTES.OAUTH_AUTHORIZE}?${params.toString()}`);
         } else {
           // Check for returnUrl to redirect to original page
@@ -234,7 +232,7 @@ const RegistrationSuccessContent: React.FC = () => {
     setIsSigningOut(true);
     setSignOutFailed(false);
     try {
-      const result = await authClient.signOut();
+      const result = await authClient.signOut({});
       if (result.error) throw result.error;
       const currentUser = authClient.$store.atoms.session.get().data?.user.id;
       if (currentUser && currentUser !== previousUser) return;

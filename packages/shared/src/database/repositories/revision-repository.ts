@@ -12,6 +12,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { withDrizzleWrite } from "../drizzle-write.js";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { entityRevision, revisionPayload } from "../schema.js";
@@ -80,7 +81,7 @@ export class RevisionRepository {
    * reused number: pruning removes the oldest rows, not the newest.
    */
   async append(options: AppendRevisionOptions): Promise<Revision> {
-    return this.appendSync(options);
+    return withDrizzleWrite(this.db, () => this.appendSync(options));
   }
 
   /** Append atomically, including when composed inside an owning entity's synchronous transaction. */
@@ -227,7 +228,7 @@ export class RevisionRepository {
 
   /** Remove an entity's whole history; the owner calls this when it deletes the entity itself. */
   async deleteHistory(target: RevisionTarget): Promise<void> {
-    this.deleteHistorySync(target);
+    await withDrizzleWrite(this.db, () => this.deleteHistorySync(target));
   }
 
   deleteHistorySync(target: RevisionTarget): void {

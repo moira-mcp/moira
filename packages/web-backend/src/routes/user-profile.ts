@@ -3,6 +3,7 @@
  * Handles profile data, password changes, and email verification
  */
 
+import { executeDrizzleWrite, withDrizzleWrite } from "@mcp-moira/shared";
 import { Router, Request, Response } from "express";
 import { requireAuth } from "../middleware/auth-middleware.js";
 import { apiLimiter } from "../middleware/rate-limit-middleware.js";
@@ -20,7 +21,7 @@ import {
   UserNotFoundError,
 } from "@mcp-moira/shared";
 import * as sharedEmail from "@mcp-moira/shared";
-import { user, session, oauthAccessToken } from "@mcp-moira/shared";
+import { user, session, oauthAccessToken, oauthRefreshToken } from "@mcp-moira/shared";
 import { eq, and, ne } from "drizzle-orm";
 import { auth } from "../auth.js";
 import { toHeaders } from "../utils/headers.js";
@@ -193,16 +194,24 @@ router.post(
 
       // Revoke all sessions EXCEPT current
       if (currentToken) {
-        await db
-          .delete(session)
-          .where(and(eq(session.userId, userId), ne(session.token, currentToken)));
+        await executeDrizzleWrite(
+          db,
+          db
+            .delete(session)
+            .where(and(eq(session.userId, userId), ne(session.token, currentToken))),
+        );
       } else {
         // If no current token (shouldn't happen), revoke ALL sessions
-        await db.delete(session).where(eq(session.userId, userId));
+        await executeDrizzleWrite(db, db.delete(session).where(eq(session.userId, userId)));
       }
 
       // Revoke all OAuth access tokens
-      await db.delete(oauthAccessToken).where(eq(oauthAccessToken.userId, userId));
+      await withDrizzleWrite(db, () =>
+        db.transaction((tx) => {
+          tx.delete(oauthAccessToken).where(eq(oauthAccessToken.userId, userId)).run();
+          tx.delete(oauthRefreshToken).where(eq(oauthRefreshToken.userId, userId)).run();
+        }),
+      );
 
       // Audit log entry
       const repository = new DatabaseRepository();

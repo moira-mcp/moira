@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { sanitizeInput } from "@mcp-moira/shared/logging/sanitize-input";
+import { wrapToolSchemaWithAutoparse } from "../utils/flexible-json-parser.js";
 import {
   getSessionInfoSchema,
   helpSchema,
@@ -20,7 +21,7 @@ import { WORKSPACE_TOOL_SCHEMAS } from "@mcp-moira/shared/workspace-tool-schemas
 /** JSON values must be present; null, false, zero and empty strings are values. */
 const presentValue = z.unknown().refine((value) => value !== undefined, "Value must be present");
 const nonempty = z.string().min(1);
-type Shape = z.ZodRawShape;
+type Shape = Record<string, z.core.$ZodType>;
 function branch(
   source: { shape: Shape },
   action: string,
@@ -370,6 +371,13 @@ export const PUBLIC_TOOL_SCHEMAS = {
   help: helpSchema.strict(),
 } as const;
 export type PublicToolName = keyof typeof PUBLIC_TOOL_SCHEMAS;
+/** One input projection for HTTP admission, SDK validation and internal dispatch. */
+export const PUBLIC_TOOL_INPUT_SCHEMAS = Object.fromEntries(
+  Object.entries(PUBLIC_TOOL_SCHEMAS).map(([name, schema]) => [
+    name,
+    wrapToolSchemaWithAutoparse(schema),
+  ]),
+) as Record<PublicToolName, z.ZodType>;
 type InternalPurpose =
   | keyof typeof WORKSPACE_TOOL_SCHEMAS
   | "list"
@@ -390,7 +398,7 @@ export function resolvePublicTool(
   name: PublicToolName,
   raw: unknown,
 ): { purpose: InternalPurpose; params: Record<string, unknown>; privateInput: boolean } {
-  const params = PUBLIC_TOOL_SCHEMAS[name].parse(raw) as Record<string, unknown>;
+  const params = PUBLIC_TOOL_INPUT_SCHEMAS[name].parse(raw) as Record<string, unknown>;
   const { action, ...fields } = params;
   if (name in WORKSPACE_PUBLIC_SINGLETONS)
     return {

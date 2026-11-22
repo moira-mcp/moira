@@ -21,10 +21,7 @@ describe("OAuth plugin page configuration follows the deployment base-path prefi
 
     expect(buildMcpPluginOptions()).toMatchObject({
       loginPage: "/app/oauth/authorize",
-      oidcConfig: {
-        loginPage: "/app/oauth/authorize",
-        consentPage: "/app/oauth/consent",
-      },
+      consentPage: "/app/oauth/consent",
     });
   });
 
@@ -34,10 +31,7 @@ describe("OAuth plugin page configuration follows the deployment base-path prefi
 
     expect(buildMcpPluginOptions()).toMatchObject({
       loginPage: "/oauth/authorize",
-      oidcConfig: {
-        loginPage: "/oauth/authorize",
-        consentPage: "/oauth/consent",
-      },
+      consentPage: "/oauth/consent",
     });
   });
 });

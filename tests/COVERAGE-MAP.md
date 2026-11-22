@@ -156,7 +156,9 @@ themselves establish each named control's full behavior; use the boundary-specif
 ## Documentation and client contracts
 
 The [typed catalog tests](unit/mcp-server/tool-definitions.test.ts) cover grouped actions, strict
-cross-action refusal, conditional native-file metadata and native result blocks.
+cross-action refusal, native input-schema publication, structured/stringified SDK calls,
+conditional native-file metadata and native result blocks. [Input preprocessing](unit/mcp-server/input-parser-simple.test.ts)
+preserves object policies, refinements, omission/null and parse-time defaults.
 [Catalog lifecycle](unit/mcp-server/mcp-catalog-lifecycle.test.ts) owns accepted connection revision
 and refresh behavior. [Inspector tools](e2e/inspector-mcp-tools.spec.ts) exercises the maintained
 Inspector 2.12 UI with discovery, JSON action editing and an actual `workflow` list result;
@@ -175,6 +177,10 @@ Workspace suites distinguish current observations from retained history and orig
 An unavailable provider is not healthy absence; one provider's unresolved observation must not
 block independent discovery of another. Original uncertainty and custody survive restart and
 authority changes; collecting them does not repeat the effect or fabricate lifecycle authority.
+
+[State JSON snapshot tests](unit/workspace-service/state-json.test.cjs) read complete versions during
+atomic publication by a separate process and refuses unsafe file types and malformed state.
+This mutable-state reader is distinct from the private receipt identity guard.
 
 [Controller availability](integration/local/controller-native-failure.test.ts) exercises real
 archive publication and original collection during controlled native failure.

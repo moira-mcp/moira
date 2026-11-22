@@ -6,7 +6,7 @@ import {
 } from "../reconciliation-aware-server.js";
 import { sanitizeMcpError } from "../utils/error-sanitizer.js";
 import { createLogger, isOperationalError, normalizeError } from "@mcp-moira/shared";
-import { wrapToolSchemaWithAutoparse } from "../utils/flexible-json-parser.js";
+import { PUBLIC_TOOL_INPUT_SCHEMAS } from "./public-tool-contract.js";
 import type { McpPromptContext } from "@mcp-moira/shared";
 import { invokeToolDefinition } from "./tool-bindings.js";
 import { TOOL_DEFINITIONS, getToolJsonSchema, resolveToolDescription } from "./tool-definitions.js";
@@ -46,7 +46,7 @@ export function registerTools(
       definition.name,
       {
         description: resolveToolDescription(definition, context),
-        inputSchema: wrapToolSchemaWithAutoparse(definition.schema),
+        inputSchema: PUBLIC_TOOL_INPUT_SCHEMAS[definition.name],
         ...(definition._meta ? { _meta: definition._meta } : {}),
       },
       async (params: unknown) => {

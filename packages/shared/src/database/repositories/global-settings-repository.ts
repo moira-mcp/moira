@@ -3,6 +3,7 @@
  * Separate from user settings - only admins can access
  */
 
+import { executeDrizzleWrite } from "../drizzle-write.js";
 import { eq } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { globalSetting } from "../schema.js";
@@ -70,14 +71,17 @@ export class GlobalSettingsRepository {
   async setValue(key: string, value: string | null, adminUserId: string): Promise<void> {
     const now = new Date();
 
-    await this.db
-      .update(globalSetting)
-      .set({
-        value,
-        updatedAt: now,
-        updatedBy: adminUserId,
-      })
-      .where(eq(globalSetting.key, key));
+    await executeDrizzleWrite(
+      this.db,
+      this.db
+        .update(globalSetting)
+        .set({
+          value,
+          updatedAt: now,
+          updatedBy: adminUserId,
+        })
+        .where(eq(globalSetting.key, key)),
+    );
   }
 
   /**
@@ -98,17 +102,20 @@ export class GlobalSettingsRepository {
   ): Promise<void> {
     const now = new Date();
 
-    await this.db.insert(globalSetting).values({
-      key: setting.key,
-      value: setting.value ?? null,
-      type: setting.type,
-      label: setting.label,
-      description: setting.description,
-      category: setting.category,
-      sortOrder: setting.sortOrder ?? 0,
-      updatedAt: now,
-      updatedBy: adminUserId,
-    });
+    await executeDrizzleWrite(
+      this.db,
+      this.db.insert(globalSetting).values({
+        key: setting.key,
+        value: setting.value ?? null,
+        type: setting.type,
+        label: setting.label,
+        description: setting.description,
+        category: setting.category,
+        sortOrder: setting.sortOrder ?? 0,
+        updatedAt: now,
+        updatedBy: adminUserId,
+      }),
+    );
   }
 
   /**

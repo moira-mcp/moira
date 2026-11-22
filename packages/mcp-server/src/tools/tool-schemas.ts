@@ -68,12 +68,12 @@ export const manageWorkflowSchema = z.object({
         tags: z.array(z.string()).optional().describe("Workflow tags"),
       }),
       nodes: z
-        .array(z.record(z.unknown()))
+        .array(z.record(z.string(), z.unknown()))
         .describe(
           "Array of workflow nodes. Decisions are `cases` on the deciding node (condition or agent-directive) with a default output; a separate condition or expression node serves shared or standalone decisions.",
         ),
       variableRegistry: z
-        .record(z.unknown())
+        .record(z.string(), z.unknown())
         .optional()
         .describe(
           "Declared global variables (JSON-Schema-shaped: name -> {type, description, default?}). Required for any variable referenced by bare name in directives, routing cases, expressions, progress list bindings and templates.",
@@ -81,7 +81,7 @@ export const manageWorkflowSchema = z.object({
       runtimePolicy: z
         .object({
           externalVariableWrites: z
-            .record(z.object({ allowedNodeIds: z.array(z.string()).optional() }))
+            .record(z.string(), z.object({ allowedNodeIds: z.array(z.string()).optional() }))
             .optional(),
         })
         .optional(),
@@ -111,24 +111,24 @@ export const manageWorkflowSchema = z.object({
         .optional()
         .describe("Metadata fields to update"),
       variableRegistry: z
-        .record(z.unknown())
+        .record(z.string(), z.unknown())
         .optional()
         .describe("Replace the workflow's declared global variable registry"),
       runtimePolicy: z
         .object({
           externalVariableWrites: z
-            .record(z.object({ allowedNodeIds: z.array(z.string()).optional() }))
+            .record(z.string(), z.object({ allowedNodeIds: z.array(z.string()).optional() }))
             .optional(),
         })
         .optional(),
       progress: progressAuthoringSchema.optional(),
-      addNodes: z.array(z.record(z.unknown())).optional().describe("New nodes to add"),
+      addNodes: z.array(z.record(z.string(), z.unknown())).optional().describe("New nodes to add"),
       removeNodes: z.array(z.string()).optional().describe("Node IDs to remove"),
       updateNodes: z
         .array(
           z.object({
             nodeId: z.string().describe("ID of node to update"),
-            changes: z.any().describe("Fields to update on the node"),
+            changes: z.any().optional().describe("Fields to update on the node"),
           }),
         )
         .optional()
@@ -284,7 +284,7 @@ export const getSessionInfoHandlerSchema = z.object({
     ),
   nodeId: z.string().optional().describe("Node the run must resume from (required for recover)"),
   variableValues: z
-    .record(z.unknown())
+    .record(z.string(), z.unknown())
     .optional()
     .describe("Variable values written into the execution context while recovering (recover only)"),
   // Parameters for executions action
@@ -512,7 +512,7 @@ export const manageReconciliationSchema = z.object({
     .regex(/^[a-f0-9]{64}$/)
     .optional(),
   rationale: z.string().trim().min(1).max(2000).optional(),
-  mergedGraph: z.record(z.unknown()).optional(),
+  mergedGraph: z.record(z.string(), z.unknown()).optional(),
   visibility: z.enum(["public", "private"]).optional(),
 });
 
@@ -578,7 +578,14 @@ export const stepSchema = z.object({
     .string()
     .describe("Step attempt ID from the current start(), step(), or session current_step response"),
   input: z
-    .union([z.string(), z.record(z.any()), z.array(z.unknown()), z.number(), z.boolean(), z.null()])
+    .union([
+      z.string(),
+      z.record(z.string(), z.any()),
+      z.array(z.unknown()),
+      z.number(),
+      z.boolean(),
+      z.null(),
+    ])
     .optional()
     .describe(
       "Input data matching the step's inputSchema. Structure depends on current step requirements.",

@@ -1249,6 +1249,16 @@ test("cancellation after a lost collector preserves uncertainty and real output 
   );
 });
 
+const ownerProcessFixture = require.resolve("../../fixtures/workspace-owner-process.cjs");
+
+function interruptOwnerAcknowledgement(directory, action) {
+  return {
+    NODE_OPTIONS: `--require=${JSON.stringify(require.resolve("../../fixtures/workspace-owner-signals.cjs"))}`,
+    MOIRA_TEST_OWNER_EVENT: action,
+    MOIRA_TEST_OWNER_DIRECTORY: directory,
+  };
+}
+
 test("lost cancellation owners cannot fabricate completion while a resistant child still produces effects", async () => {
   const value = fixture();
   await start(value);
@@ -1258,11 +1268,7 @@ test("lost cancellation owners cannot fabricate completion while a resistant chi
   try {
     await control(value, "POST", "/v1/exec", {
       requestId,
-      argv: [
-        process.execPath,
-        "-e",
-        "const f=require('node:fs');process.on('SIGTERM',()=>{});let wrote=false;f.watch('.',()=>{if(!wrote&&f.existsSync('show-life')){wrote=true;f.writeFileSync('after-cancel-effect','still running')}});f.writeFileSync('actual-child',String(process.pid));setInterval(()=>{},1000)",
-      ],
+      argv: [process.execPath, ownerProcessFixture, "cancellation"],
     });
     const directory = join(
       value.stateRoot,
@@ -1336,12 +1342,7 @@ test.each(["acknowledged", "missing-start-ack"])(
   async (phase) => {
     const value = fixture();
     if (phase === "missing-start-ack") {
-      const hook = join(value.directory, "drop-start-ack.cjs");
-      writeFileSync(
-        hook,
-        `if(process.send){const original=process.send.bind(process);process.send=(message,...args)=>{if(Number.isSafeInteger(message?.startedAt)){require('node:fs').writeFileSync(${JSON.stringify(join(value.directory, "unacknowledged-owner"))},String(process.pid));return true}return original(message,...args)}}`,
-      );
-      value.environment = { NODE_OPTIONS: `--require=${hook}` };
+      value.environment = interruptOwnerAcknowledgement(value.directory, "drop-start");
     }
     await start(value);
     const requestId = createWorkspaceRequestId();
@@ -1356,11 +1357,7 @@ test.each(["acknowledged", "missing-start-ack"])(
       await control(value, "POST", "/v1/exec", {
         requestId,
         inputReady: true,
-        argv: [
-          process.execPath,
-          "-e",
-          "const f=require('node:fs');f.watch('.',()=>{if(f.existsSync('show-survival')&&!f.existsSync('owner-loss-effect'))f.writeFileSync('owner-loss-effect','command survived owner loss')});f.writeFileSync('owner-loss-child',String(process.pid));setInterval(()=>{},1000)",
-        ],
+        argv: [process.execPath, ownerProcessFixture, "owner-loss"],
       });
       const directory = join(
         value.stateRoot,
@@ -1502,12 +1499,7 @@ test("cancellation never signals a foreign group substituted for the retained co
 test("a proved command exit cannot confirm group cancellation when a resistant descendant survives owner loss", async () => {
   const value = fixture();
   const closedOwner = join(value.directory, "command-close-owner");
-  const hook = join(value.directory, "observe-command-close.cjs");
-  writeFileSync(
-    hook,
-    `if(process.send){const original=process.send.bind(process);process.send=(message,callback)=>{if(Object.hasOwn(message,'exitCode'))return original(message,error=>{require('node:fs').writeFileSync(${JSON.stringify(closedOwner)},String(process.pid));callback?.(error)});return original(message,callback)}}`,
-  );
-  value.environment = { NODE_OPTIONS: `--require=${hook}` };
+  value.environment = interruptOwnerAcknowledgement(value.directory, "observe-close");
   await start(value);
   const requestId = createWorkspaceRequestId();
   let descendant;
@@ -1515,11 +1507,7 @@ test("a proved command exit cannot confirm group cancellation when a resistant d
   try {
     await control(value, "POST", "/v1/exec", {
       requestId,
-      argv: [
-        process.execPath,
-        "-e",
-        "const {spawn}=require('node:child_process');const f=require('node:fs');spawn(process.execPath,['-e',\"const f=require('node:fs');process.on('SIGTERM',()=>{});f.watch('.',()=>{if(f.existsSync('show-descendant')&&!f.existsSync('descendant-effect'))f.writeFileSync('descendant-effect','descendant survived cancellation')});f.writeFileSync('resistant-descendant',String(process.pid));setInterval(()=>{},1000)\"],{stdio:'ignore'});f.writeFileSync('cancellable-leader','ready');setInterval(()=>{},1000)",
-      ],
+      argv: [process.execPath, ownerProcessFixture, "descendant"],
     });
     const deadline = Date.now() + 5000;
     while (

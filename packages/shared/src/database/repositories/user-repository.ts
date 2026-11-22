@@ -7,6 +7,7 @@
  * - User lookup: by ID or by handle
  */
 
+import { executeDrizzleWrite } from "../drizzle-write.js";
 import { eq, and, ne, like, or, sql, gt, asc, desc, inArray } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import {
@@ -14,7 +15,8 @@ import {
   session,
   oauthConsent,
   oauthAccessToken,
-  oauthApplication,
+  oauthClient,
+  oauthRefreshToken,
   workflow,
 } from "../schema.js";
 import type * as schema from "../schema.js";
@@ -214,13 +216,16 @@ export class UserRepository {
       throw new Error(`Handle '${normalizedHandle}' is already taken`);
     }
 
-    const result = await this.db
-      .update(user)
-      .set({
-        handle: normalizedHandle,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(user.id, userId));
+    const result = await executeDrizzleWrite(
+      this.db,
+      this.db
+        .update(user)
+        .set({
+          handle: normalizedHandle,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(user.id, userId)),
+    );
 
     return result.changes > 0;
   }
@@ -267,13 +272,16 @@ export class UserRepository {
    * Update user profile
    */
   async updateProfile(userId: string, updates: { name?: string | null }): Promise<void> {
-    await this.db
-      .update(user)
-      .set({
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(user.id, userId));
+    await executeDrizzleWrite(
+      this.db,
+      this.db
+        .update(user)
+        .set({
+          ...updates,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(user.id, userId)),
+    );
   }
 
   // ===== Session Operations =====
@@ -321,7 +329,7 @@ export class UserRepository {
    * Delete session by ID
    */
   async deleteSession(sessionId: string): Promise<void> {
-    await this.db.delete(session).where(eq(session.id, sessionId));
+    await executeDrizzleWrite(this.db, this.db.delete(session).where(eq(session.id, sessionId)));
   }
 
   /**
@@ -342,11 +350,14 @@ export class UserRepository {
 
     // Delete sessions
     if (excludeToken) {
-      await this.db
-        .delete(session)
-        .where(and(eq(session.userId, userId), ne(session.token, excludeToken)));
+      await executeDrizzleWrite(
+        this.db,
+        this.db
+          .delete(session)
+          .where(and(eq(session.userId, userId), ne(session.token, excludeToken))),
+      );
     } else {
-      await this.db.delete(session).where(eq(session.userId, userId));
+      await executeDrizzleWrite(this.db, this.db.delete(session).where(eq(session.userId, userId)));
     }
 
     return count;
@@ -421,14 +432,14 @@ export class UserRepository {
       .select({
         id: oauthConsent.id,
         clientId: oauthConsent.clientId,
-        scopes: oauthConsent.scopes,
+        scopes: sql<string>`(SELECT group_concat(value, ',') FROM json_each(${oauthConsent.scopes}))`,
         createdAt: oauthConsent.createdAt,
-        clientName: oauthApplication.name,
-        clientIcon: oauthApplication.icon,
+        clientName: oauthClient.name,
+        clientIcon: oauthClient.icon,
       })
       .from(oauthConsent)
-      .leftJoin(oauthApplication, eq(oauthConsent.clientId, oauthApplication.clientId))
-      .where(and(eq(oauthConsent.userId, userId), eq(oauthConsent.consentGiven, true)));
+      .leftJoin(oauthClient, eq(oauthConsent.clientId, oauthClient.clientId))
+      .where(eq(oauthConsent.userId, userId));
   }
 
   /**
@@ -436,15 +447,12 @@ export class UserRepository {
    * Joins with oauthApplication for client name/icon.
    */
   async listOAuthConsentsWithFilters(filter: OAuthConsentFilter): Promise<OAuthConsentListResult> {
-    const baseConditions = [
-      eq(oauthConsent.userId, filter.userId),
-      eq(oauthConsent.consentGiven, true),
-    ];
+    const baseConditions = [eq(oauthConsent.userId, filter.userId)];
 
     if (filter.search) {
       baseConditions.push(
         or(
-          like(oauthApplication.name, `%${filter.search}%`),
+          like(oauthClient.name, `%${filter.search}%`),
           like(oauthConsent.clientId, `%${filter.search}%`),
         )!,
       );
@@ -456,7 +464,7 @@ export class UserRepository {
     const countResult = await this.db
       .select({ count: sql<number>`count(*)` })
       .from(oauthConsent)
-      .leftJoin(oauthApplication, eq(oauthConsent.clientId, oauthApplication.clientId))
+      .leftJoin(oauthClient, eq(oauthConsent.clientId, oauthClient.clientId))
       .where(whereClause);
     const total = countResult[0]?.count ?? 0;
 
@@ -471,13 +479,13 @@ export class UserRepository {
       .select({
         id: oauthConsent.id,
         clientId: oauthConsent.clientId,
-        scopes: oauthConsent.scopes,
+        scopes: sql<string>`(SELECT group_concat(value, ',') FROM json_each(${oauthConsent.scopes}))`,
         createdAt: oauthConsent.createdAt,
-        clientName: oauthApplication.name,
-        clientIcon: oauthApplication.icon,
+        clientName: oauthClient.name,
+        clientIcon: oauthClient.icon,
       })
       .from(oauthConsent)
-      .leftJoin(oauthApplication, eq(oauthConsent.clientId, oauthApplication.clientId))
+      .leftJoin(oauthClient, eq(oauthConsent.clientId, oauthClient.clientId))
       .where(whereClause)
       .orderBy(orderFn(oauthConsent.createdAt))
       .limit(limit)
@@ -494,7 +502,7 @@ export class UserRepository {
       .select({
         id: oauthConsent.id,
         clientId: oauthConsent.clientId,
-        scopes: oauthConsent.scopes,
+        scopes: sql<string>`(SELECT group_concat(value, ',') FROM json_each(${oauthConsent.scopes}))`,
         createdAt: oauthConsent.createdAt,
       })
       .from(oauthConsent)
@@ -508,16 +516,28 @@ export class UserRepository {
    * Delete OAuth consent by ID
    */
   async deleteOAuthConsent(consentId: string): Promise<void> {
-    await this.db.delete(oauthConsent).where(eq(oauthConsent.id, consentId));
+    await executeDrizzleWrite(
+      this.db,
+      this.db.delete(oauthConsent).where(eq(oauthConsent.id, consentId)),
+    );
   }
 
   /**
    * Delete OAuth access tokens for user and client
    */
   async deleteOAuthTokensForClient(userId: string, clientId: string): Promise<void> {
-    await this.db
-      .delete(oauthAccessToken)
-      .where(and(eq(oauthAccessToken.userId, userId), eq(oauthAccessToken.clientId, clientId)));
+    await executeDrizzleWrite(
+      this.db,
+      this.db
+        .delete(oauthRefreshToken)
+        .where(and(eq(oauthRefreshToken.userId, userId), eq(oauthRefreshToken.clientId, clientId))),
+    );
+    await executeDrizzleWrite(
+      this.db,
+      this.db
+        .delete(oauthAccessToken)
+        .where(and(eq(oauthAccessToken.userId, userId), eq(oauthAccessToken.clientId, clientId))),
+    );
   }
 
   /**
@@ -531,7 +551,14 @@ export class UserRepository {
 
     const count = tokensToDelete.length;
 
-    await this.db.delete(oauthAccessToken).where(eq(oauthAccessToken.userId, userId));
+    await executeDrizzleWrite(
+      this.db,
+      this.db.delete(oauthRefreshToken).where(eq(oauthRefreshToken.userId, userId)),
+    );
+    await executeDrizzleWrite(
+      this.db,
+      this.db.delete(oauthAccessToken).where(eq(oauthAccessToken.userId, userId)),
+    );
 
     return count;
   }
@@ -574,15 +601,18 @@ export class UserRepository {
     maxFiles: number | null,
     maxFileSizeMb: number | null,
   ): Promise<boolean> {
-    const result = await this.db
-      .update(user)
-      .set({
-        artifactQuotaMb: quotaMb,
-        artifactMaxFiles: maxFiles,
-        artifactMaxFileSizeMb: maxFileSizeMb,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(user.id, userId));
+    const result = await executeDrizzleWrite(
+      this.db,
+      this.db
+        .update(user)
+        .set({
+          artifactQuotaMb: quotaMb,
+          artifactMaxFiles: maxFiles,
+          artifactMaxFileSizeMb: maxFileSizeMb,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(user.id, userId)),
+    );
 
     return result.changes > 0;
   }

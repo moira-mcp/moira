@@ -592,8 +592,11 @@ test.describe("Admin settings retained regions", () => {
       await expect(page.getByTestId("mcp-prompt-systemPrompt")).toContainText(
         "Override for all ChatGPT models",
       );
+      // The select restores focus to its trigger when its closing animation finishes.
+      await expect(scope).toBeFocused();
       await input.fill("Unsaved ChatGPT prompt");
       await input.focus();
+      await expect(input).toBeFocused();
       const late = page.waitForResponse(
         (r) =>
           new URL(r.url()).pathname.endsWith("/get-scope-value") &&

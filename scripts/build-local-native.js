@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { mkdir, chmod } from "node:fs/promises";
+import { mkdir, chmod, rename, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -15,21 +16,28 @@ export async function buildLocalNativeHelpers(directory = defaultOutput) {
   const output = resolve(directory);
   await mkdir(output, { recursive: true });
   for (const name of ["process-group-helper", "runtime-control-helper"]) {
-    await execute(
-      process.platform === "darwin" ? "/usr/bin/clang" : "cc",
-      [
-        "-std=c11",
-        "-O2",
-        "-Wall",
-        "-Wextra",
-        "-Werror",
-        join(source, `${name}.c`),
-        ...(name === "runtime-control-helper" && process.platform === "darwin" ? ["-lbsm"] : []),
-        "-o",
-        join(output, name),
-      ],
-      { maxBuffer: 64 * 1024 },
-    );
-    await chmod(join(output, name), 0o755);
+    const target = join(output, name);
+    const temporary = `${target}.next-${randomUUID()}`;
+    try {
+      await execute(
+        process.platform === "darwin" ? "/usr/bin/clang" : "cc",
+        [
+          "-std=c11",
+          "-O2",
+          "-Wall",
+          "-Wextra",
+          "-Werror",
+          join(source, `${name}.c`),
+          ...(name === "runtime-control-helper" && process.platform === "darwin" ? ["-lbsm"] : []),
+          "-o",
+          temporary,
+        ],
+        { maxBuffer: 64 * 1024 },
+      );
+      await chmod(temporary, 0o755);
+      await rename(temporary, target);
+    } finally {
+      await rm(temporary, { force: true });
+    }
   }
 }

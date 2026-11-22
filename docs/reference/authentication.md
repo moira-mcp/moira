@@ -20,6 +20,19 @@ Browser users sign in through the configured application prefix. A social-only a
 
 MCP clients follow the advertised OAuth discovery documents and browser authorization/consent flow, or send a persistent `moira_…` API token as Bearer authorization. Persistent tokens are shown once at creation; the server hashes them for lookup and checks revocation, expiry and current account state on use. OAuth consent and persistent-token management are different lifecycles; removing browser sessions alone is not a substitute for revoking both.
 
+The OAuth provider serves registration, authorization, token exchange and user information under
+`/api/auth/oauth2/`. Previously registered clients can continue calling the corresponding cached
+`/api/auth/mcp/` endpoints. The shared request adapter passes those calls to the same provider.
+Login and consent return through the application's configured prefix with the provider's signed
+authorization parameters.
+
+When upgrading an installation with legacy OAuth records, retain the database, its authentication
+secret and the configured MCP resource URL. The migration runner converts registered clients,
+grants and recorded consent in a transaction. Confidential client secrets are encrypted with the
+authentication secret. Opaque access and refresh credentials are stored as digests. Clients keep
+their existing credentials, expiry and accepted MCP catalog revision. See the [migration](../../scripts/migrate-oauth-provider.ts)
+and [cached endpoint adapter](../../packages/shared/src/auth/oauth-request.ts).
+
 MCP additionally binds catalog initialization to the exact credential's `toolsVersion`. Null/stale revisions return HTTP 426 for ordinary requests. A valid singleton JSON-RPC `initialize` may proceed and records `MCP_TOOLS_REVISION` conditionally on that still-valid credential; malformed requests, batches, notifications and failed results cannot initialize it. OAuth refresh preserves the predecessor's exact catalog revision. Reinitialize with the valid credential; initialization never bypasses account admission. MCP authenticates before incremental body parsing and revalidates account/credential after the read before SDK dispatch.
 
 An authenticated singleton `server/discover` probe also reaches the SDK before catalog acceptance. The installed SDK serves the legacy protocol and returns its unsupported-method or unsupported-version response, allowing compatible clients to fall back to `initialize`. Discovery does not accept a catalog revision or authorize tool calls. This negotiation path does not advertise support for the 2026 stateless protocol.

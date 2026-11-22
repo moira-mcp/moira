@@ -19,12 +19,22 @@ export const AuthForm: React.FC<React.ComponentProps<typeof AuthView>> = (props)
 
   const navigate = (path: string) => {
     // MCP authorize endpoint needs HTTP redirect, prevent loop
-    if (path.startsWith("/api/auth/mcp/authorize")) {
+    if (
+      path.startsWith("/api/auth/oauth2/authorize?") ||
+      path.startsWith("/api/auth/mcp/authorize?")
+    ) {
       if (redirectingRef.current) return;
       redirectingRef.current = true;
       window.location.href = path;
       return;
     }
+
+    // A signed sign-in already follows the provider response, including social callbacks.
+    if (
+      path === `${location.pathname}${location.search}` &&
+      new URLSearchParams(location.search).has("sig")
+    )
+      return;
 
     // After registration, redirect to success page instead of login
     // Better Auth UI redirects to login when email verification is required

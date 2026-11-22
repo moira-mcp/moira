@@ -17,7 +17,7 @@ import { GitHubCodespaceClientError } from "../services/github-codespace-client.
 /** Private fixed controller/renewal routes never enter global secret or body logging. */
 export function createGitHubControllerRoutes(
   service: GitHubResourceService | null = getCodespaceResourceService(),
-  devices: Pick<LocalDeviceService, "authenticateDevice"> = getLocalDeviceService(),
+  devices: Pick<LocalDeviceService, "authenticateRequest"> = getLocalDeviceService(),
 ): Router {
   const router = Router();
   router.use((_req, res, next) => {
@@ -96,30 +96,30 @@ export function createGitHubControllerRoutes(
           });
         });
     };
-  const auth = (bearer: string) => devices.authenticateDevice(bearer);
+  const auth = (bearer: string) => devices.authenticateRequest(bearer);
   router.get(
     "/:resourceId/assignment",
     endpoint(async (req, res, bearer, id, resource) => {
       const purpose = z.enum(["adopt", "retire"]).optional().parse(req.query.purpose);
-      res.json(await resource.assignment(auth(bearer), id, purpose));
+      res.json(await resource.assignment(await auth(bearer), id, purpose));
     }),
   );
   router.post(
     "/:resourceId/register",
     endpoint(async (req, res, bearer, id, resource) => {
-      res.json(await resource.advanceAuthority(auth(bearer), id, req.body));
+      res.json(await resource.advanceAuthority(await auth(bearer), id, req.body));
     }),
   );
   router.post(
     "/:resourceId/provider",
     endpoint(async (req, res, bearer, id, resource) => {
-      res.json((await resource.providerAction(auth(bearer), id, req.body)) ?? null);
+      res.json((await resource.providerAction(await auth(bearer), id, req.body)) ?? null);
     }),
   );
   router.post(
     "/:resourceId/enroll",
     endpoint(async (req, res, bearer, id, resource) => {
-      res.json(await resource.enroll(auth(bearer), id, req.body));
+      res.json(await resource.enroll(await auth(bearer), id, req.body));
     }),
   );
   router.post(
