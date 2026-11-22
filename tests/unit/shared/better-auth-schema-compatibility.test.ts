@@ -23,23 +23,22 @@ describe("Better Auth database schema compatibility", () => {
   });
 
   test("exposes the MCP redirect URL column with Better Auth's logical field name", () => {
-    const columns = sqlite.prepare("PRAGMA table_info(oauthApplication)").all() as Array<{
+    const columns = sqlite.prepare("PRAGMA table_info(oauthClient)").all() as Array<{
       name: string;
     }>;
 
-    expect(columns.map((column) => column.name)).toContain("redirectUrls");
+    expect(columns.map((column) => column.name)).toContain("redirectUris");
     expect(columns.map((column) => column.name)).not.toContain("redirectURLs");
 
     const db = drizzle(sqlite, { schema });
     const now = new Date().toISOString();
-    db.insert(schema.oauthApplication)
+    db.insert(schema.oauthClient)
       .values({
         id: "schema-contract-client",
         name: "Schema contract client",
         clientId: "schema-contract-client-id",
         clientSecret: "schema-contract-secret",
-        redirectUrls: "http://localhost:3333/oauth/callback",
-        type: "web",
+        redirectUris: '["http://localhost:3333/oauth/callback"]',
         disabled: false,
         createdAt: now,
         updatedAt: now,
@@ -47,9 +46,9 @@ describe("Better Auth database schema compatibility", () => {
       .run();
 
     const stored = sqlite
-      .prepare("SELECT * FROM oauthApplication WHERE clientId = ?")
+      .prepare("SELECT * FROM oauthClient WHERE clientId = ?")
       .get("schema-contract-client-id") as Record<string, unknown>;
-    expect(stored.redirectUrls).toBe("http://localhost:3333/oauth/callback");
+    expect(stored.redirectUris).toBe('["http://localhost:3333/oauth/callback"]');
     expect(stored.redirectURLs).toBeUndefined();
   });
 });

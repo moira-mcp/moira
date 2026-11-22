@@ -998,6 +998,7 @@ router.delete(
       user,
       session,
       oauthAccessToken,
+      oauthRefreshToken,
       oauthConsent,
       getDatabase,
       deleteUserAccount,
@@ -1021,6 +1022,7 @@ router.delete(
       .set({ blocked: true, blockedAt: new Date().toISOString(), blockedBy: currentUserId })
       .where(eq(user.id, id));
     await db.delete(session).where(eq(session.userId, id));
+    await db.delete(oauthRefreshToken).where(eq(oauthRefreshToken.userId, id));
     await db.delete(oauthAccessToken).where(eq(oauthAccessToken.userId, id));
     await db.delete(oauthConsent).where(eq(oauthConsent.userId, id));
     const retirementPending = (resourcePending = false) => {

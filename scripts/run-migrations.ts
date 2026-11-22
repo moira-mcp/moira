@@ -19,6 +19,9 @@ import {
   loadPersistedSecrets,
 } from "@mcp-moira/shared";
 import { bridgeLegacyExecutionWorkflowVersionMigration } from "./migration-compatibility.js";
+import { migrateOAuthProvider } from "./migrate-oauth-provider.js";
+import { getBetterAuthSecret } from "../packages/shared/src/config/env.js";
+import { getMcpUrl } from "../packages/shared/src/config/urls.js";
 import { migrateWorkflowRevisionPayloads } from "../packages/shared/src/database/revision-payload.js";
 import * as databaseSchema from "../packages/shared/src/database/schema.js";
 
@@ -141,6 +144,7 @@ if (bridgeLegacyExecutionWorkflowVersionMigration(sqlite, migrationsFolder)) {
 // Run Drizzle migrations
 console.log("✅ Running Drizzle schema migrations...");
 migrate(db, { migrationsFolder });
+await migrateOAuthProvider(sqlite, getBetterAuthSecret(), getMcpUrl());
 migrateWorkflowRevisionPayloads(drizzle(sqlite, { schema: databaseSchema }));
 console.log("✅ Schema migrations complete");
 console.log("");

@@ -14,7 +14,8 @@ import {
   session,
   oauthConsent,
   oauthAccessToken,
-  oauthApplication,
+  oauthClient,
+  oauthRefreshToken,
   workflow,
 } from "../schema.js";
 import type * as schema from "../schema.js";
@@ -421,14 +422,14 @@ export class UserRepository {
       .select({
         id: oauthConsent.id,
         clientId: oauthConsent.clientId,
-        scopes: oauthConsent.scopes,
+        scopes: sql<string>`(SELECT group_concat(value, ',') FROM json_each(${oauthConsent.scopes}))`,
         createdAt: oauthConsent.createdAt,
-        clientName: oauthApplication.name,
-        clientIcon: oauthApplication.icon,
+        clientName: oauthClient.name,
+        clientIcon: oauthClient.icon,
       })
       .from(oauthConsent)
-      .leftJoin(oauthApplication, eq(oauthConsent.clientId, oauthApplication.clientId))
-      .where(and(eq(oauthConsent.userId, userId), eq(oauthConsent.consentGiven, true)));
+      .leftJoin(oauthClient, eq(oauthConsent.clientId, oauthClient.clientId))
+      .where(eq(oauthConsent.userId, userId));
   }
 
   /**
@@ -436,15 +437,12 @@ export class UserRepository {
    * Joins with oauthApplication for client name/icon.
    */
   async listOAuthConsentsWithFilters(filter: OAuthConsentFilter): Promise<OAuthConsentListResult> {
-    const baseConditions = [
-      eq(oauthConsent.userId, filter.userId),
-      eq(oauthConsent.consentGiven, true),
-    ];
+    const baseConditions = [eq(oauthConsent.userId, filter.userId)];
 
     if (filter.search) {
       baseConditions.push(
         or(
-          like(oauthApplication.name, `%${filter.search}%`),
+          like(oauthClient.name, `%${filter.search}%`),
           like(oauthConsent.clientId, `%${filter.search}%`),
         )!,
       );
@@ -456,7 +454,7 @@ export class UserRepository {
     const countResult = await this.db
       .select({ count: sql<number>`count(*)` })
       .from(oauthConsent)
-      .leftJoin(oauthApplication, eq(oauthConsent.clientId, oauthApplication.clientId))
+      .leftJoin(oauthClient, eq(oauthConsent.clientId, oauthClient.clientId))
       .where(whereClause);
     const total = countResult[0]?.count ?? 0;
 
@@ -471,13 +469,13 @@ export class UserRepository {
       .select({
         id: oauthConsent.id,
         clientId: oauthConsent.clientId,
-        scopes: oauthConsent.scopes,
+        scopes: sql<string>`(SELECT group_concat(value, ',') FROM json_each(${oauthConsent.scopes}))`,
         createdAt: oauthConsent.createdAt,
-        clientName: oauthApplication.name,
-        clientIcon: oauthApplication.icon,
+        clientName: oauthClient.name,
+        clientIcon: oauthClient.icon,
       })
       .from(oauthConsent)
-      .leftJoin(oauthApplication, eq(oauthConsent.clientId, oauthApplication.clientId))
+      .leftJoin(oauthClient, eq(oauthConsent.clientId, oauthClient.clientId))
       .where(whereClause)
       .orderBy(orderFn(oauthConsent.createdAt))
       .limit(limit)
@@ -494,7 +492,7 @@ export class UserRepository {
       .select({
         id: oauthConsent.id,
         clientId: oauthConsent.clientId,
-        scopes: oauthConsent.scopes,
+        scopes: sql<string>`(SELECT group_concat(value, ',') FROM json_each(${oauthConsent.scopes}))`,
         createdAt: oauthConsent.createdAt,
       })
       .from(oauthConsent)
@@ -516,6 +514,9 @@ export class UserRepository {
    */
   async deleteOAuthTokensForClient(userId: string, clientId: string): Promise<void> {
     await this.db
+      .delete(oauthRefreshToken)
+      .where(and(eq(oauthRefreshToken.userId, userId), eq(oauthRefreshToken.clientId, clientId)));
+    await this.db
       .delete(oauthAccessToken)
       .where(and(eq(oauthAccessToken.userId, userId), eq(oauthAccessToken.clientId, clientId)));
   }
@@ -531,6 +532,7 @@ export class UserRepository {
 
     const count = tokensToDelete.length;
 
+    await this.db.delete(oauthRefreshToken).where(eq(oauthRefreshToken.userId, userId));
     await this.db.delete(oauthAccessToken).where(eq(oauthAccessToken.userId, userId));
 
     return count;

@@ -3,6 +3,7 @@
  */
 
 // Auth
+export { oauthTokenDigest } from "./auth/oauth-token.js";
 export {
   createAuth,
   type SuccessfulRegistration,

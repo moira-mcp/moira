@@ -15,6 +15,7 @@ import {
   getDatabase,
   user,
   oauthAccessToken,
+  oauthRefreshToken,
   session,
   oauthConsent,
 } from "@mcp-moira/shared";
@@ -323,6 +324,7 @@ router.delete(
 
     // Delete all sessions, OAuth tokens, and OAuth consents
     await db.delete(session).where(eq(session.userId, id));
+    await db.delete(oauthRefreshToken).where(eq(oauthRefreshToken.userId, id));
     await db.delete(oauthAccessToken).where(eq(oauthAccessToken.userId, id));
     await db.delete(oauthConsent).where(eq(oauthConsent.userId, id));
 
@@ -391,7 +393,7 @@ router.get(
       consentId: consent.id,
       clientId: consent.clientId,
       scopes: consent.scopes,
-      consentGiven: consent.consentGiven,
+      consentGiven: true,
       createdAt: consent.createdAt,
       updatedAt: consent.updatedAt,
       tokens: tokensByClient[consent.clientId] || [],
@@ -449,6 +451,9 @@ router.delete(
       .where(and(eq(oauthConsent.userId, id), eq(oauthConsent.clientId, provider)));
 
     // Delete associated access tokens
+    await db
+      .delete(oauthRefreshToken)
+      .where(and(eq(oauthRefreshToken.userId, id), eq(oauthRefreshToken.clientId, provider)));
     await db
       .delete(oauthAccessToken)
       .where(and(eq(oauthAccessToken.userId, id), eq(oauthAccessToken.clientId, provider)));
@@ -514,6 +519,7 @@ router.delete(
     await db.delete(oauthConsent).where(eq(oauthConsent.userId, id));
 
     // Delete all access tokens
+    await db.delete(oauthRefreshToken).where(eq(oauthRefreshToken.userId, id));
     await db.delete(oauthAccessToken).where(eq(oauthAccessToken.userId, id));
 
     // Audit logging

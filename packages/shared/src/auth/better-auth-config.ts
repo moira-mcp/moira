@@ -5,7 +5,10 @@
 import { betterAuth } from "better-auth";
 import type { BetterAuthOptions, BetterAuthPlugin } from "better-auth";
 import { createAuthMiddleware, APIError, getSessionFromCtx, isAPIError } from "better-auth/api";
-import { mcp } from "better-auth/plugins";
+import { oauthProvider } from "@better-auth/oauth-provider";
+import { createAuthEndpoint } from "better-auth/api";
+import { oauthTokenDigest } from "./oauth-token.js";
+import { normalizeOAuthRequest } from "./oauth-request.js";
 import { timingSafeEqual } from "crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import geoip from "geoip-lite";
@@ -15,8 +18,14 @@ import { getSqliteInstance, getDatabase } from "../database/connection.js";
 import { getEmailDeliveryStatus, sendEmail } from "../email/index.js";
 import { AuditRepository } from "../database/repositories/audit-repository.js";
 import { AuditAction } from "../audit/actions.js";
-import { user, oauthAccessToken } from "../database/schema.js";
-import { and, eq } from "drizzle-orm";
+import {
+  user,
+  session,
+  oauthAccessToken,
+  oauthRefreshToken,
+  oauthClient,
+} from "../database/schema.js";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { getBaseUrl, getAuthUrl, getMcpUrl, isProduction } from "../config/urls.js";
 import { CLIENT_IP_HEADER, clientIpFromHeaders } from "../http/client-ip.js";
 import {
@@ -186,7 +195,7 @@ const PUBLIC_ACCOUNT_LIFECYCLE_PATHS = new Set([
   "/revoke-session",
   "/.well-known/oauth-authorization-server",
   "/.well-known/oauth-protected-resource",
-  "/mcp/register",
+  "/oauth2/register",
   "/ok",
   "/error",
 ]);
@@ -264,7 +273,7 @@ async function getReturnedOAuthAccessToken(returned: unknown): Promise<string | 
 
 /** Preserve catalog acceptance when Better Auth rotates an OAuth credential on refresh. */
 async function inheritMcpCatalogRevisionOnRefresh(ctx: McpTokenRefreshHookContext): Promise<void> {
-  if (!ctx.path.endsWith("/mcp/token") || ctx.method !== "POST") return;
+  if (ctx.path !== "/oauth2/token" || ctx.method !== "POST") return;
   const body =
     ctx.body && typeof ctx.body === "object"
       ? (ctx.body as { grant_type?: unknown; refresh_token?: unknown })
@@ -277,12 +286,12 @@ async function inheritMcpCatalogRevisionOnRefresh(ctx: McpTokenRefreshHookContex
   const db = getDatabase();
   const [predecessor] = await db
     .select({
-      userId: oauthAccessToken.userId,
-      clientId: oauthAccessToken.clientId,
-      toolsVersion: oauthAccessToken.toolsVersion,
+      userId: oauthRefreshToken.userId,
+      clientId: oauthRefreshToken.clientId,
+      toolsVersion: oauthRefreshToken.toolsVersion,
     })
-    .from(oauthAccessToken)
-    .where(eq(oauthAccessToken.refreshToken, body.refresh_token))
+    .from(oauthRefreshToken)
+    .where(eq(oauthRefreshToken.token, oauthTokenDigest(body.refresh_token)))
     .limit(1);
   if (!predecessor) {
     throw new APIError("INTERNAL_SERVER_ERROR", {
@@ -295,7 +304,7 @@ async function inheritMcpCatalogRevisionOnRefresh(ctx: McpTokenRefreshHookContex
     .set({ toolsVersion: predecessor.toolsVersion })
     .where(
       and(
-        eq(oauthAccessToken.accessToken, successorAccessToken),
+        eq(oauthAccessToken.accessToken, oauthTokenDigest(successorAccessToken)),
         eq(oauthAccessToken.userId, predecessor.userId),
         eq(oauthAccessToken.clientId, predecessor.clientId),
       ),
@@ -344,28 +353,78 @@ function isValidLoadTestRequest(
   }
 }
 
-// The Web UI serves the OAuth authorize/consent pages under the deployment's
-// base-path prefix (getAppPrefix(): "" for self-host root, "/app" for our
-// hosted deploy). Better Auth's mcp/oidc-provider plugin interpolates
-// loginPage/consentPage directly into its own redirects, so these must be
-// prefix-aware here rather than relying on the web backend's compensating
-// GET /oauth/authorize redirect, which only covers requests that hit that
-// exact bare-path route.
-//
-// Note: mcp() overwrites oidcConfig.loginPage with the top-level loginPage,
-// so only the top-level loginPage and oidcConfig.consentPage reach a redirect.
-// Both are set consistently so neither the live nor the shadowed value can
-// drift back to an unprefixed path.
+/** Login and consent stay on the public SPA. Moira uses revocable, database-backed opaque tokens. */
 export function buildMcpPluginOptions() {
-  const appPrefix = getAppPrefix();
-  const loginPage = `${appPrefix}/oauth/authorize`;
-
+  const prefix = getAppPrefix();
+  const resource = getMcpUrl();
   return {
-    loginPage,
-    resource: getMcpUrl(),
-    oidcConfig: {
-      loginPage,
-      consentPage: `${appPrefix}/oauth/consent`,
+    loginPage: `${prefix}/oauth/authorize`,
+    consentPage: `${prefix}/oauth/consent`,
+    disableJwtPlugin: true,
+    allowDynamicClientRegistration: true,
+    allowUnauthenticatedClientRegistration: true,
+    scopes: ["openid", "profile", "email", "offline_access"],
+    clientRegistrationDefaultScopes: ["openid", "profile", "email", "offline_access"],
+    resources: [resource],
+    clientRegistrationDefaultResources: [resource],
+    grantTypes: ["authorization_code", "refresh_token"] as (
+      "authorization_code" | "refresh_token"
+    )[],
+    refreshTokenReuseInterval: 0,
+    refreshTokenExpiresIn: 7 * 24 * 60 * 60,
+  };
+}
+
+/** The legacy MCP resource API reads the very same opaque rows issued and revoked by the provider. */
+function mcpResourceSession(): BetterAuthPlugin {
+  return {
+    id: "moira-mcp-resource-session",
+    endpoints: {
+      getMcpSession: createAuthEndpoint(
+        "/mcp/get-session",
+        { method: "GET", requireHeaders: true },
+        async (ctx) => {
+          const bearer = /^Bearer ([^\s]+)$/i.exec(ctx.headers.get("authorization") ?? "")?.[1];
+          if (!bearer) return ctx.json(null);
+          const db = getDatabase();
+          const [row] = await db
+            .select({
+              id: oauthAccessToken.id,
+              userId: oauthAccessToken.userId,
+              clientId: oauthAccessToken.clientId,
+              email: user.email,
+              scopes: oauthAccessToken.scopes,
+              resources: oauthAccessToken.resources,
+              accessTokenExpiresAt: oauthAccessToken.accessTokenExpiresAt,
+            })
+            .from(oauthAccessToken)
+            .innerJoin(user, eq(oauthAccessToken.userId, user.id))
+            .innerJoin(oauthClient, eq(oauthClient.clientId, oauthAccessToken.clientId))
+            .leftJoin(session, eq(session.id, oauthAccessToken.sessionId))
+            .where(
+              and(
+                eq(oauthAccessToken.accessToken, oauthTokenDigest(bearer)),
+                isNull(oauthAccessToken.revoked),
+                isNull(oauthAccessToken.confirmation),
+                or(isNull(oauthClient.disabled), eq(oauthClient.disabled, false)),
+                sql`julianday(${oauthAccessToken.accessTokenExpiresAt}) > julianday('now')`,
+                or(
+                  isNull(oauthAccessToken.sessionId),
+                  sql`julianday(${session.expiresAt}) > julianday('now')`,
+                ),
+              ),
+            )
+            .limit(1);
+          if (
+            !row?.userId ||
+            !row.resources ||
+            !(JSON.parse(row.resources) as string[]).includes(getMcpUrl())
+          )
+            return ctx.json(null);
+          await assertMcpOAuthAccountAccess(row.userId);
+          return ctx.json({ ...row, scopes: (JSON.parse(row.scopes) as string[]).join(" ") });
+        },
+      ),
     },
   };
 }
@@ -538,7 +597,7 @@ const baseConfig = {
     },
   },
 
-  plugins: [mcp(buildMcpPluginOptions())],
+  plugins: [oauthProvider(buildMcpPluginOptions()), mcpResourceSession()],
 
   databaseHooks: {
     user: {
@@ -806,16 +865,16 @@ const baseConfig = {
       // The MCP plugin writes tokens through its adapter and bypasses
       // databaseHooks.oauthAccessToken. Resolve the owner from the refresh token
       // or authorization code before the plugin consumes either credential.
-      if (ctx.path.endsWith("/mcp/token") && ctx.method === "POST") {
+      if (ctx.path === "/oauth2/token" && ctx.method === "POST") {
         const body = ctx.body as
           { grant_type?: string; refresh_token?: string; code?: string } | undefined;
         let userId: string | undefined;
 
         if (body?.grant_type === "refresh_token" && body.refresh_token) {
           const [tokenData] = await getDatabase()
-            .select({ userId: oauthAccessToken.userId })
-            .from(oauthAccessToken)
-            .where(eq(oauthAccessToken.refreshToken, body.refresh_token))
+            .select({ userId: oauthRefreshToken.userId })
+            .from(oauthRefreshToken)
+            .where(eq(oauthRefreshToken.token, oauthTokenDigest(body.refresh_token)))
             .limit(1);
           if (!tokenData) {
             throw new APIError("UNAUTHORIZED", {
@@ -826,7 +885,7 @@ const baseConfig = {
           userId = tokenData.userId;
         } else if (body?.code) {
           const verificationValue = await ctx.context.internalAdapter.findVerificationValue(
-            body.code,
+            oauthTokenDigest(body.code),
           );
           if (verificationValue) {
             try {
@@ -838,27 +897,6 @@ const baseConfig = {
         }
 
         if (userId) await assertMcpOAuthAccountAccess(userId);
-      }
-
-      // The plugin's bearer introspection endpoint reads oauthAccessToken
-      // directly and otherwise bypasses both cookie-session and token-exchange
-      // checks. Recheck the persisted owner state before disclosing token data.
-      if (ctx.path.endsWith("/mcp/get-session") && ctx.method === "GET") {
-        const accessToken = ctx.headers?.get("authorization")?.replace(/^Bearer\s+/i, "");
-        if (accessToken) {
-          const [tokenData] = await getDatabase()
-            .select({ userId: oauthAccessToken.userId })
-            .from(oauthAccessToken)
-            .where(eq(oauthAccessToken.accessToken, accessToken))
-            .limit(1);
-          if (!tokenData) {
-            throw new APIError("UNAUTHORIZED", {
-              message: "OAuth credential has been revoked or is invalid",
-              code: "INVALID_TOKEN",
-            });
-          }
-          await assertMcpOAuthAccountAccess(tokenData.userId);
-        }
       }
 
       // Validate legal consent on sign-up (saas only). In self-host registration
@@ -1086,7 +1124,7 @@ export function createAuth(logger: ServiceLogger, registration: AuthRegistration
     registrationCapture.run({ mailFailed: false, consumed: false }, async () => {
       const capture = registrationCapture.getStore()!;
       try {
-        const response = await originalHandler(request);
+        const response = await originalHandler(await normalizeOAuthRequest(request));
         if (registration.onSuccessfulRegistration) {
           try {
             const account = await confirmedRegistration(capture, response, request);

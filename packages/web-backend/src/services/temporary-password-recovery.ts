@@ -5,6 +5,7 @@ import {
   AuditAction,
   getDatabase,
   oauthAccessToken,
+  oauthRefreshToken,
   oauthConsent,
   session,
   user,
@@ -123,6 +124,7 @@ export async function recoverOrdinaryUserWithTemporaryPassword(
         .where(eq(account.userId, input.userId))
         .run();
       tx.delete(session).where(eq(session.userId, input.userId)).run();
+      tx.delete(oauthRefreshToken).where(eq(oauthRefreshToken.userId, input.userId)).run();
       tx.delete(oauthAccessToken).where(eq(oauthAccessToken.userId, input.userId)).run();
       tx.delete(oauthConsent).where(eq(oauthConsent.userId, input.userId)).run();
       tx.update(apiToken)

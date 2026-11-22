@@ -109,7 +109,6 @@ import { getLocalGitIdentityService } from "./services/local-git-identity-factor
 import { createScopedCredentialRouter } from "./routes/scoped-credentials.js";
 import { createGitHubControllerRoutes } from "./routes/github-controller.js";
 import { getScopedCredentialService } from "./services/scoped-credential-factory.js";
-import { mcpClientAutoRegister } from "./middleware/mcp-client-auto-register.js";
 import { auth } from "./auth.js";
 import { getLocalDeviceService } from "./services/codespace-services.js";
 import { ExecutionChangeRepository, getSqliteInstance } from "@mcp-moira/shared";
@@ -346,8 +345,7 @@ class MoiraApiServer {
 
     // Auth admission uses the dedicated limiter defined by createRateLimiters.
     // Auth audit logging handled via Better Auth hooks in auth config
-    // Auto-register unknown MCP OAuth clients before Better Auth processes the request
-    this.app.all("/api/auth/*authPath", authLimiter, mcpClientAutoRegister(), wrappedAuthHandler);
+    this.app.all("/api/auth/*authPath", authLimiter, wrappedAuthHandler);
   }
 
   /**
@@ -379,10 +377,8 @@ class MoiraApiServer {
       res.json({
         resource: getMcpUrl(),
         authorization_servers: [baseUrl],
-        jwks_uri: `${baseUrl}/api/auth/mcp/jwks`,
         scopes_supported: ["openid", "profile", "email", "offline_access"],
         bearer_methods_supported: ["header"],
-        resource_signing_alg_values_supported: ["RS256", "none"],
       });
     });
 
@@ -392,17 +388,16 @@ class MoiraApiServer {
 
       res.json({
         issuer: baseUrl,
-        authorization_endpoint: `${baseUrl}/oauth/authorize`,
-        token_endpoint: `${baseUrl}/api/auth/mcp/token`,
-        userinfo_endpoint: `${baseUrl}/api/auth/mcp/userinfo`,
-        jwks_uri: `${baseUrl}/api/auth/mcp/jwks`,
-        registration_endpoint: `${baseUrl}/api/auth/mcp/register`,
+        authorization_endpoint: `${baseUrl}/api/auth/oauth2/authorize`,
+        token_endpoint: `${baseUrl}/api/auth/oauth2/token`,
+        userinfo_endpoint: `${baseUrl}/api/auth/oauth2/userinfo`,
+        registration_endpoint: `${baseUrl}/api/auth/oauth2/register`,
         scopes_supported: ["openid", "profile", "email", "offline_access"],
         response_types_supported: ["code"],
         response_modes_supported: ["query"],
         grant_types_supported: ["authorization_code", "refresh_token"],
         subject_types_supported: ["public"],
-        id_token_signing_alg_values_supported: ["RS256", "none"],
+        id_token_signing_alg_values_supported: ["HS256"],
         token_endpoint_auth_methods_supported: [
           "client_secret_basic",
           "client_secret_post",

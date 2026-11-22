@@ -60,7 +60,8 @@ router.post(
       throw createApiError.validationFailed("Current password and new password are required");
     }
 
-    const { user, getDatabase, oauthConsent, oauthAccessToken } = await import("@mcp-moira/shared");
+    const { user, getDatabase, oauthConsent, oauthAccessToken, oauthRefreshToken } =
+      await import("@mcp-moira/shared");
     const { eq } = await import("drizzle-orm");
     const { auth } = await import("../auth.js");
     const db = getDatabase();
@@ -103,6 +104,7 @@ router.post(
 
     // Revoke all OAuth tokens for security
     await db.delete(oauthConsent).where(eq(oauthConsent.userId, userId));
+    await db.delete(oauthRefreshToken).where(eq(oauthRefreshToken.userId, userId));
     await db.delete(oauthAccessToken).where(eq(oauthAccessToken.userId, userId));
 
     // Audit log for forced password change

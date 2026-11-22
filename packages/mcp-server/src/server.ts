@@ -19,6 +19,7 @@ import {
   closeDatabase,
   user,
   oauthAccessToken,
+  oauthTokenDigest,
   apiToken,
   getBaseUrl,
   getBrowserOriginAllowlist,
@@ -321,7 +322,12 @@ async function authenticatePrincipal(
   const [tokenData] = await db
     .select({ id: oauthAccessToken.id, toolsVersion: oauthAccessToken.toolsVersion })
     .from(oauthAccessToken)
-    .where(and(eq(oauthAccessToken.accessToken, bearerToken), eq(oauthAccessToken.userId, userId)))
+    .where(
+      and(
+        eq(oauthAccessToken.accessToken, oauthTokenDigest(bearerToken)),
+        eq(oauthAccessToken.userId, userId),
+      ),
+    )
     .limit(1);
   if (!tokenData) {
     res.status(401).json({
@@ -344,7 +350,7 @@ async function authenticatePrincipal(
           .where(
             and(
               eq(oauthAccessToken.id, tokenData.id),
-              eq(oauthAccessToken.accessToken, bearerToken),
+              eq(oauthAccessToken.accessToken, oauthTokenDigest(bearerToken)),
               eq(oauthAccessToken.userId, userId),
               gt(oauthAccessToken.accessTokenExpiresAt, new Date().toISOString()),
             ),
