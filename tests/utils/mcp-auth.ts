@@ -97,8 +97,11 @@ export async function createTestUserViaApi(
     }),
   });
 
-  if (!signUpResponse.ok && signUpResponse.status !== 422) {
-    throw new Error(`Sign-up failed: ${signUpResponse.status}`);
+  if (!signUpResponse.ok) {
+    const { code } = (await signUpResponse.json()) as { code?: string };
+    if (signUpResponse.status !== 422 || code !== "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL") {
+      throw new Error(`Sign-up failed: ${signUpResponse.status} (${code ?? "unknown error"})`);
+    }
   }
 
   // Sign in for an admin session used by subsequent operations
