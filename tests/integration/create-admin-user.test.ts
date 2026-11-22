@@ -36,6 +36,33 @@ describe("create-admin-user recovery script", () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
+  it("upgrades a legacy password binding while preserving other providers and aborts ambiguous upgrades", () => {
+    const sqlite = new Database(dbPath);
+    try {
+      // Replay this migration against the schema and rows an older installation supplied.
+      sqlite.prepare("DELETE FROM __drizzle_migrations WHERE created_at = ?").run(1795305600000);
+      const insert = sqlite.prepare(
+        `INSERT INTO account (id, userId, accountId, providerId, password, createdAt, updatedAt)
+         VALUES (?, 'system-admin', ?, ?, ?, 'created', 'updated')`,
+      );
+      insert.run("legacy", "admin@moira.local", "credential", "original-hash");
+      insert.run("external", "system-admin", "github", null);
+      insert.run("conflict", "system-admin", "credential", "other-hash");
+      const accounts = () => sqlite.prepare("SELECT * FROM account ORDER BY id").all();
+      const original = accounts();
+      expect(() => migrate(drizzle(sqlite), { migrationsFolder: MIGRATIONS_PATH })).toThrow();
+      expect(accounts()).toEqual(original);
+
+      sqlite.prepare("DELETE FROM account WHERE id = 'conflict'").run();
+      migrate(drizzle(sqlite), { migrationsFolder: MIGRATIONS_PATH });
+      const [external, legacy] = accounts();
+      expect(external).toEqual(original[1]);
+      expect(legacy).toEqual({ ...(original[2] as object), accountId: "system-admin" });
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it("refuses recovery without an operator-supplied password", () => {
     const { ADMIN_PASSWORD: _removedPassword, ...environmentWithoutPassword } = process.env;
     let failure:
@@ -120,7 +147,7 @@ describe("create-admin-user recovery script", () => {
       approvedAt: expect.any(String),
     });
     expect(createdAccount).toMatchObject({
-      accountId: "recovery@example.com",
+      accountId: "recovery-admin",
       providerId: "credential",
     });
     expect(await verifyPassword({ hash: createdAccount.password, password: initialPassword })).toBe(
