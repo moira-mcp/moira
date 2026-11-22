@@ -33,7 +33,7 @@ export interface ScopedCredentialServiceDependencies {
     config: Extract<CodespaceGitHubConfigStatus, { state: "available" }>,
   ) => GitHubScopedCredentialClient;
   authorize: (bearer: string, input: ScopedCredentialAcquire) => Promise<ScopedCredentialAuthority>;
-  authenticate: (bearer: string) => string;
+  authenticate: (bearer: string) => string | Promise<string>;
   isAuthorityCurrent?: (
     authority: ScopedCredentialAuthority,
     input: ScopedCredentialAcquire,
@@ -232,7 +232,7 @@ export class ScopedCredentialService {
     bearer: string,
     input: ScopedCredentialAcquire,
   ): Promise<ScopedCredentialCollection> {
-    const userId = this.dependencies.authenticate(bearer);
+    const userId = await this.dependencies.authenticate(bearer);
     await this.dependencies.authorize(bearer, input);
     const row = this.dependencies.repository.getScopedCredential(
       userId,
@@ -249,7 +249,7 @@ export class ScopedCredentialService {
     return { state: "unconfirmed" };
   }
   async acquire(bearer: string, input: ScopedCredentialAcquire): Promise<ScopedCredentialView> {
-    const userId = this.dependencies.authenticate(bearer);
+    const userId = await this.dependencies.authenticate(bearer);
     const previous = this.dependencies.repository.getScopedCredential(
       userId,
       CODESPACE_PROVIDER_GITHUB,
@@ -382,7 +382,7 @@ export class ScopedCredentialService {
     credentialId: string,
     input: ScopedCredentialRelease,
   ): Promise<void> {
-    const userId = this.dependencies.authenticate(bearer),
+    const userId = await this.dependencies.authenticate(bearer),
       row = this.dependencies.repository.getScopedCredential(userId, CODESPACE_PROVIDER_GITHUB, {
         credentialId,
       });
