@@ -102,6 +102,19 @@ describe("MCP OAuth tools revision", () => {
     adminCredentials = getAdminCredentials();
   });
 
+  test("records exactly one attributed audit event for each accepted grant and update", async () => {
+    const client = await registerOAuthClient(BASE_URL);
+    const cookie = await signInUser(BASE_URL, adminCredentials.email, adminCredentials.password);
+    for (let i = 0; i < 2; i++)
+      await getAuthorizationCode(BASE_URL, client.client_id, cookie, "consent");
+    const rows = execSqliteInDocker(
+      `SELECT action || '|' || source || '|' || (ip IS NOT NULL) || '|' || (userAgent IS NOT NULL) FROM auditLog WHERE resource='oauth_consent' AND json_extract(metadata,'$.clientId')='${client.client_id}' ORDER BY rowid`,
+    )
+      .trim()
+      .split("\n");
+    expect(rows).toEqual(["oauth:consent_grant|web|1|1", "oauth:consent_update|web|1|1"]);
+  });
+
   test("keeps an initialized SDK client usable across OAuth refresh and stale across reconnect", async () => {
     const firstCredential = await createOAuthToken(
       adminCredentials.email,

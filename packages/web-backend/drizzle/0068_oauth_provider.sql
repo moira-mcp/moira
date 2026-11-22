@@ -163,23 +163,6 @@ BEGIN
   UPDATE oauthRefreshToken SET toolsVersion = NEW.toolsVersion WHERE id = NEW.refreshId AND userId = NEW.userId AND clientId = NEW.clientId;
 END;
 --> statement-breakpoint
-CREATE TRIGGER oauth_consent_audit_insert AFTER INSERT ON oauthConsent
-WHEN NOT EXISTS (SELECT 1 FROM sqlite_master WHERE name = 'legacyOAuthConsent' AND type = 'table')
-BEGIN
-  INSERT INTO auditLog (id, userId, action, resource, resourceId, source, metadata, createdAt)
-  VALUES (lower(hex(randomblob(16))), NEW.userId, 'oauth:consent_grant', 'oauth_consent', NEW.id, 'web',
-    json_object('clientId', NEW.clientId, 'scopes', (SELECT group_concat(value, ' ') FROM json_each(NEW.scopes))), CAST(unixepoch('subsec') * 1000 AS integer));
-END;
-
---> statement-breakpoint
-CREATE TRIGGER oauth_consent_audit_update AFTER UPDATE ON oauthConsent
-WHEN NOT EXISTS (SELECT 1 FROM sqlite_master WHERE name = 'legacyOAuthConsent' AND type = 'table')
-BEGIN
-  INSERT INTO auditLog (id, userId, action, resource, resourceId, source, metadata, createdAt)
-  VALUES (lower(hex(randomblob(16))), NEW.userId, 'oauth:consent_update', 'oauth_consent', NEW.id, 'web',
-    json_object('clientId', NEW.clientId, 'scopes', (SELECT group_concat(value, ' ') FROM json_each(NEW.scopes))), CAST(unixepoch('subsec') * 1000 AS integer));
-END;
---> statement-breakpoint
 CREATE TRIGGER oauth_consent_revoke_grants AFTER DELETE ON oauthConsent
 BEGIN
   DELETE FROM oauthAccessToken WHERE userId = OLD.userId AND clientId = OLD.clientId;

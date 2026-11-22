@@ -138,14 +138,5 @@ describe("Better Auth database schema compatibility", () => {
         .prepare("SELECT COUNT(*) AS count FROM auditLog WHERE action='oauth:consent_grant'")
         .get(),
     ).toEqual({ count: 0 });
-    sqlite
-      .prepare(
-        "INSERT INTO oauthConsent (id,clientId,userId,scopes,createdAt,updatedAt) VALUES ('new','valid','owner','[]',?,?)",
-      )
-      .run(now, now);
-    sqlite.prepare("UPDATE oauthConsent SET scopes=? WHERE id='new'").run('["email"]');
-    expect(
-      sqlite.prepare("SELECT action FROM auditLog WHERE resourceId='new' ORDER BY rowid").all(),
-    ).toEqual([{ action: "oauth:consent_grant" }, { action: "oauth:consent_update" }]);
   });
 });

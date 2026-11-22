@@ -17,6 +17,8 @@ import { createLogger } from "../logging/logger.js";
 import { getSqliteInstance, getDatabase } from "../database/connection.js";
 import { getEmailDeliveryStatus, sendEmail } from "../email/index.js";
 import { AuditRepository } from "../database/repositories/audit-repository.js";
+import { logAuditEventDirect } from "../logging/audit-logger.js";
+import type { DBAdapter } from "@better-auth/core/db/adapter";
 import { AuditAction } from "../audit/actions.js";
 import {
   user,
@@ -416,7 +418,44 @@ export async function findMcpOAuthCredential(bearer: string) {
   return { ...row, userId: row.userId };
 }
 
-/** The legacy MCP resource API reads the very same opaque rows issued and revoked by the provider. */
+/** Wrap the native provider write only for this consent request. */
+function auditConsentWrites(
+  adapter: DBAdapter,
+  headers?: Headers,
+): Pick<DBAdapter, "create" | "update"> {
+  async function record(model: string, result: unknown, action: AuditAction) {
+    if (model !== "oauthConsent" || !result || typeof result !== "object") return;
+    const consent = result as { id: string; userId: string; clientId: string; scopes: string[] };
+    const ip = clientIpFromHeaders(headers);
+    const geo = ip ? geoip.lookup(ip) : null;
+    await logAuditEventDirect(new AuditRepository(getDatabase()), {
+      action,
+      resource: "oauth_consent",
+      resourceId: consent.id,
+      userId: consent.userId,
+      metadata: { clientId: consent.clientId, scopes: consent.scopes.join(" ") },
+      ip,
+      country: geo?.country,
+      userAgent: headers?.get("user-agent") ?? undefined,
+    });
+  }
+  return {
+    create: async <T extends Record<string, unknown>, R = T>(
+      input: Parameters<typeof adapter.create<T, R>>[0],
+    ) => {
+      const row = await adapter.create<T, R>(input);
+      await record(input.model, row, AuditAction.OAUTH_CONSENT_GRANT);
+      return row;
+    },
+    update: async <T>(input: Parameters<DBAdapter["update"]>[0]) => {
+      const row = await adapter.update<T>(input);
+      await record(input.model, row, AuditAction.OAUTH_CONSENT_UPDATE);
+      return row;
+    },
+  };
+}
+
+/** The legacy MCP resource API reads the same opaque rows issued and revoked by the provider. */
 function mcpResourceSession(): BetterAuthPlugin {
   return {
     id: "moira-mcp-resource-session",
@@ -898,6 +937,13 @@ const baseConfig = {
         }
       }
 
+      // Observe durable writes on this request's adapter. The provider owns consent validation
+      // and can either insert or update a grant after validating the signed OAuth query.
+      if (ctx.path === "/oauth2/consent" || ctx.path === "/oauth2/update-consent") {
+        return {
+          context: { context: { adapter: auditConsentWrites(ctx.context.adapter, ctx.headers) } },
+        };
+      }
       // The MCP plugin writes tokens through its adapter and bypasses
       // databaseHooks.oauthAccessToken. Resolve the owner from the refresh token
       // or authorization code before the plugin consumes either credential.

@@ -410,6 +410,7 @@ export async function getAuthorizationCode(
   baseUrl: string,
   clientId: string,
   sessionCookie: string,
+  prompt?: "consent",
 ) {
   const verifier = randomBytes(32).toString("base64url");
   const challenge = createHash("sha256").update(verifier).digest("base64url");
@@ -423,6 +424,7 @@ export async function getAuthorizationCode(
     scope: "openid email profile offline_access",
     code_challenge: challenge,
     code_challenge_method: "S256",
+    ...(prompt ? { prompt } : {}),
   }).toString();
   const cookie = formatSessionCookie(baseUrl, sessionCookie);
   const response = await fetch(authorizeUrl, { headers: { Cookie: cookie }, redirect: "manual" });
