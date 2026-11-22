@@ -27,7 +27,35 @@ export async function normalizeOAuthRequest(request: Request): Promise<Request> 
   ) {
     url.searchParams.set("resource", getMcpUrl());
   }
-  const updated = url.href === request.url ? request : new Request(url, request);
+  let updated = url.href === request.url ? request : new Request(url, request);
+  // The old MCP endpoint accepted JSON token requests as well as OAuth form posts.
+  if (
+    route === "/mcp/token" &&
+    request.method === "POST" &&
+    updated.headers.get("content-type")?.startsWith("application/json")
+  ) {
+    const json: unknown = await updated
+      .clone()
+      .json()
+      .catch(() => null);
+    if (json && typeof json === "object" && !Array.isArray(json)) {
+      const form = new URLSearchParams();
+      for (const [key, value] of Object.entries(json)) {
+        if (typeof value === "string") form.append(key, value);
+        else if (
+          key === "resource" &&
+          Array.isArray(value) &&
+          value.every((v) => typeof v === "string")
+        )
+          for (const uri of value) form.append(key, uri);
+        else return updated;
+      }
+      const headers = new Headers(updated.headers);
+      headers.delete("content-length");
+      headers.set("content-type", "application/x-www-form-urlencoded");
+      updated = new Request(url, { method: "POST", headers, body: form.toString() });
+    }
+  }
   if (
     target !== "/oauth2/token" ||
     updated.method !== "POST" ||
