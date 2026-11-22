@@ -873,18 +873,21 @@ describe("Private repository creation precedes local admission without repeating
   });
   test("withdrawing controller delegation while SQLite admission waits prevents the provider POST", async () => {
     const f = await fixture();
-    const observed = Promise.withResolvers<SqliteWriter>();
+    let writerAcquired!: (writer: SqliteWriter) => void;
+    const observed = new Promise<SqliteWriter>((resolve) => {
+      writerAcquired = resolve;
+    });
     const submit = f.repository.submit.bind(f.repository);
     jest.spyOn(f.repository, "submit").mockImplementationOnce((...args) => {
       const check = f.repository.assertCurrent.bind(f.repository);
       jest.spyOn(f.repository, "assertCurrent").mockImplementationOnce(async (...input) => {
         await check(...input);
-        observed.resolve(await acquireSqliteWriter(sqlite));
+        writerAcquired(await acquireSqliteWriter(sqlite));
       });
       return submit(...args);
     });
     const pending = f.makeService().createRepository("owner", f.input);
-    const competingWriter = await observed.promise;
+    const competingWriter = await observed;
     try {
       await f.devices.requestSettings("owner", f.deviceId, {
         requestId: createWorkspaceRequestId(),
