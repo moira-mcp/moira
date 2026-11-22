@@ -235,9 +235,9 @@ export function getWorkspaceRouter(): WorkspaceRouter {
           throw error;
         let device;
         try {
-          device = new LocalDeviceService(
+          device = await new LocalDeviceService(
             new LocalDeviceRepository(getSqliteInstance()),
-          ).authenticateDevice(value);
+          ).authenticateRequest(value);
         } catch (error) {
           if (error instanceof LocalDeviceError && error.code === "LOCAL_UNAUTHORIZED")
             throw new CodespaceResourceError(

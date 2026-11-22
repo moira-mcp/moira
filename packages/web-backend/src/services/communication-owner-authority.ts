@@ -29,7 +29,7 @@ export async function authenticateCommunicationOwner(bearer: string): Promise<vo
     );
     return;
   }
-  getLocalDeviceService().authenticateDevice(bearer);
+  await getLocalDeviceService().authenticateRequest(bearer);
 }
 
 /** Authenticates the actual source actor; a valid user MCP credential is not an owner credential. */
@@ -53,7 +53,7 @@ export async function authorizeCommunicationOwner(
     if (canonicalJson(actual) !== canonicalJson(scope)) throw new Error("owner_scope_refused");
     return binding.userId;
   }
-  const device = getLocalDeviceService().authenticateDevice(bearer);
+  const device = await getLocalDeviceService().authenticateRequest(bearer);
   if (
     device.userId !== scope.userId ||
     device.deviceId !== scope.deviceId ||

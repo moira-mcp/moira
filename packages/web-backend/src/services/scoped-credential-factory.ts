@@ -32,7 +32,7 @@ import {
 export function createScopedCredentialService(): ScopedCredentialService {
   const sqlite = getSqliteInstance(),
     repository = new CodespaceConnectionRepository(sqlite);
-  const authenticate = (bearer: string) => {
+  const authenticate = async (bearer: string) => {
     try {
       return new WorkspaceAuthRepository(sqlite).authenticate(bearer).userId;
     } catch (error) {
@@ -42,7 +42,7 @@ export function createScopedCredentialService(): ScopedCredentialService {
       )
         throw error;
       try {
-        return getLocalDeviceService().authenticateDevice(bearer).userId;
+        return (await getLocalDeviceService().authenticateRequest(bearer)).userId;
       } catch (error) {
         if (error instanceof LocalDeviceError && error.code === "LOCAL_UNAUTHORIZED")
           throw new ScopedCredentialError("SCOPED_CREDENTIAL_AUTHORITY_REFUSED", 403);
@@ -181,8 +181,11 @@ export function createScopedCredentialService(): ScopedCredentialService {
     async authorize(bearer: string, input: ScopedCredentialAcquire) {
       try {
         if (input.action === "codespaces_provision")
-          return provisioningAuthority(getLocalDeviceService().authenticateDevice(bearer), input);
-        const userId = authenticate(bearer),
+          return provisioningAuthority(
+            await getLocalDeviceService().authenticateRequest(bearer),
+            input,
+          );
+        const userId = await authenticate(bearer),
           github = new GitHubResourceRepository(sqlite).getOwned(userId, input.resourceId),
           local = github
             ? null
@@ -195,7 +198,7 @@ export function createScopedCredentialService(): ScopedCredentialService {
         if (!resource) throw new ScopedCredentialError("SCOPED_CREDENTIAL_AUTHORITY_REFUSED", 403);
         if (resource.provider === CODESPACE_PROVIDER_LOCAL) {
           const devices = getLocalDeviceService(),
-            auth = devices.authenticateDevice(bearer);
+            auth = await devices.authenticateRequest(bearer);
           const witness = await devices.authorizeGitHubOperation(
             auth,
             input.resourceId,

@@ -76,6 +76,39 @@ afterEach(() => {
 });
 
 describe("Local registration, revocation and owner routing", () => {
+  test("device authentication observes a concurrent committed revocation before updating last seen", async () => {
+    const { device, credential } = await enroll();
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "moira-auth-contention-"));
+    const filename = path.join(directory, "devices.db");
+    try {
+      await sqlite.backup(filename);
+      const app = new Database(filename);
+      const owner = new Database(filename);
+      try {
+        const auth = new LocalDeviceService(new LocalDeviceRepository(app), () => now + 1);
+        owner.exec("BEGIN IMMEDIATE");
+        owner
+          .prepare("UPDATE codespaceLocalDevice SET status='revoked' WHERE id=?")
+          .run(device.deviceId);
+        const pending = expect(auth.authenticateRequest(credential)).rejects.toMatchObject({
+          code: "LOCAL_UNAUTHORIZED",
+        });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        owner.exec("COMMIT");
+        await pending;
+        expect(
+          app
+            .prepare("SELECT lastSeenAt FROM codespaceLocalDevice WHERE id=?")
+            .get(device.deviceId),
+        ).toEqual({ lastSeenAt: now });
+      } finally {
+        owner.close();
+        app.close();
+      }
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
   test("device revocation fences its bearer before a refused remote child disposal", async () => {
     const first = await enroll(),
       second = await enroll();

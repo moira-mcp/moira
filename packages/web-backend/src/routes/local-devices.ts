@@ -107,10 +107,10 @@ function protectOrigin(router: Router, publicOrigin: string): void {
     next();
   });
 }
-function deviceAuth(service: LocalDeviceService, req: Request): LocalDeviceAuth {
+function deviceBearer(req: Request): string {
   const bearer = req.get("Authorization")?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
   if (!bearer) throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Device access denied.");
-  return service.authenticateDevice(bearer);
+  return bearer;
 }
 function param(req: Request, key: string): string {
   return z.string().uuid().parse(req.params[key]);
@@ -171,11 +171,16 @@ export function createLocalDeviceManagementRoutes(
   router.post(
     "/pairings",
     json({ limit: "2mb" }),
-    endpoint((req, res) => {
+    endpoint(async (req, res) => {
       z.object({})
         .strict()
         .parse(req.body ?? {});
-      res.status(201).json({ success: true, data: service.beginEnrollment(owner(req)) });
+      res
+        .status(201)
+        .json({
+          success: true,
+          data: await service.repository.write(() => service.beginEnrollment(owner(req))),
+        });
     }),
   );
   router.post(
@@ -290,7 +295,7 @@ export function createLocalDeviceRoutes(
   router.post(
     "/resources/register",
     endpoint(async (req, res) => {
-      const auth = deviceAuth(service, req),
+      const auth = await service.authenticateRequest(deviceBearer(req)),
         input = controllerResourceRegistrationSchema.parse(req.body);
       res.json({ success: true, data: await registerResource(auth, input) });
     }),
@@ -307,7 +312,7 @@ export function createLocalDeviceRoutes(
         .parse(req.body);
       const sqlite = getSqliteInstance();
       const credential = await withSqliteWrite(() => {
-        const auth = deviceAuth(service, req);
+        const auth = service.authenticateDevice(deviceBearer(req));
         const binding = sqlite
           .prepare(
             `SELECT 1 FROM codespaceLocalResourceBinding
@@ -327,8 +332,13 @@ export function createLocalDeviceRoutes(
   );
   router.post(
     "/enroll",
-    endpoint((req, res) =>
-      res.status(201).json({ success: true, data: service.approveLocalEnrollment(req.body) }),
+    endpoint(async (req, res) =>
+      res
+        .status(201)
+        .json({
+          success: true,
+          data: await service.repository.write(() => service.approveLocalEnrollment(req.body)),
+        }),
     ),
   );
   router.post(
@@ -337,11 +347,11 @@ export function createLocalDeviceRoutes(
   );
   router.post(
     "/heartbeat",
-    endpoint((req, res) => {
+    endpoint(async (req, res) => {
       z.object({})
         .strict()
         .parse(req.body ?? {});
-      const auth = deviceAuth(service, req),
+      const auth = await service.authenticateRequest(deviceBearer(req)),
         current = service.getDeviceIdentity(auth.userId, auth.deviceId);
       res.json({ success: true, data: { ...current } });
     }),

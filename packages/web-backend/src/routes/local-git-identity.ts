@@ -17,7 +17,7 @@ export function createLocalGitIdentityRoutes(
         throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Origin denied.");
       const token = req.get("Authorization")?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
       if (!token) throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Device access denied.");
-      const auth = devices.authenticateDevice(token);
+      const auth = await devices.authenticateRequest(token);
       const id = z.string().uuid().parse(req.params.resourceId);
       const generation = z.coerce.number().int().positive().parse(req.params.resourceGeneration);
       res.json({ success: true, data: await identity.identity(auth, id, generation) });
