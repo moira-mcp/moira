@@ -125,6 +125,19 @@ describe("Migrating a database created before the extension value store", () => 
         delete schemaBefore[superseded];
         delete schemaAfter[superseded];
       }
+      // Provider migration preserves each old table under a legacy name until the runtime
+      // has converted its credentials. Its replacement has a distinct provider schema.
+      for (const [previous, legacy, successor, column] of [
+        ["oauthApplication", "legacyOAuthApplication", "oauthClient", "redirectUris"],
+        ["oauthAccessToken", "legacyOAuthAccessToken", "oauthAccessToken", "token"],
+        ["oauthConsent", "legacyOAuthConsent", "oauthConsent", "referenceId"],
+      ]) {
+        const definition = (sql: string) => sql.slice(sql.indexOf("("));
+        expect(definition(allSchemasAfter[legacy])).toBe(definition(schemaBefore[previous]));
+        expect(allSchemasAfter[successor]).toContain(`"${column}"`);
+        delete schemaBefore[previous];
+        delete schemaAfter[previous];
+      }
       expect(schemaAfter).toEqual(schemaBefore);
 
       const kept = sqlite
