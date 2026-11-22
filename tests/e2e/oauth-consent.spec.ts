@@ -65,10 +65,20 @@ test.describe("OAuth consent", () => {
     expect(query.get("code")).toBeTruthy();
   });
 
-  test("anonymous authorization shows the login form", async ({ page }) => {
-    await beginAuthorization(page);
-    await expect(page.locator('input[type="email"]').first()).toBeVisible();
-    await expect(page.locator('input[type="password"]')).toBeVisible();
+  test("a signed-out user can finish the same authorization request after signing in", async ({
+    page,
+  }) => {
+    const { clientId, state } = await beginAuthorization(page);
+    const { email, password } = getAdminCredentials();
+    await page.locator('input[type="email"]').fill(email);
+    await page.locator('input[type="password"]').fill(password);
+    await page.locator('button[type="submit"]').click();
+    await expect(page.getByText(clientId, { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Allow" }).click();
+    await page.waitForURL(callback + "**");
+    const query = new URL(page.url()).searchParams;
+    expect(query.get("state")).toBe(state);
+    expect(query.get("code")).toBeTruthy();
   });
 
   test("switching accounts restarts login", async ({ page }) => {
