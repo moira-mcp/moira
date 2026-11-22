@@ -89,30 +89,24 @@ describe("temporary-password recovery serialization", () => {
       .run("target-api-token", "Target API", "prefix", "hash", "recovery-target", now);
     sqlite
       .prepare(
-        `INSERT INTO oauthAccessToken
-           (id, accessToken, refreshToken, accessTokenExpiresAt, refreshTokenExpiresAt,
-            clientId, userId, scopes, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        "INSERT INTO oauthClient (id, clientId, redirectUris) VALUES ('client','oauth-client','[]')",
       )
-      .run(
-        "target-oauth-token",
-        "oauth-access",
-        "oauth-refresh",
-        "2026-08-23T09:00:00.000Z",
-        "2026-08-24T09:00:00.000Z",
-        "oauth-client",
-        "recovery-target",
-        "openid profile",
-        now,
-        now,
-      );
+      .run();
     sqlite
       .prepare(
-        `INSERT INTO oauthConsent
-           (id, clientId, userId, scopes, createdAt, updatedAt, consentGiven)
-         VALUES (?, ?, ?, ?, ?, ?, 1)`,
+        "INSERT INTO oauthRefreshToken (id, token, expiresAt, clientId, userId, scopes, createdAt) VALUES ('refresh','refresh-digest',?,'oauth-client','recovery-target','[]',?)",
       )
-      .run("target-oauth-consent", "oauth-client", "recovery-target", "openid profile", now, now);
+      .run(now, now);
+    sqlite
+      .prepare(
+        "INSERT INTO oauthAccessToken (id, token, expiresAt, clientId, userId, scopes, createdAt, refreshId) VALUES ('target-oauth-token','access-digest',?,'oauth-client','recovery-target','[]',?,'refresh')",
+      )
+      .run(now, now);
+    sqlite
+      .prepare(
+        "INSERT INTO oauthConsent (id,clientId,userId,scopes,createdAt,updatedAt) VALUES ('target-oauth-consent','oauth-client','recovery-target','[]',?,?)",
+      )
+      .run(now, now);
   });
 
   afterEach(() => {
@@ -186,8 +180,8 @@ function snapshotRecoveryAuthority(sqlite: Database.Database) {
       .all(),
     oauthTokens: sqlite
       .prepare(
-        `SELECT id, accessToken, refreshToken
-         FROM oauthAccessToken WHERE userId = 'recovery-target' ORDER BY id`,
+        `SELECT a.id, a.token AS accessToken, r.token AS refreshToken
+         FROM oauthAccessToken a JOIN oauthRefreshToken r ON a.refreshId = r.id WHERE a.userId = 'recovery-target' ORDER BY a.id`,
       )
       .all(),
     oauthConsents: sqlite

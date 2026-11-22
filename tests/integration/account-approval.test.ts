@@ -121,43 +121,20 @@ describe("account approval migration", () => {
       )
       .run("approved-api-token", "approved", "mcp_approved", "approved-hash", "approved", now);
     sqlite
-      .prepare(
-        `INSERT INTO oauthAccessToken
-           (id, accessToken, refreshToken, accessTokenExpiresAt, refreshTokenExpiresAt,
-            clientId, userId, scopes, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        "pending-oauth-token",
-        "pending-access-token",
-        "pending-refresh-token",
-        now,
-        now,
-        "client",
-        "pending",
-        "openid",
-        now,
-        now,
-      );
-    sqlite
-      .prepare(
-        `INSERT INTO oauthAccessToken
-           (id, accessToken, refreshToken, accessTokenExpiresAt, refreshTokenExpiresAt,
-            clientId, userId, scopes, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        "approved-oauth-token",
-        "approved-access-token",
-        "approved-refresh-token",
-        now,
-        now,
-        "client",
-        "approved",
-        "openid",
-        now,
-        now,
-      );
+      .prepare("INSERT INTO oauthClient (id,clientId,redirectUris) VALUES ('client','client','[]')")
+      .run();
+    for (const owner of ["pending", "approved"]) {
+      sqlite
+        .prepare(
+          "INSERT INTO oauthRefreshToken (id,token,expiresAt,clientId,userId,scopes,createdAt) VALUES (?, ?, ?, 'client', ?, '[]', ?)",
+        )
+        .run(owner + "-refresh", owner + "-refresh-digest", now, owner, now);
+      sqlite
+        .prepare(
+          "INSERT INTO oauthAccessToken (id,token,expiresAt,clientId,userId,scopes,createdAt,refreshId) VALUES (?, ?, ?, 'client', ?, '[]', ?, ?)",
+        )
+        .run(owner + "-oauth-token", owner + "-access-digest", now, owner, now, owner + "-refresh");
+    }
     sqlite
       .prepare(
         `INSERT INTO oauthConsent (id, clientId, userId, scopes, createdAt, updatedAt)
@@ -186,7 +163,13 @@ describe("account approval migration", () => {
         .get(),
     ).toEqual({ blocked: 0, blockedAt: null, blockedReason: null });
     for (const userId of ["pending", "approved"]) {
-      for (const table of ["session", "apiToken", "oauthAccessToken", "oauthConsent"]) {
+      for (const table of [
+        "session",
+        "apiToken",
+        "oauthAccessToken",
+        "oauthRefreshToken",
+        "oauthConsent",
+      ]) {
         expect(
           (
             sqlite
@@ -222,7 +205,13 @@ describe("account approval migration", () => {
       "Blocked before rollback to a version without account approval",
     );
 
-    for (const table of ["session", "apiToken", "oauthAccessToken", "oauthConsent"]) {
+    for (const table of [
+      "session",
+      "apiToken",
+      "oauthAccessToken",
+      "oauthRefreshToken",
+      "oauthConsent",
+    ]) {
       expect(
         (
           sqlite
@@ -240,7 +229,13 @@ describe("account approval migration", () => {
         }
       ).blocked,
     ).toBe(0);
-    for (const table of ["session", "apiToken", "oauthAccessToken", "oauthConsent"]) {
+    for (const table of [
+      "session",
+      "apiToken",
+      "oauthAccessToken",
+      "oauthRefreshToken",
+      "oauthConsent",
+    ]) {
       expect(
         (
           sqlite

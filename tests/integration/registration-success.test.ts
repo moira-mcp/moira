@@ -22,7 +22,7 @@ let user: SharedRuntime["user"];
 let emailLog: SharedRuntime["emailLog"];
 let globalSetting: SharedRuntime["globalSetting"];
 let auditLog: SharedRuntime["auditLog"];
-let oauthApplication: SharedRuntime["oauthApplication"];
+let oauthClient: SharedRuntime["oauthClient"];
 let resetFeatureResolver: SharedRuntime["resetFeatureResolver"];
 let DatabaseRepository: EngineRuntime["DatabaseRepository"];
 let TelegramClient: EngineRuntime["TelegramClient"];
@@ -205,7 +205,7 @@ beforeAll(async () => {
       emailLog,
       globalSetting,
       auditLog,
-      oauthApplication,
+      oauthClient,
       resetFeatureResolver,
     } = await import("@mcp-moira/shared"));
     ({
@@ -336,9 +336,7 @@ afterAll(async () => {
   await getDatabase().delete(auditLog).where(inArray(auditLog.userId, ids));
   await getDatabase().delete(user).where(inArray(user.id, ids));
   if (createdClients.length)
-    await getDatabase()
-      .delete(oauthApplication)
-      .where(inArray(oauthApplication.clientId, createdClients));
+    await getDatabase().delete(oauthClient).where(inArray(oauthClient.clientId, createdClients));
   await new Promise<void>((resolve, reject) =>
     transport.close((error) => (error ? reject(error) : resolve())),
   );

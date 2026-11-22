@@ -11,11 +11,16 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { MCP_TOOLS_REVISION } from "@mcp-moira/mcp-server/tool-contract";
 import { getAdminCredentials, getTestBaseUrl } from "../../utils/test-config.js";
-import { signInUser } from "../../utils/mcp-auth.js";
+import { oauthTokenDigest } from "../../../packages/shared/src/auth/oauth-token.js";
+import {
+  signInUser,
+  registerOAuthClient,
+  getAuthorizationCode,
+  exchangeCodeForToken,
+} from "../../utils/mcp-auth.js";
 import { execSqliteInDocker } from "../../utils/docker-command.js";
 
 const BASE_URL = getTestBaseUrl();
-const OAUTH_REDIRECT_URI = "http://localhost:3333/oauth/callback";
 
 async function mcpRequest(accessToken: string, body: unknown): Promise<Response> {
   return fetch(`${BASE_URL}/mcp`, {
@@ -48,55 +53,10 @@ interface OAuthCredential {
 }
 
 async function createOAuthToken(email: string, password: string): Promise<OAuthCredential> {
-  const registerResponse = await fetch(`${BASE_URL}/api/auth/mcp/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      client_name: `test-version-check-${Date.now()}`,
-      redirect_uris: [OAUTH_REDIRECT_URI],
-      grant_types: ["authorization_code", "refresh_token"],
-    }),
-  });
-  expect(registerResponse.status).toBe(201);
-  const client = (await registerResponse.json()) as {
-    client_id: string;
-    client_secret: string;
-  };
-
-  const sessionCookie = await signInUser(BASE_URL, email, password);
-  const cookieName = BASE_URL.startsWith("https://")
-    ? "__Secure-better-auth.session_token"
-    : "better-auth.session_token";
-  const authorizeUrl = new URL(`${BASE_URL}/api/auth/mcp/authorize`);
-  authorizeUrl.searchParams.set("client_id", client.client_id);
-  authorizeUrl.searchParams.set("redirect_uri", OAUTH_REDIRECT_URI);
-  authorizeUrl.searchParams.set("response_type", "code");
-  authorizeUrl.searchParams.set("state", "revision-test");
-  authorizeUrl.searchParams.set("scope", "openid email profile offline_access");
-
-  const authorizeResponse = await fetch(authorizeUrl, {
-    headers: { Cookie: `${cookieName}=${sessionCookie}` },
-    redirect: "manual",
-  });
-  expect(authorizeResponse.status).toBe(302);
-  const location = authorizeResponse.headers.get("location");
-  expect(location).not.toBeNull();
-  const code = new URL(location!, BASE_URL).searchParams.get("code");
-  expect(code).not.toBeNull();
-
-  const tokenResponse = await fetch(`${BASE_URL}/api/auth/mcp/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      grant_type: "authorization_code",
-      code,
-      client_id: client.client_id,
-      client_secret: client.client_secret,
-      redirect_uri: OAUTH_REDIRECT_URI,
-    }),
-  });
-  expect(tokenResponse.status).toBe(200);
-  const token = (await tokenResponse.json()) as { access_token: string; refresh_token: string };
+  const client = await registerOAuthClient(BASE_URL);
+  const cookie = await signInUser(BASE_URL, email, password);
+  const authorization = await getAuthorizationCode(BASE_URL, client.client_id, cookie);
+  const token = await exchangeCodeForToken(BASE_URL, authorization, client);
   expect(token.refresh_token).toEqual(expect.any(String));
   return {
     accessToken: token.access_token,
@@ -109,8 +69,7 @@ async function createOAuthToken(email: string, password: string): Promise<OAuthC
 async function refreshOAuthToken(credential: OAuthCredential): Promise<OAuthCredential> {
   const response = await fetch(`${BASE_URL}/api/auth/mcp/token`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+    body: new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: credential.refreshToken,
       client_id: credential.clientId,
@@ -155,7 +114,7 @@ describe("MCP OAuth tools revision", () => {
     const first = firstCredential.accessToken;
     const sibling = siblingCredential.accessToken;
     const storedBefore = execSqliteInDocker(
-      `SELECT COALESCE(toolsVersion, 'null') FROM oauthAccessToken WHERE accessToken IN ('${first}', '${sibling}') ORDER BY accessToken`,
+      `SELECT COALESCE(toolsVersion, 'null') FROM oauthAccessToken WHERE token IN ('${oauthTokenDigest(first)}', '${oauthTokenDigest(sibling)}') ORDER BY token`,
     );
     expect(storedBefore.split("\n")).toEqual(["null", "null"]);
 
@@ -164,14 +123,14 @@ describe("MCP OAuth tools revision", () => {
     );
     expect(
       execSqliteInDocker(
-        `SELECT COALESCE(toolsVersion, 'null') FROM oauthAccessToken WHERE accessToken = '${first}'`,
+        `SELECT COALESCE(toolsVersion, 'null') FROM oauthAccessToken WHERE token = '${oauthTokenDigest(first)}'`,
       ),
     ).toBe("null");
 
     const uninitializedRefresh = await refreshOAuthToken(siblingCredential);
     expect(
       execSqliteInDocker(
-        `SELECT COALESCE(toolsVersion, 'null') FROM oauthAccessToken WHERE accessToken = '${uninitializedRefresh.accessToken}'`,
+        `SELECT COALESCE(toolsVersion, 'null') FROM oauthAccessToken WHERE token = '${oauthTokenDigest(uninitializedRefresh.accessToken)}'`,
       ),
     ).toBe("null");
     expect(
@@ -189,12 +148,12 @@ describe("MCP OAuth tools revision", () => {
     await initialized.client.connect(initialized.transport);
     expect(
       execSqliteInDocker(
-        `SELECT toolsVersion FROM oauthAccessToken WHERE accessToken = '${first}'`,
+        `SELECT toolsVersion FROM oauthAccessToken WHERE token = '${oauthTokenDigest(first)}'`,
       ),
     ).toBe(MCP_TOOLS_REVISION);
     expect(
       execSqliteInDocker(
-        `SELECT COALESCE(toolsVersion, 'null') FROM oauthAccessToken WHERE accessToken = '${sibling}'`,
+        `SELECT COALESCE(toolsVersion, 'null') FROM oauthAccessToken WHERE token = '${oauthTokenDigest(sibling)}'`,
       ),
     ).toBe("null");
     expect((await mcpRequest(first, { jsonrpc: "2.0", method: "tools/list", id: 3 })).status).toBe(
@@ -205,7 +164,7 @@ describe("MCP OAuth tools revision", () => {
     expect(refreshed.accessToken).not.toBe(first);
     expect(
       execSqliteInDocker(
-        `SELECT toolsVersion FROM oauthAccessToken WHERE accessToken = '${refreshed.accessToken}'`,
+        `SELECT toolsVersion FROM oauthAccessToken WHERE token = '${oauthTokenDigest(refreshed.accessToken)}'`,
       ),
     ).toBe(MCP_TOOLS_REVISION);
     authorizationHeaders.set("Authorization", `Bearer ${refreshed.accessToken}`);
@@ -218,12 +177,12 @@ describe("MCP OAuth tools revision", () => {
     await initialized.client.close();
 
     execSqliteInDocker(
-      `UPDATE oauthAccessToken SET toolsVersion = 'stale-revision' WHERE accessToken = '${uninitializedRefresh.accessToken}'`,
+      `UPDATE oauthAccessToken SET toolsVersion = 'stale-revision' WHERE token = '${oauthTokenDigest(uninitializedRefresh.accessToken)}'`,
     );
     const staleRefreshed = await refreshOAuthToken(uninitializedRefresh);
     expect(
       execSqliteInDocker(
-        `SELECT toolsVersion FROM oauthAccessToken WHERE accessToken = '${staleRefreshed.accessToken}'`,
+        `SELECT toolsVersion FROM oauthAccessToken WHERE token = '${oauthTokenDigest(staleRefreshed.accessToken)}'`,
       ),
     ).toBe("stale-revision");
     expect(
@@ -241,7 +200,7 @@ describe("MCP OAuth tools revision", () => {
     await reconnect.client.connect(reconnect.transport);
     expect(
       execSqliteInDocker(
-        `SELECT toolsVersion FROM oauthAccessToken WHERE accessToken = '${staleRefreshed.accessToken}'`,
+        `SELECT toolsVersion FROM oauthAccessToken WHERE token = '${oauthTokenDigest(staleRefreshed.accessToken)}'`,
       ),
     ).toBe(MCP_TOOLS_REVISION);
     await reconnect.client.close();

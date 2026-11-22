@@ -6,6 +6,7 @@
  * blocked user rejection, and OAuth flow remaining unaffected.
  */
 
+import { oauthTokenDigest } from "../../packages/shared/src/auth/oauth-token.js";
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -367,7 +368,7 @@ describe("MCP Persistent Token Authentication", () => {
         const token = oauth?.accessToken ?? persistent!.token;
         const table = kind === "oauth" ? "oauthAccessToken" : "apiToken";
         const condition = oauth
-          ? `accessToken = '${token.replaceAll("'", "''")}'`
+          ? `token = '${oauthTokenDigest(token)}'`
           : `id = '${persistent!.id}'`;
         execSqliteInDocker(
           `UPDATE ${table} SET toolsVersion = ${revision === null ? "NULL" : "'stale-revision'"} WHERE ${condition}`,

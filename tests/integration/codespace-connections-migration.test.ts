@@ -6,6 +6,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+import { migrateOAuthProvider } from "../../scripts/migrate-oauth-provider.js";
+
 const migrations = path.resolve(process.cwd(), "packages/web-backend/drizzle");
 const newTables = [
   "codespaceAuthorizationState",
@@ -43,7 +45,7 @@ function copyMigrationsBeforeCodespaceFeature(directory: string): string {
 }
 
 describe("Codespace connection schema migration", () => {
-  test("upgrades a pre-feature database without changing unrelated data or adding plaintext defaults", () => {
+  test("upgrades a pre-feature database without changing unrelated data or adding plaintext defaults", async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "moira-codespace-migration-"));
     const filename = path.join(directory, "moira.db");
     const preFeatureMigrations = copyMigrationsBeforeCodespaceFeature(directory);
@@ -83,6 +85,11 @@ describe("Codespace connection schema migration", () => {
         .run();
       sqlite
         .prepare(
+          "INSERT INTO oauthApplication (id, name, clientId, redirectUrls, type, createdAt, updatedAt) VALUES ('client','Existing','existing-client','https://test.example/callback','public','before','before')",
+        )
+        .run();
+      sqlite
+        .prepare(
           `INSERT INTO oauthConsent
            (id, clientId, userId, scopes, createdAt, updatedAt, consentGiven)
            VALUES ('existing-consent', 'existing-client', 'existing-user', 'openid',
@@ -91,6 +98,11 @@ describe("Codespace connection schema migration", () => {
         .run();
 
       migrate(drizzle(sqlite), { migrationsFolder: migrations });
+      await migrateOAuthProvider(
+        sqlite,
+        "synthetic-secret-for-the-codespace-test-only",
+        "https://test.example/mcp",
+      );
 
       expect(newTables.every((table) => tables(sqlite).includes(table))).toBe(true);
       expect(sqlite.prepare("SELECT email FROM user WHERE id = 'existing-user'").get()).toEqual({
@@ -111,7 +123,7 @@ describe("Codespace connection schema migration", () => {
       ).toEqual({ value: "preserved-value" });
       expect(
         sqlite.prepare("SELECT scopes FROM oauthConsent WHERE id = 'existing-consent'").get(),
-      ).toEqual({ scopes: "openid" });
+      ).toEqual({ scopes: '["openid"]' });
       const codespaceSchema = newTables.map(
         (table) =>
           (
