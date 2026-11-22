@@ -11,7 +11,14 @@ import { describe, test, expect, beforeAll, afterEach } from "@jest/globals";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { getTestBaseUrl } from "../../utils/test-config.js";
 import { execSqliteInDocker } from "../../utils/docker-command.js";
-import { formatSessionCookie, getAdminSessionCookie } from "../../utils/mcp-auth.js";
+import {
+  exchangeCodeForToken,
+  formatSessionCookie,
+  getAdminSessionCookie,
+  getAuthorizationCode,
+  registerOAuthClient,
+  signInUser,
+} from "../../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
 const OAUTH_REDIRECT_URI = "http://localhost:3333/oauth/callback";
@@ -214,121 +221,24 @@ describe("deployment-mode auth behavior", () => {
       error_code: "ACCOUNT_APPROVAL_REQUIRED",
     });
 
-    const registerClient = await fetch(`${BASE_URL}/api/auth/mcp/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        client_name: `approval-flow-${Date.now()}`,
-        redirect_uris: [OAUTH_REDIRECT_URI],
-        grant_types: ["authorization_code"],
-      }),
-    });
-    expect(registerClient.status).toBe(201);
-    const client = (await registerClient.json()) as {
-      client_id: string;
-      client_secret: string;
-    };
-
-    // A refresh token minted before an account became pending must be denied
-    // independently from the authorization-code lookup below.
-    const pendingAccessToken = randomUUID();
-    const pendingRefreshToken = randomUUID();
-    const oauthCreatedAt = new Date().toISOString();
-    execSqliteInDocker(
-      `INSERT INTO oauthAccessToken (id, accessToken, refreshToken, accessTokenExpiresAt, refreshTokenExpiresAt, clientId, userId, scopes, createdAt, updatedAt) VALUES ('${randomUUID()}', '${pendingAccessToken}', '${pendingRefreshToken}', '${new Date(Date.now() + 300_000).toISOString()}', '${new Date(Date.now() + 600_000).toISOString()}', '${client.client_id}', '${userId}', 'openid email profile', '${oauthCreatedAt}', '${oauthCreatedAt}')`,
-    );
-    const pendingOAuthMcp = await fetch(`${BASE_URL}/mcp`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json, text/event-stream",
-        Authorization: `Bearer ${pendingAccessToken}`,
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        method: "initialize",
-        id: 2,
-        params: {
-          protocolVersion: "2025-06-18",
-          capabilities: {},
-          clientInfo: { name: "pending-oauth-admission-test", version: "1.0.0" },
-        },
-      }),
-    });
-    expect(pendingOAuthMcp.status).toBe(403);
-    expect(await pendingOAuthMcp.json()).toMatchObject({
-      error_code: "ACCOUNT_APPROVAL_REQUIRED",
-    });
-    const introspectionBefore = await fetch(`${BASE_URL}/api/auth/mcp/get-session`, {
-      headers: { Authorization: `Bearer ${pendingAccessToken}` },
-    });
-    expect(introspectionBefore.status).toBe(403);
-    expect(await introspectionBefore.json()).toMatchObject({
-      code: "ACCOUNT_APPROVAL_REQUIRED",
-    });
-    const refreshBefore = await fetch(`${BASE_URL}/api/auth/mcp/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        grant_type: "refresh_token",
-        refresh_token: pendingRefreshToken,
-        client_id: client.client_id,
-        client_secret: client.client_secret,
-      }),
-    });
-    expect(refreshBefore.status).toBe(403);
-    expect(await refreshBefore.json()).toMatchObject({
-      code: "ACCOUNT_APPROVAL_REQUIRED",
-    });
-
+    const client = await registerOAuthClient(BASE_URL);
     const authorizeUrl = new URL(`${BASE_URL}/api/auth/mcp/authorize`);
     authorizeUrl.searchParams.set("client_id", client.client_id);
     authorizeUrl.searchParams.set("redirect_uri", OAUTH_REDIRECT_URI);
     authorizeUrl.searchParams.set("response_type", "code");
     authorizeUrl.searchParams.set("state", "approval-flow");
     authorizeUrl.searchParams.set("scope", "openid email profile");
+    authorizeUrl.searchParams.set(
+      "code_challenge",
+      createHash("sha256").update(randomBytes(32)).digest("base64url"),
+    );
+    authorizeUrl.searchParams.set("code_challenge_method", "S256");
     const authorize = await fetch(authorizeUrl, {
       headers: { Cookie: userCookie },
       redirect: "manual",
     });
     expect(authorize.status).toBe(403);
     expect((await authorize.json()) as { code?: string }).toMatchObject({
-      code: "ACCOUNT_APPROVAL_REQUIRED",
-    });
-
-    // A code minted by an older deployment must still be rejected at token
-    // exchange. The hook rejects before plugin consumption, so this same code
-    // proves successful issuance after the account is approved.
-    const code = randomUUID();
-    const codeVerifier = randomUUID();
-    const verificationValue = JSON.stringify({
-      clientId: client.client_id,
-      redirectURI: OAUTH_REDIRECT_URI,
-      userId,
-      scope: ["openid", "email", "profile"],
-      codeChallenge: codeVerifier,
-      codeChallengeMethod: "plain",
-    }).replace(/'/g, "''");
-    execSqliteInDocker(
-      `INSERT INTO verification (id, identifier, value, expiresAt, createdAt, updatedAt) VALUES ('${randomUUID()}', '${code}', '${verificationValue}', '${new Date(Date.now() + 300_000).toISOString()}', '${new Date().toISOString()}', '${new Date().toISOString()}')`,
-    );
-
-    const exchange = () =>
-      fetch(`${BASE_URL}/api/auth/mcp/token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          grant_type: "authorization_code",
-          code,
-          client_id: client.client_id,
-          client_secret: client.client_secret,
-          redirect_uri: OAUTH_REDIRECT_URI,
-          code_verifier: codeVerifier,
-        }),
-      });
-    const oauthBefore = await exchange();
-    expect(oauthBefore.status).toBe(403);
-    expect((await oauthBefore.json()) as { code?: string }).toMatchObject({
       code: "ACCOUNT_APPROVAL_REQUIRED",
     });
 
@@ -439,6 +349,80 @@ describe("deployment-mode auth behavior", () => {
     });
     expect(updateAfter.status).toBe(200);
 
+    // Issue credentials through normal approval, registration, signed consent and PKCE.
+    // Return this disposable account to pending to exercise admission for real existing grants.
+    const session = await signInUser(BASE_URL, email, "testpassword123");
+    const authorizeUser = () => getAuthorizationCode(BASE_URL, client.client_id, session);
+    const issued = await exchangeCodeForToken(BASE_URL, await authorizeUser(), client);
+    const authorization = await authorizeUser();
+    const exchange = () =>
+      fetch(`${BASE_URL}/api/auth/mcp/token`, {
+        method: "POST",
+        headers: { Origin: BASE_URL },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code: authorization.code,
+          client_id: client.client_id,
+          client_secret: client.client_secret,
+          redirect_uri: OAUTH_REDIRECT_URI,
+          code_verifier: authorization.verifier,
+        }),
+      });
+    const originalApproval = execSqliteInDocker(
+      `SELECT quote(approvedAt) FROM user WHERE id = '${userId}'`,
+    );
+    execSqliteInDocker(`UPDATE user SET approvedAt = NULL WHERE id = '${userId}'`);
+    try {
+      const pendingOAuthMcp = await fetch(`${BASE_URL}/mcp`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+          Authorization: `Bearer ${issued.access_token}`,
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          method: "initialize",
+          id: 2,
+          params: {
+            protocolVersion: "2025-06-18",
+            capabilities: {},
+            clientInfo: { name: "pending-oauth-admission-test", version: "1.0.0" },
+          },
+        }),
+      });
+      expect(pendingOAuthMcp.status).toBe(403);
+      expect(await pendingOAuthMcp.json()).toMatchObject({
+        error_code: "ACCOUNT_APPROVAL_REQUIRED",
+      });
+      const introspectionBefore = await fetch(`${BASE_URL}/api/auth/mcp/get-session`, {
+        headers: { Authorization: `Bearer ${issued.access_token}` },
+      });
+      expect(introspectionBefore.status).toBe(403);
+      expect(await introspectionBefore.json()).toMatchObject({
+        code: "ACCOUNT_APPROVAL_REQUIRED",
+      });
+      const refreshBefore = await fetch(`${BASE_URL}/api/auth/mcp/token`, {
+        method: "POST",
+        headers: { Origin: BASE_URL },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: issued.refresh_token,
+          client_id: client.client_id,
+          client_secret: client.client_secret,
+        }),
+      });
+      expect(refreshBefore.status).toBe(403);
+      expect(await refreshBefore.json()).toMatchObject({
+        code: "ACCOUNT_APPROVAL_REQUIRED",
+      });
+      const oauthBefore = await exchange();
+      expect(oauthBefore.status).toBe(403);
+      expect(await oauthBefore.json()).toMatchObject({ code: "ACCOUNT_APPROVAL_REQUIRED" });
+    } finally {
+      execSqliteInDocker(`UPDATE user SET approvedAt = ${originalApproval} WHERE id = '${userId}'`);
+    }
+
     const oauthAfter = await exchange();
     expect(oauthAfter.status).toBe(200);
     expect((await oauthAfter.json()) as { access_token?: string }).toMatchObject({
@@ -446,12 +430,12 @@ describe("deployment-mode auth behavior", () => {
     });
 
     const introspectionAfter = await fetch(`${BASE_URL}/api/auth/mcp/get-session`, {
-      headers: { Authorization: `Bearer ${pendingAccessToken}` },
+      headers: { Authorization: `Bearer ${issued.access_token}` },
     });
     expect(introspectionAfter.status).toBe(200);
     expect(await introspectionAfter.json()).toMatchObject({
       userId,
-      accessToken: pendingAccessToken,
+      accessToken: issued.access_token,
     });
 
     const tokenAfter = await fetch(`${BASE_URL}/api/tokens`, {
