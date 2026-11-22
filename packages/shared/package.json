@@ -43,6 +43,7 @@
     "./validation-types": "./src/types/validation-types.ts",
     "./step-attempt-binding": "./src/types/step-attempt-binding.ts",
     "./database/connection": "./src/database/connection.ts",
+    "./database/sqlite-write": "./src/database/sqlite-write.ts",
     "./database/repositories/workflow-repository": "./src/database/repositories/workflow-repository.ts",
     "./database/repositories/execution-repository": "./src/database/repositories/execution-repository.ts",
     "./database/repositories/execution-attempt-repository": "./src/database/repositories/execution-attempt-repository.ts",
