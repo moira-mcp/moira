@@ -20,7 +20,7 @@ import {
   UserNotFoundError,
 } from "@mcp-moira/shared";
 import * as sharedEmail from "@mcp-moira/shared";
-import { user, session, oauthAccessToken } from "@mcp-moira/shared";
+import { user, session, oauthAccessToken, oauthRefreshToken } from "@mcp-moira/shared";
 import { eq, and, ne } from "drizzle-orm";
 import { auth } from "../auth.js";
 import { toHeaders } from "../utils/headers.js";
@@ -202,7 +202,10 @@ router.post(
       }
 
       // Revoke all OAuth access tokens
-      await db.delete(oauthAccessToken).where(eq(oauthAccessToken.userId, userId));
+      db.transaction((tx) => {
+        tx.delete(oauthAccessToken).where(eq(oauthAccessToken.userId, userId)).run();
+        tx.delete(oauthRefreshToken).where(eq(oauthRefreshToken.userId, userId)).run();
+      });
 
       // Audit log entry
       const repository = new DatabaseRepository();

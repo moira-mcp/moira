@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { symmetricEncrypt } from "better-auth/crypto";
 import { oauthTokenDigest } from "../packages/shared/src/auth/oauth-token.js";
@@ -73,7 +74,30 @@ export async function migrateOAuthProvider(
       sqlite.exec("COMMIT");
       return;
     }
-    const resourceId = "moira-mcp-resource";
+    const existingUser = sqlite.prepare("SELECT 1 FROM user WHERE id=?");
+    const existingClient = sqlite.prepare("SELECT 1 FROM oauthClient WHERE clientId=?");
+    const audit = sqlite.prepare(
+      "INSERT INTO auditLog (id,action,resource,resourceId,source,metadata,createdAt) VALUES (?, 'oauth:migration_unresolved', ?, ?, 'system', ?, ?)",
+    );
+    function unresolved(
+      row: { id: string; clientId: string; userId: string | null },
+      model: string,
+      reason: string,
+    ) {
+      audit.run(
+        randomUUID(),
+        model,
+        row.id,
+        JSON.stringify({ reason, clientId: row.clientId, originalUserId: row.userId }),
+        Date.now(),
+      );
+    }
+    function missingOwner(row: { clientId: string; userId: string }) {
+      if (!existingClient.get(row.clientId)) return "missing_client";
+      if (!existingUser.get(row.userId)) return "missing_user";
+      return null;
+    }
+    const resourceId = randomUUID();
     sqlite
       .prepare(
         "INSERT INTO oauthResource (id,identifier,name) VALUES (?,?,?) ON CONFLICT(identifier) DO NOTHING",
@@ -88,7 +112,16 @@ export async function migrateOAuthProvider(
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '["authorization_code","refresh_token"]', '["code"]', 1, '["openid","profile","email","offline_access"]', ?, ?, 1)`);
     for (const c of readRows<LegacyClient>(sqlite, "legacyOAuthApplication")) {
       const isPublic = c.type === "public";
-      if (!isPublic && !c.clientSecret) throw new Error("Confidential OAuth client has no secret");
+      if ((c.userId !== null && !existingUser.get(c.userId)) || (!isPublic && !c.clientSecret)) {
+        unresolved(
+          c,
+          "oauth_client",
+          c.userId !== null && !existingUser.get(c.userId)
+            ? "missing_user"
+            : "missing_client_secret",
+        );
+        continue;
+      }
       const storedSecret =
         !isPublic && c.clientSecret
           ? await symmetricEncrypt({ key: secret, data: c.clientSecret })
@@ -121,13 +154,21 @@ export async function migrateOAuthProvider(
       (id, token, clientId, userId, resources, scopes, expiresAt, createdAt, toolsVersion, refreshId)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     for (const grant of readRows<LegacyGrant>(sqlite, "legacyOAuthAccessToken")) {
+      const reason = missingOwner(grant);
+      if (reason) {
+        unresolved(grant, "oauth_grant", reason);
+        continue;
+      }
+      const refreshUsable = !!grant.refreshToken && !!grant.refreshTokenExpiresAt;
+      if (grant.refreshToken && !refreshUsable)
+        unresolved(grant, "oauth_refresh_token", "missing_expiry");
       const values = [
         grant.clientId,
         grant.userId,
         JSON.stringify([resource]),
         scopes(grant.scopes),
       ];
-      if (grant.refreshToken)
+      if (refreshUsable && grant.refreshToken)
         addRefresh.run(
           grant.id,
           oauthTokenDigest(grant.refreshToken),
@@ -143,13 +184,18 @@ export async function migrateOAuthProvider(
         grant.accessTokenExpiresAt,
         grant.createdAt,
         grant.toolsVersion,
-        grant.refreshToken ? grant.id : null,
+        refreshUsable ? grant.id : null,
       );
     }
     const addConsent = sqlite.prepare(
       "INSERT INTO oauthConsent (id,clientId,userId,scopes,resources,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?)",
     );
     for (const c of readRows<LegacyConsent>(sqlite, "legacyOAuthConsent")) {
+      const reason = missingOwner(c);
+      if (reason) {
+        unresolved(c, "oauth_consent", reason);
+        continue;
+      }
       if (!c.consentGiven) continue;
       addConsent.run(
         c.id,

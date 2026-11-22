@@ -448,7 +448,7 @@ router.post(
       throw createApiError.badRequest("Cannot block your own account");
     }
 
-    const { user, session, oauthAccessToken, oauthConsent, getDatabase } =
+    const { user, session, oauthAccessToken, oauthRefreshToken, oauthConsent, getDatabase } =
       await import("@mcp-moira/shared");
     const { eq } = await import("drizzle-orm");
     const db = getDatabase();
@@ -472,10 +472,15 @@ router.post(
 
     // Revoke all sessions, OAuth tokens, and OAuth consents
     const deletedSessions = await db.delete(session).where(eq(session.userId, id)).returning();
-    const deletedOAuthTokens = await db
-      .delete(oauthAccessToken)
-      .where(eq(oauthAccessToken.userId, id))
-      .returning();
+    const deletedOAuthTokens = db.transaction((tx) => {
+      const deleted = tx
+        .delete(oauthAccessToken)
+        .where(eq(oauthAccessToken.userId, id))
+        .returning({ id: oauthAccessToken.id })
+        .all();
+      tx.delete(oauthRefreshToken).where(eq(oauthRefreshToken.userId, id)).run();
+      return deleted;
+    });
     const deletedOAuthConsents = await db
       .delete(oauthConsent)
       .where(eq(oauthConsent.userId, id))
