@@ -2,6 +2,11 @@
 
 Start with the supplied Compose configuration and environment example. Keep operator secrets outside Git and image layers. Application settings are resolved through [shared config](../../packages/shared/src/config/env.ts) and [URL helpers](../../packages/shared/src/config/urls.ts); use those getters when changing application code, rather than adding direct environment reads or independent defaults.
 
+When deploying a production image built from source, verify that its clean checkout equals the
+accepted commit on the freshly fetched `origin/master`. Record that commit and compare it with
+the running image's `/app/BUILD_INFO` after deployment. The [source checkout checks](../development/getting-started.md#debug-the-selected-target)
+give the commands. Deployments using a published image can match its recorded commit to the selected release.
+
 ## Environment loading and durable secrets
 
 On first getter access the config singleton loads `.env.local` when `NODE_ENV=development`, otherwise `.env`, from `ENV_FILE_FOLDER` or the current directory. Existing process environment wins. Persisted secrets next to `DB_PATH` fill missing values without overriding real supplied values. Build arguments and browser bundles are not runtime secret storage; changing a build-time browser option requires rebuilding its consumer.
