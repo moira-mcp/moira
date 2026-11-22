@@ -1249,6 +1249,27 @@ test("cancellation after a lost collector preserves uncertainty and real output 
   );
 });
 
+// Watchers may observe a file as soon as it is opened. Publish complete markers by rename.
+function publishFixtureFile(path, value) {
+  const fs = require("node:fs");
+  fs.writeFileSync(path + ".pending", value);
+  fs.renameSync(path + ".pending", path);
+}
+
+function survivalCommand(trigger, effect, message, pidFile, resistTermination) {
+  return `
+    const fs = require("node:fs");
+    ${publishFixtureFile.toString()}
+    if (${resistTermination}) process.on("SIGTERM", () => {});
+    fs.watch(".", () => {
+      if (fs.existsSync(${JSON.stringify(trigger)}) && !fs.existsSync(${JSON.stringify(effect)}))
+        publishFixtureFile(${JSON.stringify(effect)}, ${JSON.stringify(message)});
+    });
+    publishFixtureFile(${JSON.stringify(pidFile)}, String(process.pid));
+    setInterval(() => {}, 1000);
+  `;
+}
+
 test("lost cancellation owners cannot fabricate completion while a resistant child still produces effects", async () => {
   const value = fixture();
   await start(value);
@@ -1261,7 +1282,7 @@ test("lost cancellation owners cannot fabricate completion while a resistant chi
       argv: [
         process.execPath,
         "-e",
-        "const f=require('node:fs');process.on('SIGTERM',()=>{});let wrote=false;f.watch('.',()=>{if(!wrote&&f.existsSync('show-life')){wrote=true;f.writeFileSync('after-cancel-effect','still running')}});f.writeFileSync('actual-child',String(process.pid));setInterval(()=>{},1000)",
+        survivalCommand("show-life", "after-cancel-effect", "still running", "actual-child", true),
       ],
     });
     const directory = join(
@@ -1339,7 +1360,7 @@ test.each(["acknowledged", "missing-start-ack"])(
       const hook = join(value.directory, "drop-start-ack.cjs");
       writeFileSync(
         hook,
-        `if(process.send){const original=process.send.bind(process);process.send=(message,...args)=>{if(Number.isSafeInteger(message?.startedAt)){require('node:fs').writeFileSync(${JSON.stringify(join(value.directory, "unacknowledged-owner"))},String(process.pid));return true}return original(message,...args)}}`,
+        `${publishFixtureFile.toString()};if(process.send){const original=process.send.bind(process);process.send=(message,...args)=>{if(Number.isSafeInteger(message?.startedAt)){publishFixtureFile(${JSON.stringify(join(value.directory, "unacknowledged-owner"))},String(process.pid));return true}return original(message,...args)}}`,
       );
       value.environment = { NODE_OPTIONS: `--require=${hook}` };
     }
@@ -1359,7 +1380,13 @@ test.each(["acknowledged", "missing-start-ack"])(
         argv: [
           process.execPath,
           "-e",
-          "const f=require('node:fs');f.watch('.',()=>{if(f.existsSync('show-survival')&&!f.existsSync('owner-loss-effect'))f.writeFileSync('owner-loss-effect','command survived owner loss')});f.writeFileSync('owner-loss-child',String(process.pid));setInterval(()=>{},1000)",
+          survivalCommand(
+            "show-survival",
+            "owner-loss-effect",
+            "command survived owner loss",
+            "owner-loss-child",
+            false,
+          ),
         ],
       });
       const directory = join(
@@ -1505,7 +1532,7 @@ test("a proved command exit cannot confirm group cancellation when a resistant d
   const hook = join(value.directory, "observe-command-close.cjs");
   writeFileSync(
     hook,
-    `if(process.send){const original=process.send.bind(process);process.send=(message,callback)=>{if(Object.hasOwn(message,'exitCode'))return original(message,error=>{require('node:fs').writeFileSync(${JSON.stringify(closedOwner)},String(process.pid));callback?.(error)});return original(message,callback)}}`,
+    `${publishFixtureFile.toString()};if(process.send){const original=process.send.bind(process);process.send=(message,callback)=>{if(Object.hasOwn(message,'exitCode'))return original(message,error=>{publishFixtureFile(${JSON.stringify(closedOwner)},String(process.pid));callback?.(error)});return original(message,callback)}}`,
   );
   value.environment = { NODE_OPTIONS: `--require=${hook}` };
   await start(value);
@@ -1518,7 +1545,7 @@ test("a proved command exit cannot confirm group cancellation when a resistant d
       argv: [
         process.execPath,
         "-e",
-        "const {spawn}=require('node:child_process');const f=require('node:fs');spawn(process.execPath,['-e',\"const f=require('node:fs');process.on('SIGTERM',()=>{});f.watch('.',()=>{if(f.existsSync('show-descendant')&&!f.existsSync('descendant-effect'))f.writeFileSync('descendant-effect','descendant survived cancellation')});f.writeFileSync('resistant-descendant',String(process.pid));setInterval(()=>{},1000)\"],{stdio:'ignore'});f.writeFileSync('cancellable-leader','ready');setInterval(()=>{},1000)",
+        `const {spawn}=require('node:child_process');const f=require('node:fs');spawn(process.execPath,['-e',${JSON.stringify(survivalCommand("show-descendant", "descendant-effect", "descendant survived cancellation", "resistant-descendant", true))}],{stdio:'ignore'});f.writeFileSync('cancellable-leader','ready');setInterval(()=>{},1000)`,
       ],
     });
     const deadline = Date.now() + 5000;

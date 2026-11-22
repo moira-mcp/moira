@@ -10,6 +10,7 @@ import { connect, type Socket } from "node:net";
 import { createServer } from "node:tls";
 import { createInterface } from "node:readline";
 import { buildWorkspaceService } from "../../scripts/build-workspace-service.js";
+import { buildLocalNativeHelpers } from "../../scripts/build-local-native.js";
 import { createTestUser, getSessionCookieHeader } from "../e2e/helpers/auth-helper.js";
 import { getAdminCredentials, getTestFetchUrl } from "../utils/test-config.js";
 
@@ -48,7 +49,10 @@ export async function browserPublicationOwner(bridgePort: number) {
     if (errors.length) throw new AggregateError(errors, "Browser owner cleanup failed");
   };
   try {
-    await buildWorkspaceService("packages/local/dist/owner-runtime");
+    await Promise.all([
+      buildLocalNativeHelpers(),
+      buildWorkspaceService("packages/local/dist/owner-runtime"),
+    ]);
     const created = await createTestUser(email, password, "Browser publication owner", true);
     if (!created.success || !created.userId)
       throw new Error("Browser owner account creation failed");
