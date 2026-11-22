@@ -232,7 +232,7 @@ const RegistrationSuccessContent: React.FC = () => {
     setIsSigningOut(true);
     setSignOutFailed(false);
     try {
-      const result = await authClient.signOut();
+      const result = await authClient.signOut({});
       if (result.error) throw result.error;
       const currentUser = authClient.$store.atoms.session.get().data?.user.id;
       if (currentUser && currentUser !== previousUser) return;

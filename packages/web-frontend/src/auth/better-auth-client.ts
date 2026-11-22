@@ -86,9 +86,11 @@ authClient.$store.atoms.session.listen((snapshot) => {
 setReadSessionRevalidator(() => authClient.$store.atoms.session.get().refetch());
 
 // Export hooks for components
-export const { useSession, signIn, signUp, signOut } = authClient;
-
-export type Session = typeof authClient.$Infer.Session;
+export const { signIn, signUp } = authClient;
+export const signOut = () => authClient.signOut({});
+type SessionSnapshot = ReturnType<typeof authClient.$store.atoms.session.get>;
+export const useSession: () => SessionSnapshot = authClient.useSession;
+export type Session = NonNullable<SessionSnapshot["data"]>;
 
 /** A canceled refetch promise can finish before the replacement session request settles. */
 export function waitForSessionSettlement(signal?: AbortSignal) {

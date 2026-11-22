@@ -49,7 +49,7 @@ export const SecuritySettings: React.FC<{ active?: boolean }> = ({ active = true
   const { t } = useTranslation();
 
   const resource = useResource<SignInMethods>("user-sign-in-methods", async () => {
-    const { data, error } = await authClient.listAccounts();
+    const { data, error } = await authClient.listAccounts({});
     if (error || !data) throw new Error(t("common.errors.failedToLoad"));
     return {
       hasPassword: data.some((account) => account.providerId === "credential"),
