@@ -15,6 +15,7 @@ import geoip from "geoip-lite";
 import type { ServiceLogger } from "../logging/logger.js";
 import { createLogger } from "../logging/logger.js";
 import { getSqliteInstance, getDatabase } from "../database/connection.js";
+import { AuthSqliteDialect } from "./sqlite-dialect.js";
 import { getEmailDeliveryStatus, sendEmail } from "../email/index.js";
 import { AuditRepository } from "../database/repositories/audit-repository.js";
 import { logAuditEventDirect } from "../logging/audit-logger.js";
@@ -1163,7 +1164,11 @@ export function createAuth(logger: ServiceLogger, registration: AuthRegistration
   const config: BetterAuthOptions = {
     ...baseConfig,
     plugins: [...baseConfig.plugins, registrationResultObserver()],
-    database: getSqliteInstance(),
+    database: {
+      dialect: new AuthSqliteDialect({ database: getSqliteInstance() }),
+      type: "sqlite",
+      transaction: true,
+    },
     logger: {
       disabled: false,
       level: "error",
