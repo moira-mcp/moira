@@ -18,6 +18,7 @@ let getAuthUrl: SharedRuntime["getAuthUrl"];
 let getBaseUrl: SharedRuntime["getBaseUrl"];
 let getAppPrefix: SharedRuntime["getAppPrefix"];
 let getDatabase: SharedRuntime["getDatabase"];
+let withSqliteWrite: SharedRuntime["withSqliteWrite"];
 let closeDatabase: SharedRuntime["closeDatabase"];
 let user: SharedRuntime["user"];
 let emailLog: SharedRuntime["emailLog"];
@@ -201,6 +202,7 @@ beforeAll(async () => {
       getBaseUrl,
       getAppPrefix,
       getDatabase,
+      withSqliteWrite,
       closeDatabase,
       user,
       emailLog,
@@ -627,13 +629,28 @@ test("only the registration transaction sees its user before a failed credential
     hooks.account = previous;
   });
   const operation = signup(email);
+  const id = randomUUID();
+  let write: Promise<unknown> | undefined;
   try {
     expect(await Promise.race([entered.promise, operation.then(() => false)])).toBe(true);
     expect(await findUser()).toHaveLength(0);
+    write = withSqliteWrite(() =>
+      getDatabase()
+        .insert(auditLog)
+        .values({ id, action: "test:concurrent_writer", createdAt: new Date() })
+        .run(),
+    );
+    // The signup releases its transaction from this process's event loop.
+    await new Promise<void>((resolve) => setImmediate(resolve));
   } finally {
     finish.resolve();
   }
   expect((await operation).status).toBe(400);
+  await write;
+  expect(
+    await getDatabase().select({ id: auditLog.id }).from(auditLog).where(eq(auditLog.id, id)),
+  ).toEqual([{ id }]);
+  await getDatabase().delete(auditLog).where(eq(auditLog.id, id));
   expect(await findUser()).toHaveLength(0);
 });
 

@@ -9,6 +9,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import path from "path";
 import "dotenv/config";
 import * as schema from "./schema.js";
+import { asSqliteWriter } from "./sqlite-write.js";
 import { createLogger } from "../logging/logger.js";
 import { getDbPath, isLogSqlEnabled, getNodeEnv, isTestEnvironment } from "../config/env.js";
 
@@ -114,7 +115,7 @@ export async function withAuthTransaction<T>(
 ): Promise<T> {
   const scope = { connection, active: true };
   try {
-    return await transactionOwner.run(scope, work);
+    return await asSqliteWriter(connection.sqlite, () => transactionOwner.run(scope, work));
   } finally {
     scope.active = false;
   }
