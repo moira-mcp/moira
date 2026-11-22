@@ -726,10 +726,7 @@ export class GitHubResourceService {
         "Use the assigned controller and settle its original operation before changing assignment",
         "Use the assigned controller and collect or settle its original operation before changing the controller assignment.",
       );
-    const device = this.selectDevice(
-      userId,
-      options.deviceId ?? resource.deviceId ?? undefined,
-    );
+    const device = this.selectDevice(userId, options.deviceId ?? resource.deviceId ?? undefined);
     this.assigned(resource, device);
     return this.dispatch(
       userId,

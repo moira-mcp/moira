@@ -175,12 +175,10 @@ export function createLocalDeviceManagementRoutes(
       z.object({})
         .strict()
         .parse(req.body ?? {});
-      res
-        .status(201)
-        .json({
-          success: true,
-          data: await service.repository.write(() => service.beginEnrollment(owner(req))),
-        });
+      res.status(201).json({
+        success: true,
+        data: await service.repository.write(() => service.beginEnrollment(owner(req))),
+      });
     }),
   );
   router.post(
@@ -333,12 +331,10 @@ export function createLocalDeviceRoutes(
   router.post(
     "/enroll",
     endpoint(async (req, res) =>
-      res
-        .status(201)
-        .json({
-          success: true,
-          data: await service.repository.write(() => service.approveLocalEnrollment(req.body)),
-        }),
+      res.status(201).json({
+        success: true,
+        data: await service.repository.write(() => service.approveLocalEnrollment(req.body)),
+      }),
     ),
   );
   router.post(
