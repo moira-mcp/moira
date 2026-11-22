@@ -427,11 +427,31 @@ export async function getAuthorizationCode(
     ...(prompt ? { prompt } : {}),
   }).toString();
   const cookie = formatSessionCookie(baseUrl, sessionCookie);
-  const response = await fetch(authorizeUrl, { headers: { Cookie: cookie }, redirect: "manual" });
-  const location = response.headers.get("location");
-  if (!location) throw new Error("Authorization did not redirect: " + response.status);
+  const response = await fetch(authorizeUrl, {
+    headers: { Cookie: cookie, Accept: "application/json" },
+    redirect: "manual",
+  });
+  let location: string | null = null;
+  if (
+    response.status === 200 &&
+    response.headers.get("content-type")?.includes("application/json")
+  ) {
+    const body = (await response.json()) as { redirect?: unknown; url?: unknown };
+    if (body.redirect === true && typeof body.url === "string") location = body.url;
+  } else if (response.status >= 300 && response.status < 400) {
+    location = response.headers.get("location");
+  }
+  if (!location)
+    throw new Error("OAuth authorization returned no redirect target: " + response.status);
   let next = new URL(location, baseUrl);
   if (next.pathname.endsWith("/oauth/consent")) {
+    if (
+      ![new URL(baseUrl).origin, getTestRequestOrigin()].includes(next.origin) ||
+      next.searchParams.get("state") !== state ||
+      !next.searchParams.has("sig")
+    ) {
+      throw new Error("Unexpected OAuth consent origin, state or signature");
+    }
     const consent = await fetch(baseUrl + "/api/auth/oauth2/consent", {
       method: "POST",
       headers: {
