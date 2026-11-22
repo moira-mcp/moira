@@ -22,7 +22,11 @@ interface WriteQuery<T> extends PromiseLike<T> {
 
 export async function executeDrizzleWrite<T>(db: object, query: WriteQuery<T>): Promise<T> {
   const client = rootClient(db);
-  if (!client) return query;
+  if (!client) {
+    // A native transaction callback is synchronous. Execute its statement before
+    // returning so that a subsequent rollback also undoes this write.
+    return typeof query.prepare === "function" ? query.prepare().execute().sync() : query;
+  }
   // Use Drizzle's selected result mode, including rows from RETURNING, in the
   // synchronous write callback. No other request runs between the statement and COMMIT.
   return withSqliteWrite(() => query.prepare().execute().sync(), client);

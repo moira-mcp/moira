@@ -1373,12 +1373,7 @@ router.post(
     const tempBackupPath = path.join(path.dirname(dbPath), `.backup-temp-${Date.now()}.db`);
 
     try {
-      // WAL checkpoint before backup to ensure all data is written
-      const { getSqliteInstance } = await import("@mcp-moira/shared");
-      const db = getSqliteInstance();
-      db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-
-      // Create backup using SQLite backup API
+      // SQLite's online backup reads the committed database, including its WAL.
       await repository.backup(tempBackupPath);
 
       // Audit logging
