@@ -375,6 +375,46 @@ export function buildMcpPluginOptions() {
   };
 }
 
+export async function findMcpOAuthCredential(bearer: string) {
+  const db = getDatabase();
+  const [row] = await db
+    .select({
+      id: oauthAccessToken.id,
+      toolsVersion: oauthAccessToken.toolsVersion,
+      userId: oauthAccessToken.userId,
+      clientId: oauthAccessToken.clientId,
+      email: user.email,
+      scopes: oauthAccessToken.scopes,
+      resources: oauthAccessToken.resources,
+      accessTokenExpiresAt: oauthAccessToken.accessTokenExpiresAt,
+    })
+    .from(oauthAccessToken)
+    .innerJoin(user, eq(oauthAccessToken.userId, user.id))
+    .innerJoin(oauthClient, eq(oauthClient.clientId, oauthAccessToken.clientId))
+    .leftJoin(session, eq(session.id, oauthAccessToken.sessionId))
+    .where(
+      and(
+        eq(oauthAccessToken.accessToken, oauthTokenDigest(bearer)),
+        isNull(oauthAccessToken.revoked),
+        isNull(oauthAccessToken.confirmation),
+        or(isNull(oauthClient.disabled), eq(oauthClient.disabled, false)),
+        sql`julianday(${oauthAccessToken.accessTokenExpiresAt}) > julianday('now')`,
+        or(
+          isNull(oauthAccessToken.sessionId),
+          sql`julianday(${session.expiresAt}) > julianday('now')`,
+        ),
+      ),
+    )
+    .limit(1);
+  if (
+    !row?.userId ||
+    !row.resources ||
+    !(JSON.parse(row.resources) as string[]).includes(getMcpUrl())
+  )
+    return null;
+  return { ...row, userId: row.userId };
+}
+
 /** The legacy MCP resource API reads the very same opaque rows issued and revoked by the provider. */
 function mcpResourceSession(): BetterAuthPlugin {
   return {
@@ -385,44 +425,26 @@ function mcpResourceSession(): BetterAuthPlugin {
         { method: "GET", requireHeaders: true },
         async (ctx) => {
           const bearer = /^Bearer ([^\s]+)$/i.exec(ctx.headers.get("authorization") ?? "")?.[1];
-          if (!bearer) return ctx.json(null);
-          const db = getDatabase();
-          const [row] = await db
-            .select({
-              id: oauthAccessToken.id,
-              userId: oauthAccessToken.userId,
-              clientId: oauthAccessToken.clientId,
-              email: user.email,
-              scopes: oauthAccessToken.scopes,
-              resources: oauthAccessToken.resources,
-              accessTokenExpiresAt: oauthAccessToken.accessTokenExpiresAt,
-            })
-            .from(oauthAccessToken)
-            .innerJoin(user, eq(oauthAccessToken.userId, user.id))
-            .innerJoin(oauthClient, eq(oauthClient.clientId, oauthAccessToken.clientId))
-            .leftJoin(session, eq(session.id, oauthAccessToken.sessionId))
-            .where(
-              and(
-                eq(oauthAccessToken.accessToken, oauthTokenDigest(bearer)),
-                isNull(oauthAccessToken.revoked),
-                isNull(oauthAccessToken.confirmation),
-                or(isNull(oauthClient.disabled), eq(oauthClient.disabled, false)),
-                sql`julianday(${oauthAccessToken.accessTokenExpiresAt}) > julianday('now')`,
-                or(
-                  isNull(oauthAccessToken.sessionId),
-                  sql`julianday(${session.expiresAt}) > julianday('now')`,
-                ),
-              ),
-            )
-            .limit(1);
-          if (
-            !row?.userId ||
-            !row.resources ||
-            !(JSON.parse(row.resources) as string[]).includes(getMcpUrl())
-          )
-            return ctx.json(null);
+          if (!bearer)
+            throw new APIError("UNAUTHORIZED", {
+              code: "INVALID_TOKEN",
+              message: "OAuth bearer required",
+            });
+          const row = await findMcpOAuthCredential(bearer);
+          if (!row)
+            throw new APIError("UNAUTHORIZED", {
+              code: "INVALID_TOKEN",
+              message: "Invalid or expired OAuth credential",
+            });
           await assertMcpOAuthAccountAccess(row.userId);
-          return ctx.json({ ...row, scopes: (JSON.parse(row.scopes) as string[]).join(" ") });
+          return ctx.json({
+            id: row.id,
+            userId: row.userId,
+            email: row.email,
+            clientId: row.clientId,
+            accessTokenExpiresAt: row.accessTokenExpiresAt,
+            scopes: (JSON.parse(row.scopes) as string[]).join(" "),
+          });
         },
       ),
     },

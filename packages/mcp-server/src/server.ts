@@ -35,6 +35,7 @@ import {
   hashToken,
   validateTokenRecord,
   getAccountAccessDenial,
+  findMcpOAuthCredential,
   ACCOUNT_APPROVAL_REQUIRED_CODE,
   type McpPromptContext,
   getSqliteInstance,
@@ -75,7 +76,6 @@ import {
   ExecutionAttemptMaintenance,
   WaitingNotificationSender,
 } from "@mcp-moira/workflow-engine";
-import { auth } from "./auth.js";
 import { mcpLimiter } from "./middleware/rate-limit-middleware.js";
 
 import { buildReconciliationAwareInstructions } from "./reconciliation-aware-server.js";
@@ -249,9 +249,8 @@ async function authenticatePrincipal(
     };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const session = await (auth.api as any).getMcpSession({ headers: req.headers as any });
-  if (!session) {
+  const tokenData = bearerToken ? await findMcpOAuthCredential(bearerToken) : null;
+  if (!tokenData || !bearerToken) {
     const baseUrl = getBaseUrl();
     res
       .status(401)
@@ -266,10 +265,7 @@ async function authenticatePrincipal(
       });
     return null;
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const userId = (session as any).userId || "";
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const email = (session as any).email || "";
+  const { userId, email } = tokenData;
   const db = getDatabase();
   const [userData] = await db
     .select({
@@ -313,29 +309,6 @@ async function authenticatePrincipal(
     });
     return null;
   }
-  if (!bearerToken) {
-    res
-      .status(401)
-      .json({ error: "invalid_token", error_description: "OAuth access token is required." });
-    return null;
-  }
-  const [tokenData] = await db
-    .select({ id: oauthAccessToken.id, toolsVersion: oauthAccessToken.toolsVersion })
-    .from(oauthAccessToken)
-    .where(
-      and(
-        eq(oauthAccessToken.accessToken, oauthTokenDigest(bearerToken)),
-        eq(oauthAccessToken.userId, userId),
-      ),
-    )
-    .limit(1);
-  if (!tokenData) {
-    res.status(401).json({
-      error: "invalid_token",
-      error_description: "OAuth credential has been revoked or is invalid.",
-    });
-    return null;
-  }
   logger.debug("Authenticated principal", { method, credentialKind: "oauth" });
   return {
     identity: { userId, email },
@@ -350,6 +323,7 @@ async function authenticatePrincipal(
           .where(
             and(
               eq(oauthAccessToken.id, tokenData.id),
+              isNull(oauthAccessToken.revoked),
               eq(oauthAccessToken.accessToken, oauthTokenDigest(bearerToken)),
               eq(oauthAccessToken.userId, userId),
               gt(oauthAccessToken.accessTokenExpiresAt, new Date().toISOString()),
