@@ -1033,7 +1033,7 @@ const baseConfig = {
       }
       // Password hashing can yield to unrelated requests. Complete it before SQLite
       // acquires the writer; the native endpoint still validates and commits the account.
-      const password = ctx.body?.password;
+      const password = requestBody?.password;
       if (ctx.path === "/sign-up/email" && typeof password === "string") {
         const { minPasswordLength, maxPasswordLength } = ctx.context.password.config;
         if (password.length >= minPasswordLength && password.length <= maxPasswordLength) {
