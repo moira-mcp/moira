@@ -886,6 +886,18 @@ const baseConfig = {
         }
       }
 
+      if (ctx.path === "/oauth2/userinfo") {
+        const bearer = /^Bearer ([^\s]+)$/i.exec(ctx.headers?.get("authorization") ?? "")?.[1];
+        if (bearer) {
+          const [owner] = await getDatabase()
+            .select({ userId: oauthAccessToken.userId })
+            .from(oauthAccessToken)
+            .where(eq(oauthAccessToken.accessToken, oauthTokenDigest(bearer)))
+            .limit(1);
+          if (owner?.userId) await assertMcpOAuthAccountAccess(owner.userId);
+        }
+      }
+
       // The MCP plugin writes tokens through its adapter and bypasses
       // databaseHooks.oauthAccessToken. Resolve the owner from the refresh token
       // or authorization code before the plugin consumes either credential.
