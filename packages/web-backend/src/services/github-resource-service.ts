@@ -614,7 +614,7 @@ export class GitHubResourceService {
     options: { deviceId?: string; requestId: string },
   ) {
     const requestId = controllerRequestIdSchema.parse(options.requestId),
-      device = await this.selectDevice(userId, options.deviceId);
+      device = this.selectDevice(userId, options.deviceId);
     const connection = new CodespaceConnectionRepository(this.db).getConnection(
       userId,
       "github-codespaces",
@@ -726,7 +726,7 @@ export class GitHubResourceService {
         "Use the assigned controller and settle its original operation before changing assignment",
         "Use the assigned controller and collect or settle its original operation before changing the controller assignment.",
       );
-    const device = await this.selectDevice(
+    const device = this.selectDevice(
       userId,
       options.deviceId ?? resource.deviceId ?? undefined,
     );
