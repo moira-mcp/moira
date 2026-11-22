@@ -201,7 +201,7 @@ async function fixture() {
       };
     },
   });
-  const makeService = () =>
+  const makeService = (clock = () => now) =>
     new LocalPrivateRepositoryCreationService({
       repository,
       admission,
@@ -221,7 +221,7 @@ async function fixture() {
           throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "No actual installation grant.");
       },
       links: () => ({ settings: config.settingsUrl, installation: config.installationUrl }),
-      now: () => now,
+      now: clock,
     });
   const input = {
     deviceId,
@@ -844,6 +844,24 @@ describe("Private repository creation precedes local admission without repeating
     expect(f.repository.getOwned("owner", f.input.requestId)?.reservationHeld).toBe(1);
     expect(f.state.posts).toBe(1);
   });
+  test.each(["expired claim", "changed account authority"])(
+    "%s after preflight cannot submit a private repository creation",
+    async (change) => {
+      const f = await fixture();
+      let clock = now;
+      const submit = f.repository.submit.bind(f.repository);
+      jest.spyOn(f.repository, "submit").mockImplementationOnce((record, ...rest) => {
+        if (change === "expired claim") clock = record.claimExpiresAt!;
+        else f.authority.credentialGeneration++;
+        return submit(record, ...rest);
+      });
+      const result = await f.makeService(() => clock).createRepository("owner", f.input);
+      expect(result.status).toBe("setup_required");
+      expect(f.repository.getOwned("owner", f.input.requestId)?.state).toBe("prepared");
+      expect(f.state.posts).toBe(0);
+    },
+  );
+
   test("changed credentials during preflight cannot reach POST", async () => {
     const f = await fixture();
     f.state.changedDuringInspection = true;

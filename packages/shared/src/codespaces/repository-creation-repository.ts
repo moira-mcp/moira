@@ -214,10 +214,16 @@ export class RepositoryCreationRepository {
   async submit(
     record: RepositoryCreationRecord,
     authority: RepositoryCreationAuthority,
-    now: number,
+    clock: number | (() => number),
+    readAuthority?: () => RepositoryCreationAuthority,
   ): Promise<void> {
     await this.assertCurrent(record, authority);
     await withSqliteWrite(() => {
+      if (readAuthority && canonicalJson(readAuthority()) !== canonicalJson(authority))
+        throw new LocalDeviceError(
+          "LOCAL_UNAUTHORIZED",
+          "GitHub repository creation authority changed.",
+        );
       const device = this.devices.getDeviceIdentity(record.userId, record.deviceId);
       if (
         device.status !== "active" ||
@@ -225,6 +231,7 @@ export class RepositoryCreationRepository {
         device.connectionId !== record.localConnectionId
       )
         throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Repository creation authority changed.");
+      const now = typeof clock === "number" ? clock : clock();
       const changed = this.sqlite
         .prepare(
           "UPDATE codespaceRepositoryRequest SET state='submitted',errorCode=NULL,updatedAt=? WHERE requestId=? AND userId=? AND state='prepared' AND claimId=? AND claimExpiresAt>?",

@@ -303,7 +303,9 @@ export class LocalPrivateRepositoryCreationService {
             "LOCAL_REPOSITORY_NAME_EXISTS",
           );
         }
-        await ledger.submit(record, await this.current(record, context.authority), this.now());
+        await ledger.submit(record, await this.current(record, context.authority), this.now, () =>
+          this.dependencies.currentAuthority(userId),
+        );
         record = ledger.getOwned(userId, input.requestId)!;
         let created: GitHubPrivateRepositoryIdentity;
         try {
