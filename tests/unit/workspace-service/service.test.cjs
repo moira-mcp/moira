@@ -1249,25 +1249,14 @@ test("cancellation after a lost collector preserves uncertainty and real output 
   );
 });
 
-// Watchers may observe a file as soon as it is opened. Publish complete markers by rename.
-function publishFixtureFile(path, value) {
-  const fs = require("node:fs");
-  fs.writeFileSync(path + ".pending", value);
-  fs.renameSync(path + ".pending", path);
-}
+const ownerProcessFixture = require.resolve("../../fixtures/workspace-owner-process.cjs");
 
-function survivalCommand(trigger, effect, message, pidFile, resistTermination) {
-  return `
-    const fs = require("node:fs");
-    ${publishFixtureFile.toString()}
-    if (${resistTermination}) process.on("SIGTERM", () => {});
-    fs.watch(".", () => {
-      if (fs.existsSync(${JSON.stringify(trigger)}) && !fs.existsSync(${JSON.stringify(effect)}))
-        publishFixtureFile(${JSON.stringify(effect)}, ${JSON.stringify(message)});
-    });
-    publishFixtureFile(${JSON.stringify(pidFile)}, String(process.pid));
-    setInterval(() => {}, 1000);
-  `;
+function interruptOwnerAcknowledgement(directory, action) {
+  return {
+    NODE_OPTIONS: `--require=${JSON.stringify(require.resolve("../../fixtures/workspace-owner-signals.cjs"))}`,
+    MOIRA_TEST_OWNER_EVENT: action,
+    MOIRA_TEST_OWNER_DIRECTORY: directory,
+  };
 }
 
 test("lost cancellation owners cannot fabricate completion while a resistant child still produces effects", async () => {
@@ -1279,11 +1268,7 @@ test("lost cancellation owners cannot fabricate completion while a resistant chi
   try {
     await control(value, "POST", "/v1/exec", {
       requestId,
-      argv: [
-        process.execPath,
-        "-e",
-        survivalCommand("show-life", "after-cancel-effect", "still running", "actual-child", true),
-      ],
+      argv: [process.execPath, ownerProcessFixture, "cancellation"],
     });
     const directory = join(
       value.stateRoot,
@@ -1357,12 +1342,7 @@ test.each(["acknowledged", "missing-start-ack"])(
   async (phase) => {
     const value = fixture();
     if (phase === "missing-start-ack") {
-      const hook = join(value.directory, "drop-start-ack.cjs");
-      writeFileSync(
-        hook,
-        `${publishFixtureFile.toString()};if(process.send){const original=process.send.bind(process);process.send=(message,...args)=>{if(Number.isSafeInteger(message?.startedAt)){publishFixtureFile(${JSON.stringify(join(value.directory, "unacknowledged-owner"))},String(process.pid));return true}return original(message,...args)}}`,
-      );
-      value.environment = { NODE_OPTIONS: `--require=${hook}` };
+      value.environment = interruptOwnerAcknowledgement(value.directory, "drop-start");
     }
     await start(value);
     const requestId = createWorkspaceRequestId();
@@ -1377,17 +1357,7 @@ test.each(["acknowledged", "missing-start-ack"])(
       await control(value, "POST", "/v1/exec", {
         requestId,
         inputReady: true,
-        argv: [
-          process.execPath,
-          "-e",
-          survivalCommand(
-            "show-survival",
-            "owner-loss-effect",
-            "command survived owner loss",
-            "owner-loss-child",
-            false,
-          ),
-        ],
+        argv: [process.execPath, ownerProcessFixture, "owner-loss"],
       });
       const directory = join(
         value.stateRoot,
@@ -1529,12 +1499,7 @@ test("cancellation never signals a foreign group substituted for the retained co
 test("a proved command exit cannot confirm group cancellation when a resistant descendant survives owner loss", async () => {
   const value = fixture();
   const closedOwner = join(value.directory, "command-close-owner");
-  const hook = join(value.directory, "observe-command-close.cjs");
-  writeFileSync(
-    hook,
-    `${publishFixtureFile.toString()};if(process.send){const original=process.send.bind(process);process.send=(message,callback)=>{if(Object.hasOwn(message,'exitCode'))return original(message,error=>{publishFixtureFile(${JSON.stringify(closedOwner)},String(process.pid));callback?.(error)});return original(message,callback)}}`,
-  );
-  value.environment = { NODE_OPTIONS: `--require=${hook}` };
+  value.environment = interruptOwnerAcknowledgement(value.directory, "observe-close");
   await start(value);
   const requestId = createWorkspaceRequestId();
   let descendant;
@@ -1542,11 +1507,7 @@ test("a proved command exit cannot confirm group cancellation when a resistant d
   try {
     await control(value, "POST", "/v1/exec", {
       requestId,
-      argv: [
-        process.execPath,
-        "-e",
-        `const {spawn}=require('node:child_process');const f=require('node:fs');spawn(process.execPath,['-e',${JSON.stringify(survivalCommand("show-descendant", "descendant-effect", "descendant survived cancellation", "resistant-descendant", true))}],{stdio:'ignore'});f.writeFileSync('cancellable-leader','ready');setInterval(()=>{},1000)`,
-      ],
+      argv: [process.execPath, ownerProcessFixture, "descendant"],
     });
     const deadline = Date.now() + 5000;
     while (
