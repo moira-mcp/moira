@@ -3,6 +3,8 @@ import { createServer as httpServer } from "node:http";
 import { createServer as smtpServer, type AddressInfo } from "node:net";
 import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
+import express from "express";
+import request from "supertest";
 import { eq, inArray } from "drizzle-orm";
 import { github } from "better-auth/social-providers";
 import { APIError } from "better-auth/api";
@@ -26,6 +28,12 @@ let globalSetting: SharedRuntime["globalSetting"];
 let auditLog: SharedRuntime["auditLog"];
 let oauthClient: SharedRuntime["oauthClient"];
 let resetFeatureResolver: SharedRuntime["resetFeatureResolver"];
+let PublicationRepository: SharedRuntime["PublicationRepository"];
+let publicationLink: SharedRuntime["publicationLink"];
+let publicationVisit: SharedRuntime["publicationVisit"];
+let publicationRegistration: SharedRuntime["publicationRegistration"];
+const consent = express();
+const publicationIds: string[] = [];
 let DatabaseRepository: EngineRuntime["DatabaseRepository"];
 let TelegramClient: EngineRuntime["TelegramClient"];
 let notifyAdminsOfRegistration: EngineRuntime["notifyAdminsOfRegistration"];
@@ -210,7 +218,14 @@ beforeAll(async () => {
       auditLog,
       oauthClient,
       resetFeatureResolver,
+      PublicationRepository,
+      publicationLink,
+      publicationVisit,
+      publicationRegistration,
     } = await import("@mcp-moira/shared"));
+    const { publicationConsentRoutes } =
+      await import("../../packages/web-backend/src/routes/publication-consent.js");
+    consent.use("/api/public/publications", publicationConsentRoutes);
     ({
       DatabaseRepository,
       TelegramClient,
@@ -327,6 +342,15 @@ afterEach(async () => {
 });
 afterAll(async () => {
   resetClientFactory();
+  if (publicationIds.length) {
+    await getDatabase()
+      .delete(publicationRegistration)
+      .where(inArray(publicationRegistration.publicationId, publicationIds));
+    await getDatabase()
+      .delete(publicationVisit)
+      .where(inArray(publicationVisit.publicationId, publicationIds));
+    await getDatabase().delete(publicationLink).where(inArray(publicationLink.id, publicationIds));
+  }
   await getDatabase()
     .update(globalSetting)
     .set({ value: originalPreference })
@@ -387,6 +411,26 @@ function cookies(response: Response) {
     .getSetCookie()
     .map((cookie) => cookie.split(";")[0])
     .join("; ");
+}
+
+async function newPublication() {
+  const link = await new PublicationRepository(getDatabase()).create({
+    source: "fixture",
+    campaign: fixtureId,
+    publication: randomUUID(),
+    language: "en",
+  });
+  publicationIds.push(link.id);
+  return { id: link.id, path: `/api/public/publications/${link.id}` };
+}
+async function choose(path: string, choice: "accept" | "decline") {
+  const response = await request(consent)
+    .post(path)
+    .set("Origin", getBaseUrl())
+    .type("form")
+    .send({ choice })
+    .expect(303);
+  return response.headers["set-cookie"][0] as string;
 }
 async function oauth(extraCookie?: string) {
   createdEmails.push(providerEmail);
@@ -472,6 +516,109 @@ test("first real OAuth callback delivers once and repeat provider login does not
   await Promise.all(notificationTasks);
   expect(events).toHaveLength(1);
   expect(telegramMessages).toHaveLength(1);
+});
+
+test("publication previews reveal no labels and only voluntary same-origin choices count", async () => {
+  const link = await newPublication();
+  const unknown = `/api/public/publications/${randomUUID()}`;
+  const page = await request(consent)
+    .get(link.path + "?lang=ru")
+    .expect(200);
+  const missing = await request(consent)
+    .get(unknown + "?lang=ru")
+    .expect(200);
+  expect(page.text).toBe(missing.text);
+  expect(page.text).toContain('lang="ru"');
+  expect(page.text).not.toContain(fixtureId);
+  expect(page.headers["set-cookie"]).toBeUndefined();
+  expect(page.headers["cache-control"]).toBe("no-store");
+  expect(page.headers["referrer-policy"]).toBe("no-referrer");
+  await request(consent)
+    .post(link.path)
+    .set("Origin", "https://other.example")
+    .type("form")
+    .send({ choice: "accept" })
+    .expect(403);
+  await request(consent).post(link.path).type("form").send({ choice: "accept" }).expect(403);
+  expect(await choose(link.path, "decline")).toMatch(/expires=Thu, 01 Jan 1970/i);
+  expect(
+    await getDatabase()
+      .select()
+      .from(publicationVisit)
+      .where(eq(publicationVisit.publicationId, link.id)),
+  ).toHaveLength(0);
+  const accepted = await request(consent)
+    .post(link.path + "?lang=ru&next=https://other.example")
+    .set("Origin", "null")
+    .set("Sec-Fetch-Site", "same-origin")
+    .type("form")
+    .send({ choice: "accept" })
+    .expect(303);
+  expect(accepted.headers.location).toBe(getAppPrefix() ? "/ru/" : "/?lang=ru");
+  expect(accepted.headers["set-cookie"][0]).toMatch(
+    /Max-Age=604800; Path=\/;.*HttpOnly;.*SameSite=Lax/,
+  );
+  expect(
+    await getDatabase()
+      .select()
+      .from(publicationVisit)
+      .where(eq(publicationVisit.publicationId, link.id)),
+  ).toHaveLength(1);
+  const unknownCookie = await choose(unknown, "accept");
+  expect(unknownCookie.split(";")[0]).toMatch(/moira-publication=[A-Za-z0-9_-]{43}$/);
+});
+
+test("email and social registration consume the accepted publication while later sign-in cannot reattribute", async () => {
+  const before = await newPublication();
+  const latest = await newPublication();
+  await choose(before.path, "accept");
+  const emailCookie = (await choose(latest.path, "accept")).split(";")[0];
+  const email = await signup(undefined, emailCookie);
+  expect(email.status).toBe(200);
+  const emailId: string = (await email.json()).user.id;
+  const socialCookie = (await choose(before.path, "accept")).split(";")[0];
+  const social = await oauth(socialCookie);
+  expect(social.status).toBe(302);
+  const session = await auth.api.getSession({ headers: new Headers({ Cookie: cookies(social) }) });
+  const socialId = session!.user.id;
+  expect((await oauth((await choose(latest.path, "accept")).split(";")[0])).status).toBe(302);
+  const attributed = await getDatabase()
+    .select({ id: publicationRegistration.userId, source: publicationRegistration.publicationId })
+    .from(publicationRegistration)
+    .where(inArray(publicationRegistration.userId, [emailId, socialId]));
+  expect(attributed).toHaveLength(2);
+  expect(attributed).toEqual(
+    expect.arrayContaining([
+      { id: emailId, source: latest.id },
+      { id: socialId, source: before.id },
+    ]),
+  );
+});
+
+test("an installation without admin analytics sends readers on without recording a choice", async () => {
+  const link = await newPublication();
+  const previousMode = process.env.DEPLOYMENT_MODE;
+  try {
+    process.env.DEPLOYMENT_MODE = "self-host";
+    resetFeatureResolver();
+    await request(consent).get(link.path).expect(303).expect("location", "/");
+    const response = await request(consent)
+      .post(link.path)
+      .set("origin", getBaseUrl())
+      .type("form")
+      .send({ choice: "accept" })
+      .expect(303);
+    expect(response.headers["set-cookie"]).toBeUndefined();
+    expect(
+      await getDatabase()
+        .select()
+        .from(publicationVisit)
+        .where(eq(publicationVisit.publicationId, link.id)),
+    ).toHaveLength(0);
+  } finally {
+    process.env.DEPLOYMENT_MODE = previousMode;
+    resetFeatureResolver();
+  }
 });
 
 test("registration succeeds alongside a writer on another service connection", async () => {
@@ -560,21 +707,33 @@ test("existing email login and provider linking are not registrations", async ()
   const account = (await created.json()).user as { id: string; email: string };
   await assertDelivery(account.id);
   await getDatabase().update(user).set({ emailVerified: true }).where(eq(user.id, account.id));
-  const signedIn = await call("/sign-in/email", {
-    email: account.email,
-    password: "RegistrationPassword123!",
-  });
+  const link = await newPublication();
+  const laterCookie = (await choose(link.path, "accept")).split(";")[0];
+  const signedIn = await call(
+    "/sign-in/email",
+    {
+      email: account.email,
+      password: "RegistrationPassword123!",
+    },
+    laterCookie,
+  );
   expect(signedIn.status).toBe(200);
   providerEmail = account.email;
-  const linked = await oauth();
+  const linked = await oauth(laterCookie);
   expect(linked.status).toBe(302);
   const observed = await auth.api.getSession({ headers: new Headers({ Cookie: cookies(linked) }) });
   expect(observed?.user.id).toBe(account.id);
-  const duplicate = await signup(account.email);
+  const duplicate = await signup(account.email, laterCookie);
   expect(duplicate.status).toBeGreaterThanOrEqual(400);
   await Promise.all(notificationTasks);
   expect(events).toHaveLength(1);
   expect(telegramMessages).toHaveLength(1);
+  expect(
+    await getDatabase()
+      .select()
+      .from(publicationRegistration)
+      .where(eq(publicationRegistration.userId, account.id)),
+  ).toEqual([]);
 });
 
 test("invalid OAuth state and failed OAuth account creation cannot publish a registration", async () => {

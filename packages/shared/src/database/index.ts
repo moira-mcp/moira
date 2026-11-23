@@ -11,6 +11,13 @@ export {
   parseUserIdSelection,
 } from "./admin-analytics-query.js";
 export { AdminAnalyticsRepository } from "./repositories/admin-analytics-repository.js";
+export {
+  PublicationRepository,
+  PUBLICATION_VISIT_TTL_MS,
+  type PublicationInput,
+  type PublicationReport,
+  type PublicationReportRow,
+} from "./repositories/publication-repository.js";
 export { getDatabase, getSqliteInstance, closeDatabase, withReadSnapshot } from "./connection.js";
 export { withSqliteWrite, type SqliteWriteResult } from "./sqlite-write.js";
 export { executeDrizzleWrite, withDrizzleWrite } from "./drizzle-write.js";

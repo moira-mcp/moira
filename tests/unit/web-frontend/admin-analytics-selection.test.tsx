@@ -1,23 +1,207 @@
 /** @jest-environment jsdom */
 import React from "react";
 import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
-import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  within,
+} from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../../packages/web-frontend/src/i18n";
 import { useAnalyticsExclusions } from "../../../packages/web-frontend/src/hooks/useAnalyticsExclusions";
 import { AnalyticsCard } from "../../../packages/web-frontend/src/components/admin/AnalyticsCard";
+import { PublicationAnalytics } from "../../../packages/web-frontend/src/components/admin/PublicationAnalytics";
 import { ExecutionCard } from "../../../packages/web-frontend/src/components/cards/ExecutionCard";
 import { UserCard } from "../../../packages/web-frontend/src/components/cards/UserCard";
 import { normalizeUser } from "../../../packages/web-frontend/src/components/cards/normalize-user";
 import { normalizeExecution } from "../../../packages/web-frontend/src/components/cards/normalize-execution";
-import type { AnalyticsScope } from "@mcp-moira/shared";
+import type { AnalyticsQuery, AnalyticsScope } from "@mcp-moira/shared";
 import axios from "axios";
-import { MoiraApiClient, apiClient } from "../../../packages/web-frontend/src/services/api-client";
+import {
+  MoiraApiClient,
+  ApiClientError,
+  apiClient,
+} from "../../../packages/web-frontend/src/services/api-client";
 import { AnalyticsExclusionsControl } from "../../../packages/web-frontend/src/components/admin/AnalyticsExclusionsControl";
 
 const originalReact = (globalThis as typeof globalThis & { React?: typeof React }).React;
 const originalAdapter = axios.defaults.adapter;
+
+const publicationQuery: AnalyticsQuery = {
+  range: "week",
+  exclusions: { mode: "custom", userIds: ["operator"] },
+  limit: 6,
+  offset: 0,
+};
+
+test("publication export posts the same analytics query and receives CSV from the server", async () => {
+  const adapter = jest.fn(async (config: import("axios").InternalAxiosRequestConfig) => ({
+    config,
+    status: 200,
+    statusText: "OK",
+    headers: { "content-type": "text/csv; charset=utf-8" },
+    data: "server report",
+  }));
+  axios.defaults.adapter = adapter;
+  const file = await new MoiraApiClient().exportAdminPublications(publicationQuery, "forum", "ru");
+  const { method, url, data } = adapter.mock.calls[0][0];
+  const endpoint = new URL(url!, "https://example.test");
+  expect(method).toBe("post");
+  expect(endpoint.pathname).toBe("/admin/analytics/publications/export");
+  expect(endpoint.searchParams.get("excludeUserIds")).toBe("operator");
+  expect(endpoint.searchParams.get("range")).toBe("week");
+  expect(JSON.parse(data)).toEqual({ search: "forum", language: "ru" });
+  expect(file.type).toBe("text/csv;charset=utf-8");
+});
+
+test("publication export requests a fresh server report with the active search, exclusions and range", async () => {
+  const row = {
+    id: "one",
+    language: "en" as const,
+    campaign: "=Campaign",
+    source: "Forum",
+    publication: 'Part "I", May',
+    visits: 7,
+    registered: 4,
+    firstRun: 2,
+    repeatRun: 1,
+  };
+  render(
+    <I18nextProvider i18n={i18n}>
+      <PublicationAnalytics
+        exportQuery={publicationQuery}
+        rows={[
+          row,
+          { ...row, id: "two", publication: "Article", source: "Newsletter" },
+          {
+            id: null,
+            language: null,
+            campaign: "",
+            source: "",
+            publication: "",
+            visits: 0,
+            registered: 9,
+            firstRun: 3,
+            repeatRun: 2,
+          },
+        ]}
+        onCreated={async () => {}}
+      />
+    </I18nextProvider>,
+  );
+  const table = screen.getByRole("table");
+  const unknown = within(table).getByText("Unknown source").closest("tr")!;
+  expect(
+    within(unknown)
+      .getAllByRole("cell")
+      .slice(4, 8)
+      .map((el) => el.textContent),
+  ).toEqual(["—", "9", "3", "2"]);
+  fireEvent.change(screen.getByPlaceholderText("Find a placement"), {
+    target: { value: "forum" },
+  });
+  expect(within(table).queryByText("Article")).toBeNull();
+  expect(within(table).getAllByRole("row")).toHaveLength(3);
+  const createUrl = URL.createObjectURL;
+  const revokeUrl = URL.revokeObjectURL;
+  const exportRequest = jest
+    .spyOn(apiClient, "exportAdminPublications")
+    .mockResolvedValue(new Blob(["server report"]));
+  const reader = new FileReader();
+  const csv = new Promise<string>((resolve) => {
+    reader.onload = () => resolve(String(reader.result));
+  });
+  URL.createObjectURL = (blob) => {
+    reader.readAsText(blob as Blob);
+    return "blob:export";
+  };
+  URL.revokeObjectURL = () => {};
+  try {
+    jest.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
+    expect(await csv).toBe("server report");
+    expect(exportRequest).toHaveBeenCalledWith(publicationQuery, "forum", "en");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    URL.createObjectURL = createUrl;
+    URL.revokeObjectURL = revokeUrl;
+  }
+});
+
+test.each([401, 403])(
+  "server export refusal %i prevents downloading retained rows",
+  async (status) => {
+    jest
+      .spyOn(apiClient, "exportAdminPublications")
+      .mockRejectedValue(new ApiClientError("Refused", undefined, status));
+    const download = jest.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    render(
+      <I18nextProvider i18n={i18n}>
+        <PublicationAnalytics
+          exportQuery={publicationQuery}
+          rows={[
+            {
+              id: "one",
+              language: "en",
+              campaign: "Demo",
+              source: "Forum",
+              publication: "Cached",
+              visits: 2,
+              registered: 2,
+              firstRun: 1,
+              repeatRun: 0,
+            },
+          ]}
+          onCreated={async () => {}}
+        />
+      </I18nextProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not download the report");
+    expect(download).not.toHaveBeenCalled();
+  },
+);
+
+test("an operator creates a Russian publication and can copy its opaque URL after a clipboard refusal", async () => {
+  await i18n.changeLanguage("ru");
+  const input = {
+    campaign: "Демо",
+    source: "Форум",
+    publication: "Статья",
+    language: "ru" as const,
+  };
+  const create = jest
+    .spyOn(apiClient, "createAdminPublication")
+    .mockResolvedValue({ id: "opaque-id", ...input });
+  const refresh = jest.fn(async () => {});
+  render(
+    <I18nextProvider i18n={i18n}>
+      <PublicationAnalytics exportQuery={publicationQuery} rows={[]} onCreated={refresh} />
+    </I18nextProvider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Создать ссылку" }));
+  const form = within(screen.getByRole("dialog"));
+  for (const [label, value] of [
+    ["Кампания", input.campaign],
+    ["Площадка", input.source],
+    ["Публикация", input.publication],
+  ]) {
+    fireEvent.change(form.getByLabelText(label), { target: { value } });
+  }
+  fireEvent.click(form.getByRole("button", { name: "Создать ссылку" }));
+  expect(await form.findByText("Ссылка для публикации создана")).toBeInTheDocument();
+  expect(create).toHaveBeenCalledWith(input);
+  expect(refresh).toHaveBeenCalledTimes(1);
+  fireEvent.click(form.getByRole("button", { name: "Скопировать ссылку" }));
+  expect(await form.findByLabelText("Ссылка для публикации")).toHaveValue(
+    `${window.location.origin}/api/public/publications/opaque-id?lang=ru`,
+  );
+});
 
 beforeEach(async () => {
   (globalThis as typeof globalThis & { React?: typeof React }).React = React;

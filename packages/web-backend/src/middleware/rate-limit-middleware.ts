@@ -41,7 +41,7 @@ function isWhitelisted(req: Request, whitelist: readonly string[]): boolean {
  * Check if request has valid load test header
  * Returns true if header matches LOAD_TEST_SECRET env var
  */
-function hasValidLoadTestHeader(req: Request): boolean {
+function hasValidLoadTestHeader(req: Request, logBypass = true): boolean {
   const secret = getLoadTestSecret();
   if (!secret) return false;
 
@@ -49,7 +49,7 @@ function hasValidLoadTestHeader(req: Request): boolean {
   if (!headerValue || typeof headerValue !== "string") return false;
 
   const isValid = headerValue === secret;
-  if (isValid) {
+  if (isValid && logBypass) {
     logger.debug("Rate limit bypassed via load test header", {
       type: "rate_limit_bypass",
       ip: req.ip,
@@ -117,6 +117,18 @@ export function createRateLimiters({ skipLimits, whitelist }: RateLimiterOptions
       });
       res.status(429).json({ error: "Too many API requests, please try again later" });
     },
+  });
+
+  // Keep anonymous publication requests out of the ordinary API quota and logs.
+  // This transient IP budget contains no publication identifier.
+  const publicationLimiter = rateLimit({
+    windowMs: 60_000,
+    max: 100,
+    skip: (req) =>
+      skipLimits || isWhitelisted(req, whitelist) || hasValidLoadTestHeader(req, false),
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (_req, res) => res.sendStatus(429),
   });
 
   /**
@@ -209,13 +221,14 @@ export function createRateLimiters({ skipLimits, whitelist }: RateLimiterOptions
     },
   });
 
-  return { apiLimiter, authLimiter, artifactViewLimiter, mcpLimiter };
+  return { apiLimiter, publicationLimiter, authLimiter, artifactViewLimiter, mcpLimiter };
 }
 
-export const { apiLimiter, authLimiter, artifactViewLimiter, mcpLimiter } = createRateLimiters({
-  skipLimits: isTestEnvironment() || isRateLimitDisabled(),
-  whitelist: getRateLimitWhitelist(),
-});
+export const { apiLimiter, publicationLimiter, authLimiter, artifactViewLimiter, mcpLimiter } =
+  createRateLimiters({
+    skipLimits: isTestEnvironment() || isRateLimitDisabled(),
+    whitelist: getRateLimitWhitelist(),
+  });
 
 /** File chunks have a separate verified owner budget, independent of ordinary UI traffic. */
 export function createCodespaceFileRateLimiter(

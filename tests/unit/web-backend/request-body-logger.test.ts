@@ -94,11 +94,12 @@ describe("requestBodyLogger middleware", () => {
       );
     });
 
-    it("omits a temporary password from emitted request-body logs", async () => {
+    it("omits passwords and private publication labels from emitted request-body logs", async () => {
       const previousLevel = getLogLevel();
       const consoleOutput = (console as Console & { _stdout: NodeJS.WriteStream })._stdout;
       const writeSpy = jest.spyOn(consoleOutput, "write").mockImplementation(() => true);
       const secret = `temporary-secret-${Date.now()}`;
+      const publication = `unreleased-title-${Date.now()}`;
       const safeMarker = `safe-request-${Date.now()}`;
 
       try {
@@ -107,11 +108,13 @@ describe("requestBodyLogger middleware", () => {
           .post("/api/admin/users/target-id/temporary-password")
           .send({ temporaryPassword: secret });
         await request(app).post("/api/public/other").send({ marker: safeMarker });
+        await request(app).post("/api/admin/analytics/publications/").send({ publication });
         await new Promise<void>((resolve) => setImmediate(resolve));
 
         const output = writeSpy.mock.calls.flat().map(String).join("\n");
         expect(output).toContain(safeMarker);
         expect(output).not.toContain(secret);
+        expect(output).not.toContain(publication);
       } finally {
         setLogLevel(previousLevel);
         writeSpy.mockRestore();

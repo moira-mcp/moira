@@ -68,6 +68,7 @@ import { requestBodyLogger } from "./middleware/request-body-logger.js";
 import { inputContextMiddleware } from "./middleware/input-context-middleware.js";
 import { workflowRoutes } from "./routes/workflows.js";
 import { workflowTokenRoutes } from "./routes/workflow-tokens.js";
+import { publicationConsentRoutes } from "./routes/publication-consent.js";
 import { createExecutionMaterializeRoutes } from "./routes/execution-materialize.js";
 import { createExecutionProgressImageRoutes } from "./routes/execution-progress-image.js";
 import { executionRoutes } from "./routes/executions.js";
@@ -165,6 +166,9 @@ class MoiraApiServer {
   private setupMiddlewareBeforeAuth(): void {
     // Derive req.ip only through the proxies TRUST_PROXY names (the in-container nginx by default)
     applyTrustProxy(this.app);
+
+    // Publication choices need no request tracing, GeoIP or general-purpose body logging.
+    this.app.use("/api/public/publications", publicationConsentRoutes);
 
     // Private broker credentials bypass global request/body logging and error context.
     this.app.use(

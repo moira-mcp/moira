@@ -1,7 +1,11 @@
 import { sql, type SQL } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import type * as schema from "../schema.js";
-import { analyticsBounds } from "../admin-analytics-query.js";
+import {
+  analyticsBounds,
+  analyticsScope,
+  includedAnalyticsUser,
+} from "../admin-analytics-query.js";
 import {
   refusalCount,
   latestRefusalAt,
@@ -16,7 +20,6 @@ import { storedTimestampMs } from "../timestamp-sql.js";
 import { boundedAnalyticsSeries } from "../analytics-series.js";
 import type {
   AnalyticsQuery,
-  AnalyticsScope,
   AnalyticsOverview,
   AnalyticsUsers,
   AnalyticsRegistrations,
@@ -51,30 +54,6 @@ export class AdminAnalyticsRepository {
     private clock: () => number = Date.now,
   ) {}
 
-  private included(query: AnalyticsQuery): SQL {
-    return query.exclusions.mode === "default-admins"
-      ? sql`coalesce(u.isAdmin,0) = 0`
-      : query.exclusions.userIds.length
-        ? sql`u.id NOT IN (${sql.join(
-            query.exclusions.userIds.map((id) => sql`${id}`),
-            sql`,`,
-          )})`
-        : sql`1 = 1`;
-  }
-  private scope(query: AnalyticsQuery, now: number): AnalyticsScope {
-    const effectiveCount = this.db.get<{ count: number }>(
-      sql`SELECT count(*) AS count FROM user u WHERE NOT (${this.included(query)})`,
-    )!.count;
-    return {
-      timeRange: query.range,
-      ...analyticsBounds(query.range, now),
-      asOf: now,
-      exclusions:
-        query.exclusions.mode === "default-admins"
-          ? { mode: "default-admins", effectiveCount }
-          : { ...query.exclusions, effectiveCount },
-    };
-  }
   private period(query: AnalyticsQuery, now: number): SQL {
     const { startAt, endAt } = analyticsBounds(query.range, now);
     return sql`e.createdAt >= ${startAt} AND e.createdAt < ${endAt}`;
@@ -82,7 +61,7 @@ export class AdminAnalyticsRepository {
 
   overview(query: AnalyticsQuery): AnalyticsOverview {
     const now = this.clock();
-    const scope = this.scope(query, now);
+    const scope = analyticsScope(this.db, query, now);
     const totals = this.db.get<{
       totalExecutions: number;
       activeExecutions: number;
@@ -93,17 +72,17 @@ export class AdminAnalyticsRepository {
       activeUsers: number;
       avgDurationMs: number;
     }>(
-      sql`SELECT count(*) AS totalExecutions, coalesce(sum(${active}),0) AS activeExecutions, coalesce(sum(${genuine}),0) AS completedExecutions, coalesce(sum(${genuine} AND ${refusals}>0),0) AS failedExecutions, coalesce(sum(${stopped}),0) AS stoppedExecutions, coalesce(sum(${successful}),0) AS successfulExecutions, count(DISTINCT e.userId) AS activeUsers, coalesce(round(avg(CASE WHEN ${genuine} AND e.completedAt >= e.createdAt THEN e.completedAt-e.createdAt END)),0) AS avgDurationMs FROM workflowExecution e JOIN user u ON u.id=e.userId WHERE ${this.included(query)} AND ${this.period(query, now)}`,
+      sql`SELECT count(*) AS totalExecutions, coalesce(sum(${active}),0) AS activeExecutions, coalesce(sum(${genuine}),0) AS completedExecutions, coalesce(sum(${genuine} AND ${refusals}>0),0) AS failedExecutions, coalesce(sum(${stopped}),0) AS stoppedExecutions, coalesce(sum(${successful}),0) AS successfulExecutions, count(DISTINCT e.userId) AS activeUsers, coalesce(round(avg(CASE WHEN ${genuine} AND e.completedAt >= e.createdAt THEN e.completedAt-e.createdAt END)),0) AS avgDurationMs FROM workflowExecution e JOIN user u ON u.id=e.userId WHERE ${includedAnalyticsUser(query)} AND ${this.period(query, now)}`,
     )!;
     const totalUsers = this.db.get<{ count: number }>(
-      sql`SELECT count(*) AS count FROM user u WHERE ${this.included(query)}`,
+      sql`SELECT count(*) AS count FROM user u WHERE ${includedAnalyticsUser(query)}`,
     )!.count;
     const totalWorkflows = this.db.get<{ count: number }>(
-      sql`SELECT count(*) AS count FROM workflow w JOIN user u ON u.id=w.userId WHERE coalesce(w.deleted,0)=0 AND ${this.included(query)}`,
+      sql`SELECT count(*) AS count FROM workflow w JOIN user u ON u.id=w.userId WHERE coalesce(w.deleted,0)=0 AND ${includedAnalyticsUser(query)}`,
     )!.count;
     const history = boundedAnalyticsSeries<AnalyticsOverview["overTime"][number]>(
       this.db,
-      sql`SELECT date(e.createdAt/1000,'unixepoch') AS date, count(*) AS count, sum(${genuine}) AS completed, sum(${genuine} AND ${refusals}>0) AS failed, sum(${stopped}) AS stopped FROM workflowExecution e JOIN user u ON u.id=e.userId WHERE ${this.included(query)} AND ${this.period(query, now)} GROUP BY date ORDER BY date`,
+      sql`SELECT date(e.createdAt/1000,'unixepoch') AS date, count(*) AS count, sum(${genuine}) AS completed, sum(${genuine} AND ${refusals}>0) AS failed, sum(${stopped}) AS stopped FROM workflowExecution e JOIN user u ON u.id=e.userId WHERE ${includedAnalyticsUser(query)} AND ${this.period(query, now)} GROUP BY date ORDER BY date`,
     );
     return {
       scope,
@@ -125,7 +104,7 @@ export class AdminAnalyticsRepository {
     condition: SQL,
     order: SQL,
   ): { users: AnalyticsPerson[]; total: number } {
-    const where = sql`${this.included(query)} AND (${condition})`;
+    const where = sql`${includedAnalyticsUser(query)} AND (${condition})`;
     const total = this.db.get<{ count: number }>(
       sql`SELECT count(*) AS count FROM user u WHERE ${where}`,
     )!.count;
@@ -172,13 +151,13 @@ export class AdminAnalyticsRepository {
   }
   users(query: AnalyticsQuery): AnalyticsUsers {
     const now = this.clock();
-    const scope = this.scope(query, now);
+    const scope = analyticsScope(this.db, query, now);
     // The session predicate uses the request clock, not SQLite's wall clock, for deterministic boundaries.
     const recent = sql`(${auditActivity(now)} >= ${scope.startAt}) OR (${sessionActivity(now)} >= ${scope.startAt})`;
     const people = this.people(query, now, recent, sql`lastActivityAt DESC`);
     const overview = this.overviewAt(query, now);
     const topUsers = this.db.all<AnalyticsUsers["topUsers"][number]>(
-      sql`SELECT u.id AS userId,u.email,u.name,u.email AS userEmail,u.name AS userName,count(*) AS executionCount,(SELECT count(*) FROM workflow w WHERE w.userId=u.id AND coalesce(w.deleted,0)=0) AS workflowCount FROM workflowExecution e JOIN user u ON u.id=e.userId WHERE ${this.included(query)} AND ${this.period(query, now)} GROUP BY u.id ORDER BY executionCount DESC,u.id LIMIT 10`,
+      sql`SELECT u.id AS userId,u.email,u.name,u.email AS userEmail,u.name AS userName,count(*) AS executionCount,(SELECT count(*) FROM workflow w WHERE w.userId=u.id AND coalesce(w.deleted,0)=0) AS workflowCount FROM workflowExecution e JOIN user u ON u.id=e.userId WHERE ${includedAnalyticsUser(query)} AND ${this.period(query, now)} GROUP BY u.id ORDER BY executionCount DESC,u.id LIMIT 10`,
     );
     return {
       scope,
@@ -197,22 +176,22 @@ export class AdminAnalyticsRepository {
   ): { totalUsers: number; activeUsers: number } {
     return {
       totalUsers: this.db.get<{ count: number }>(
-        sql`SELECT count(*) AS count FROM user u WHERE ${this.included(query)}`,
+        sql`SELECT count(*) AS count FROM user u WHERE ${includedAnalyticsUser(query)}`,
       )!.count,
       activeUsers: this.db.get<{ count: number }>(
-        sql`SELECT count(DISTINCT e.userId) AS count FROM workflowExecution e JOIN user u ON u.id=e.userId WHERE ${this.included(query)} AND ${this.period(query, now)}`,
+        sql`SELECT count(DISTINCT e.userId) AS count FROM workflowExecution e JOIN user u ON u.id=e.userId WHERE ${includedAnalyticsUser(query)} AND ${this.period(query, now)}`,
       )!.count,
     };
   }
   private registrationCount(query: AnalyticsQuery, now: number): number {
     const { startAt, endAt } = analyticsBounds(query.range, now);
     return this.db.get<{ count: number }>(
-      sql`SELECT count(*) AS count FROM user u WHERE ${this.included(query)} AND ${registrationAt}>=${startAt} AND ${registrationAt}<${endAt}`,
+      sql`SELECT count(*) AS count FROM user u WHERE ${includedAnalyticsUser(query)} AND ${registrationAt}>=${startAt} AND ${registrationAt}<${endAt}`,
     )!.count;
   }
   registrations(query: AnalyticsQuery): AnalyticsRegistrations {
     const now = this.clock();
-    const scope = this.scope(query, now);
+    const scope = analyticsScope(this.db, query, now);
     const result = this.people(
       query,
       now,
@@ -225,8 +204,8 @@ export class AdminAnalyticsRepository {
   /** Registration cohorts share the absolute timestamp/exclusion rules of the dashboard. */
   conversion(query: AnalyticsQuery) {
     const now = this.clock();
-    const scope = this.scope(query, now);
-    const cohort = sql`${this.included(query)} AND ${registrationAt}>=${scope.startAt} AND ${registrationAt}<${scope.endAt}`;
+    const scope = analyticsScope(this.db, query, now);
+    const cohort = sql`${includedAnalyticsUser(query)} AND ${registrationAt}>=${scope.startAt} AND ${registrationAt}<${scope.endAt}`;
     const [counts] = this.db.all<{
       registered: number;
       verified: number;
@@ -255,8 +234,8 @@ export class AdminAnalyticsRepository {
 
   engagement(query: AnalyticsQuery) {
     const now = this.clock();
-    const scope = this.scope(query, now);
-    const where = sql`${this.included(query)} AND ${this.period(query, now)}`;
+    const scope = analyticsScope(this.db, query, now);
+    const where = sql`${includedAnalyticsUser(query)} AND ${this.period(query, now)}`;
     const stats = this.db.get<{ users: number; runs: number }>(
       sql`SELECT count(DISTINCT e.userId) AS users,count(*) AS runs FROM workflowExecution e JOIN user u ON u.id=e.userId WHERE ${where}`,
     )!;
@@ -268,7 +247,7 @@ export class AdminAnalyticsRepository {
       )!.count;
     }
     const first = this.db.get<{ value: number | null }>(
-      sql`SELECT avg((first.firstAt-${registrationAt})/86400000.0) AS value FROM user u JOIN (SELECT userId,min(createdAt) AS firstAt FROM workflowExecution WHERE createdAt<${now} GROUP BY userId) first ON first.userId=u.id WHERE ${this.included(query)} AND ${registrationAt}>=${scope.startAt} AND ${registrationAt}<${scope.endAt} AND first.firstAt>=${registrationAt}`,
+      sql`SELECT avg((first.firstAt-${registrationAt})/86400000.0) AS value FROM user u JOIN (SELECT userId,min(createdAt) AS firstAt FROM workflowExecution WHERE createdAt<${now} GROUP BY userId) first ON first.userId=u.id WHERE ${includedAnalyticsUser(query)} AND ${registrationAt}>=${scope.startAt} AND ${registrationAt}<${scope.endAt} AND first.firstAt>=${registrationAt}`,
     )!.value;
     const trend = boundedAnalyticsSeries<{ date: string; value: number }>(
       this.db,
@@ -411,7 +390,7 @@ export class AdminAnalyticsRepository {
   topWorkflows(query: AnalyticsQuery): AnalyticsTopWorkflows {
     const now = this.clock();
     const total = this.db.get<{ count: number }>(
-      sql`SELECT count(DISTINCT e.workflowId) AS count FROM workflowExecution e JOIN user u ON u.id=e.userId WHERE ${this.included(query)} AND ${this.period(query, now)}`,
+      sql`SELECT count(DISTINCT e.workflowId) AS count FROM workflowExecution e JOIN user u ON u.id=e.userId WHERE ${includedAnalyticsUser(query)} AND ${this.period(query, now)}`,
     )!.count;
     const rows = this.db.all<{
       workflowId: string;
@@ -425,7 +404,7 @@ export class AdminAnalyticsRepository {
       participantCount: number;
       lastRunAt: number | null;
     }>(
-      sql`SELECT e.workflowId,coalesce(w.name,e.workflowId) AS workflowName,count(*) AS executionCount,sum(${genuine}) AS completedCount,sum(${genuine} AND ${refusals}>0) AS failedCount,sum(${successful}) AS successfulCount,sum(${stopped}) AS stoppedCount,count(DISTINCT e.userId) AS participantCount,max(e.createdAt) AS lastRunAt,coalesce(round(avg(CASE WHEN ${genuine} AND e.completedAt>=e.createdAt THEN e.completedAt-e.createdAt END)),0) AS avgDurationMs FROM workflowExecution e JOIN user u ON u.id=e.userId LEFT JOIN workflow w ON w.id=e.workflowId WHERE ${this.included(query)} AND ${this.period(query, now)} GROUP BY e.workflowId ORDER BY executionCount DESC,e.workflowId LIMIT ${Math.min(query.limit, 20)} OFFSET ${query.offset}`,
+      sql`SELECT e.workflowId,coalesce(w.name,e.workflowId) AS workflowName,count(*) AS executionCount,sum(${genuine}) AS completedCount,sum(${genuine} AND ${refusals}>0) AS failedCount,sum(${successful}) AS successfulCount,sum(${stopped}) AS stoppedCount,count(DISTINCT e.userId) AS participantCount,max(e.createdAt) AS lastRunAt,coalesce(round(avg(CASE WHEN ${genuine} AND e.completedAt>=e.createdAt THEN e.completedAt-e.createdAt END)),0) AS avgDurationMs FROM workflowExecution e JOIN user u ON u.id=e.userId LEFT JOIN workflow w ON w.id=e.workflowId WHERE ${includedAnalyticsUser(query)} AND ${this.period(query, now)} GROUP BY e.workflowId ORDER BY executionCount DESC,e.workflowId LIMIT ${Math.min(query.limit, 20)} OFFSET ${query.offset}`,
     );
     const owners = new Map<string, AnalyticsTopWorkflows["workflows"][number]["topUsers"]>();
     if (rows.length) {
@@ -436,7 +415,7 @@ export class AdminAnalyticsRepository {
         email: string;
         executionCount: number;
       }>(
-        sql`SELECT workflowId,userId,name,email,executionCount FROM (SELECT e.workflowId,u.id AS userId,u.name,u.email,count(*) AS executionCount,row_number() OVER (PARTITION BY e.workflowId ORDER BY count(*) DESC,u.id) AS rank FROM workflowExecution e JOIN user u ON u.id=e.userId WHERE ${this.included(query)} AND ${this.period(query, now)} AND e.workflowId IN (${sql.join(
+        sql`SELECT workflowId,userId,name,email,executionCount FROM (SELECT e.workflowId,u.id AS userId,u.name,u.email,count(*) AS executionCount,row_number() OVER (PARTITION BY e.workflowId ORDER BY count(*) DESC,u.id) AS rank FROM workflowExecution e JOIN user u ON u.id=e.userId WHERE ${includedAnalyticsUser(query)} AND ${this.period(query, now)} AND e.workflowId IN (${sql.join(
           rows.map((row) => sql`${row.workflowId}`),
           sql`,`,
         )}) GROUP BY e.workflowId,u.id) WHERE rank<=3`,
@@ -445,7 +424,7 @@ export class AdminAnalyticsRepository {
         owners.set(workflowId, [...(owners.get(workflowId) ?? []), person]);
     }
     return {
-      scope: this.scope(query, now),
+      scope: analyticsScope(this.db, query, now),
       timeRange: query.range,
       total,
       workflows: rows.map(({ successfulCount, ...row }) => ({
@@ -459,13 +438,13 @@ export class AdminAnalyticsRepository {
   }
   attention(query: AnalyticsQuery, actorId = ""): AnalyticsAttention {
     const now = this.clock();
-    const scope = this.scope(query, now);
+    const scope = analyticsScope(this.db, query, now);
     const lockTime = sql`(SELECT max(l.createdAt) FROM executionLock l WHERE l.executionId=e.executionId AND l.status='active')`;
     const inPeriod = (value: SQL) => sql`${value} >= ${scope.startAt} AND ${value} < ${now}`;
     const locked = sql`(${active}) AND ${inPeriod(lockTime)}`;
     const refusal = sql`${inPeriod(lastError)}`;
     const stale = sql`(${active}) AND e.waitingForInputNodeId IS NOT NULL AND ${lastStep}<${now - 3600000} AND ${inPeriod(lastStep)}`;
-    const where = sql`${this.included(query)} AND ((${locked}) OR (${refusal}) OR (${stale}))`;
+    const where = sql`${includedAnalyticsUser(query)} AND ((${locked}) OR (${refusal}) OR (${stale}))`;
     const total = this.db.get<{ count: number }>(
       sql`SELECT count(*) AS count FROM workflowExecution e JOIN user u ON u.id=e.userId WHERE ${where}`,
     )!.count;

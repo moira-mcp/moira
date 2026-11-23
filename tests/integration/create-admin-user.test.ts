@@ -7,6 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { verifyPassword } from "better-auth/crypto";
+import { migrationsBefore } from "../helpers/migrations-before.js";
 
 const MIGRATIONS_PATH = path.join(process.cwd(), "packages/web-backend/drizzle");
 const TSX_PATH = path.join(process.cwd(), "node_modules/.bin/tsx");
@@ -19,8 +20,11 @@ describe("create-admin-user recovery script", () => {
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "moira-admin-recovery-"));
     dbPath = path.join(tempDir, "moira.db");
+  });
+
+  function initializeAdminDatabase(migrationsFolder = MIGRATIONS_PATH) {
     const sqlite = new Database(dbPath);
-    migrate(drizzle(sqlite), { migrationsFolder: MIGRATIONS_PATH });
+    migrate(drizzle(sqlite), { migrationsFolder });
     const now = new Date().toISOString();
     sqlite
       .prepare(
@@ -30,17 +34,16 @@ describe("create-admin-user recovery script", () => {
       )
       .run("system-admin", "admin@moira.local", "Bootstrap Admin", now, now, now);
     sqlite.close();
-  });
+  }
 
   afterEach(() => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
   it("upgrades a legacy password binding while preserving other providers and aborts ambiguous upgrades", () => {
+    initializeAdminDatabase(migrationsBefore(tempDir, "0069_password_credential_identity"));
     const sqlite = new Database(dbPath);
     try {
-      // Replay this migration against the schema and rows an older installation supplied.
-      sqlite.prepare("DELETE FROM __drizzle_migrations WHERE created_at = ?").run(1795305600000);
       const insert = sqlite.prepare(
         `INSERT INTO account (id, userId, accountId, providerId, password, createdAt, updatedAt)
          VALUES (?, 'system-admin', ?, ?, ?, 'created', 'updated')`,
@@ -64,6 +67,7 @@ describe("create-admin-user recovery script", () => {
   });
 
   it("refuses recovery without an operator-supplied password", () => {
+    initializeAdminDatabase();
     const { ADMIN_PASSWORD: _removedPassword, ...environmentWithoutPassword } = process.env;
     let failure:
       | (Error & { status?: number | null; stderr?: string | Buffer; stdout?: string | Buffer })
@@ -101,6 +105,7 @@ describe("create-admin-user recovery script", () => {
   });
 
   it("creates and recovers an approved admin with a Better Auth credential without logging it", async () => {
+    initializeAdminDatabase();
     const runRecovery = (password: string) =>
       execFileSync(TSX_PATH, [SCRIPT_PATH], {
         cwd: process.cwd(),

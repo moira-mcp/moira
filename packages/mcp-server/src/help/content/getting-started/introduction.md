@@ -54,6 +54,20 @@ or **Today** (UTC midnight); choices last on this page.
 **Excluded users** defaults to admins: search name/email or **Include everyone**. Choices stay per
 account/browser, without sync. Refresh retains labelled scope; errors/retry stay local.
 
+In **Publication analytics**, select **Create link** for each placement. Enter its campaign,
+source and publication label, choose the language for the consent page and copy the link.
+Visitors can continue without attribution. Accepting counts a visit and sets a first-party
+cookie for seven days. The last accepted link in the same browser supplies the source for a
+new account. Declining clears the pending source. Signing in to an existing account leaves its
+source unchanged.
+
+For the selected period, the card counts consent events and people who registered, including
+how many have started at least one or at least two workflows by the time of the report.
+Account exclusions apply to the people columns. Registrations without a recorded source appear
+in a separate row. Search for a placement and choose **Export CSV** to download the filtered
+figures with stable link IDs. The server checks administrator access again when exporting.
+Anyone opening a publication link sees only the consent page.
+
 Activity is a recorded action or observed provider renewal of an unexpired session, not online
 status. No renewal is inferred from signup/old stamps. Last step is an accepted step; missing times
 are unknown.

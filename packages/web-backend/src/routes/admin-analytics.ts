@@ -2,12 +2,14 @@
  * Administrator analytics: bounded SQL projections with common periods and exclusions.
  */
 import { Router, Request, Response } from "express";
+import { z } from "zod";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
 import {
   auditLog,
   getDatabase,
   workflowExecution,
   AdminAnalyticsRepository,
+  PublicationRepository,
   parseAnalyticsQuery,
   analyticsBounds,
 } from "@mcp-moira/shared";
@@ -15,9 +17,67 @@ import { DatabaseRepository } from "@mcp-moira/workflow-engine";
 import { and, gte, lt, count, desc, sql, eq, type SQL, type SQLWrapper } from "drizzle-orm";
 import type { AuthenticatedRequest } from "../types/express-types.js";
 import { withExecutionTaskTitles } from "../utils/execution-task-titles.js";
+import { publicationCsv } from "../utils/publication-export.js";
 const router = Router();
 const repository = new DatabaseRepository();
 const analytics = () => new AdminAnalyticsRepository(getDatabase());
+const publicationLabel = z
+  .string()
+  .trim()
+  .min(1)
+  .max(120)
+  .regex(/^[^\p{Cc}]+$/u);
+const publicationInput = z
+  .object({
+    campaign: publicationLabel,
+    source: publicationLabel,
+    publication: publicationLabel,
+    language: z.enum(["en", "ru"]),
+  })
+  .strict();
+
+const exportInput = z
+  .object({ search: z.string().max(1024), language: z.enum(["en", "ru"]) })
+  .strict();
+
+router.post("/publications/export", (req, res) => {
+  const input = exportInput.safeParse(req.body);
+  if (!req.is("application/json") || !input.success) {
+    throw createApiError.validationFailed("Invalid publication export options");
+  }
+  const report = new PublicationRepository(getDatabase()).report(parseAnalyticsQuery(req.query));
+  res
+    .set("Cache-Control", "private, no-store")
+    .attachment("publication-analytics.csv")
+    .type("text/csv")
+    .send(publicationCsv(report.rows, input.data.search, input.data.language));
+});
+
+router.get("/publications", (req, res) => {
+  const data = new PublicationRepository(getDatabase()).report(parseAnalyticsQuery(req.query));
+  res.set("Cache-Control", "private, no-store").json({
+    success: true,
+    data,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+router.post(
+  "/publications",
+  asyncHandler(async (req, res) => {
+    if (!req.is("application/json")) {
+      throw createApiError.validationFailed("Publication settings require JSON");
+    }
+    const input = publicationInput.safeParse(req.body);
+    if (!input.success) throw createApiError.validationFailed("Invalid publication settings");
+    const data = await new PublicationRepository(getDatabase()).create(input.data);
+    res.set("Cache-Control", "private, no-store").status(201).json({
+      success: true,
+      data,
+      timestamp: new Date().toISOString(),
+    });
+  }),
+);
 function exclusions(req: Request, column: SQLWrapper): SQL {
   const query = parseAnalyticsQuery(req.query);
   if (query.exclusions.mode === "default-admins")

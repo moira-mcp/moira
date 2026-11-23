@@ -2,6 +2,7 @@ import { test, expect } from "./fixtures.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
 import { TEST_USERS } from "./fixtures/test-constants.js";
+import { randomUUID } from "node:crypto";
 
 const BASE_URL = getTestBaseUrl();
 
@@ -21,6 +22,55 @@ test.describe("Admin analytics", () => {
     await page.goto(`${BASE_URL}/admin/analytics`);
     await page.waitForURL(`${BASE_URL}/admin`, { timeout: 10000 });
     expect(page.url()).not.toContain("/analytics");
+  });
+
+  test("publication links survive reload and can be copied from both language layouts", async ({
+    page,
+    context,
+  }, testInfo) => {
+    const campaign = `Demo ${randomUUID().slice(0, 8)}`;
+    const card = page.getByTestId("admin-card-publications");
+    await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+      origin: new URL(BASE_URL).origin,
+    });
+    const links: string[] = [];
+    for (const [source, publication] of [
+      ["Newsletter", "November digest"],
+      ["Forum", "Release notes"],
+    ]) {
+      await card.getByRole("button", { name: "Create link" }).click();
+      const dialog = page.getByRole("dialog");
+      await dialog.getByLabel("Campaign", { exact: true }).fill(campaign);
+      await dialog.getByLabel("Source", { exact: true }).fill(source);
+      await dialog.getByLabel("Publication", { exact: true }).fill(publication);
+      await dialog.getByRole("button", { name: "Create link" }).click();
+      await dialog.getByRole("button", { name: "Copy link" }).click();
+      await expect(dialog.getByRole("status")).toHaveText("Link copied");
+      const url = new URL(await page.evaluate(() => navigator.clipboard.readText()));
+      expect(url.origin).toBe(new URL(BASE_URL).origin);
+      expect(url.pathname).toMatch(/^\/api\/public\/publications\/[a-zA-Z0-9_-]+$/);
+      expect(url.search).toBe("?lang=en");
+      links.push(url.href);
+      await dialog.getByRole("button", { name: "Close" }).click();
+    }
+    expect(new Set(links).size).toBe(2);
+    await page.reload();
+    await card.getByRole("textbox").fill(campaign);
+    await expect(card.getByRole("row")).toHaveCount(4);
+    await expect(card.getByRole("row").filter({ hasText: "Newsletter" })).toContainText(
+      "November digest",
+    );
+    await card.screenshot({ path: testInfo.outputPath("publication-desktop-en.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => localStorage.setItem("i18nextLng", "ru"));
+    await page.reload();
+    await card.getByRole("textbox").fill(campaign);
+    await expect(card.getByRole("row")).toHaveCount(4);
+    await card.screenshot({ path: testInfo.outputPath("publication-mobile-ru.png") });
+    const forum = card.getByRole("row").filter({ hasText: "Forum" });
+    await forum.getByRole("button", { name: "Скопировать ссылку" }).click();
+    await expect(forum.getByRole("status")).toHaveText("Ссылка скопирована");
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(links[1]);
   });
 
   test("changing one card's period leaves the other periods unchanged", async ({ page }) => {

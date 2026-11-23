@@ -12,6 +12,7 @@ import { useResource } from "@/hooks/useResource";
 import { useFeatures } from "@/hooks/useFeatures";
 import { apiClient } from "@/services/api-client";
 import { AnalyticsCard } from "./AnalyticsCard";
+import { PublicationAnalytics } from "./PublicationAnalytics";
 import { AnalyticsSeriesNotice } from "./AnalyticsSeriesNotice";
 import { CardShell } from "@/components/cards/CardShell";
 import { ExecutionStopProvider } from "@/components/execution/ExecutionStop";
@@ -32,7 +33,12 @@ function useCard<T extends { scope: AnalyticsScope }>(
   const query: AnalyticsQuery = { range, exclusions, limit: 6, offset: 0 };
   const key = accountId ? JSON.stringify({ accountId, ...query }) : null;
   const resource = useResource(key, (request) => read(JSON.parse(request) as AnalyticsQuery));
-  return { range, setRange, resource };
+  return {
+    range,
+    setRange,
+    resource,
+    acceptedQuery: resource.dataKey === key && key ? query : null,
+  };
 }
 
 export function AdminOverview({
@@ -57,6 +63,9 @@ export function AdminOverview({
   );
   const registrations = useCard(accountId, exclusions, "week", (query) =>
     apiClient.getAdminAnalyticsRegistrations(query),
+  );
+  const publications = useCard(accountId, exclusions, "month", (query) =>
+    apiClient.getAdminPublications(query),
   );
   const attention = useCard(accountId, exclusions, "week", (query) =>
     apiClient.getAdminAnalyticsAttention(query),
@@ -278,6 +287,23 @@ export function AdminOverview({
             )}
           </AnalyticsCard>
         </div>
+        <AnalyticsCard
+          id="publications"
+          title={t("adminOverview.publications.title")}
+          range={publications.range}
+          ranges={analysisRanges}
+          onRangeChange={publications.setRange}
+          resource={publications.resource}
+          hint={t("adminOverview.publications.hint")}
+        >
+          {(data) => (
+            <PublicationAnalytics
+              rows={data.rows}
+              exportQuery={publications.acceptedQuery}
+              onCreated={publications.resource.refresh}
+            />
+          )}
+        </AnalyticsCard>
         <AnalyticsCard
           id="overview"
           title={t("adminOverview.analytics")}

@@ -3,6 +3,7 @@
  */
 
 import { betterAuth } from "better-auth";
+import { parseCookies } from "better-auth/cookies";
 import type { BetterAuthOptions, BetterAuthPlugin } from "better-auth";
 import { createAuthMiddleware, APIError, getSessionFromCtx, isAPIError } from "better-auth/api";
 import { oauthProvider } from "@better-auth/oauth-provider";
@@ -19,6 +20,7 @@ import { withSqliteWrite } from "../database/sqlite-write.js";
 import { getAuthKysely } from "./sqlite-dialect.js";
 import { getEmailDeliveryStatus, sendEmail } from "../email/index.js";
 import { AuditRepository } from "../database/repositories/audit-repository.js";
+import { PublicationRepository } from "../database/repositories/publication-repository.js";
 import { logAuditEventDirect } from "../logging/audit-logger.js";
 import type { DBAdapter } from "@better-auth/core/db/adapter";
 import { AuditAction } from "../audit/actions.js";
@@ -49,6 +51,10 @@ import { generateHandleFromEmail, generateRandomHandleSuffix } from "../validati
 import { storedTimestampMs } from "../database/timestamp-sql.js";
 
 const logger = createLogger({ component: "BetterAuth" });
+
+export function publicationCookieName(): string {
+  return isProduction() ? "__Host-moira-publication" : "moira-publication";
+}
 
 export interface SuccessfulRegistration {
   id: string;
@@ -1248,11 +1254,23 @@ export function createAuth(logger: ServiceLogger, registration: AuthRegistration
       const capture = registrationCapture.getStore()!;
       try {
         const response = await originalHandler(await normalizeOAuthRequest(request));
-        if (registration.onSuccessfulRegistration) {
+        if (capture.candidateId) {
           try {
             const account = await confirmedRegistration(capture, response, request);
             capture.consumed = true;
-            if (account) {
+            if (account && getFeatureResolver().isEnabled("adminAnalytics")) {
+              const token = parseCookies(request.headers.get("cookie") ?? "").get(
+                publicationCookieName(),
+              );
+              if (token && /^[A-Za-z0-9_-]{43}$/.test(token)) {
+                try {
+                  await new PublicationRepository(getDatabase()).attribute(token, account.id);
+                } catch {
+                  logger.warn("Publication attribution could not be saved");
+                }
+              }
+            }
+            if (account && registration.onSuccessfulRegistration) {
               try {
                 void Promise.resolve(registration.onSuccessfulRegistration(account)).catch(() => {
                   logger.warn("Registration notification callback failed", { userId: account.id });
@@ -1262,7 +1280,7 @@ export function createAuth(logger: ServiceLogger, registration: AuthRegistration
               }
             }
           } catch {
-            logger.warn("Registration notification eligibility could not be confirmed");
+            logger.warn("Registration result could not be confirmed");
           }
         }
         return response;

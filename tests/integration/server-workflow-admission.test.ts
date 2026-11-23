@@ -4,10 +4,17 @@ import request from "supertest";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { eq, inArray } from "drizzle-orm";
-import { getDatabase, resetFeatureResolver, WorkflowRepository } from "@mcp-moira/shared";
+import {
+  getBaseUrl,
+  getDatabase,
+  PublicationRepository,
+  resetFeatureResolver,
+  WorkflowRepository,
+} from "@mcp-moira/shared";
 import * as schema from "../../packages/shared/src/database/schema.js";
 import { auth } from "../../packages/web-backend/src/auth.js";
 import * as rateLimits from "../../packages/web-backend/src/middleware/rate-limit-middleware.js";
+import { logger } from "../../packages/web-backend/src/utils/logger.js";
 
 // Use the production limiter with its usual test bypass explicitly disabled.
 const limiters = rateLimits.createRateLimiters({ skipLimits: false, whitelist: [] });
@@ -19,6 +26,58 @@ const { MoiraApiServer } = await import("../../packages/web-backend/src/server.j
 const { userProfileRoutes } = await import("../../packages/web-backend/src/routes/user-profile.js");
 const { default: userOAuthSessionsRoutes } =
   await import("../../packages/web-backend/src/routes/user-oauth-sessions.js");
+
+test("publication failures and throttling stay inside the anonymous route's privacy boundary", async () => {
+  const app = (new MoiraApiServer() as unknown as { app: Application }).app;
+  const path = `/api/public/publications/${randomUUID()}`;
+  const previousMode = process.env.DEPLOYMENT_MODE;
+  const warn = jest.spyOn(logger, "warn");
+  const error = jest.spyOn(logger, "error");
+  const accept = jest
+    .spyOn(PublicationRepository.prototype, "accept")
+    .mockRejectedValueOnce(new Error("private database diagnostic"));
+  try {
+    process.env.DEPLOYMENT_MODE = "saas";
+    resetFeatureResolver();
+    await request(app)
+      .post(path)
+      .set("Origin", getBaseUrl())
+      .type("form")
+      .send({ choice: "x".repeat(1100) })
+      .expect(413, "Payload Too Large")
+      .expect("Cache-Control", "no-store");
+    await request(app)
+      .get("/api/public/publications/%zz")
+      .expect(400, "Bad Request")
+      .expect("Referrer-Policy", "no-referrer");
+    await request(app)
+      .post(path)
+      .set("Origin", getBaseUrl())
+      .type("form")
+      .send({ choice: "accept" })
+      .expect(500, "Internal Server Error")
+      .expect("Referrer-Policy", "no-referrer");
+    const first = await request(app).get(path).expect(200);
+    const remaining = Number(first.headers["ratelimit-remaining"]);
+    expect(remaining).toBeGreaterThan(0);
+    for (let i = 0; i < remaining; i++) await request(app).get(path).expect(200);
+    await request(app)
+      .get(path)
+      .expect(429)
+      .expect("Referrer-Policy", "no-referrer")
+      .expect("Cache-Control", "no-store");
+    expect(warn.mock.calls).toEqual([["Publication consent request failed"]]);
+    expect(error.mock.calls).toEqual([]);
+    await request(app).get("/api/features").expect(200);
+  } finally {
+    accept.mockRestore();
+    warn.mockRestore();
+    error.mockRestore();
+    if (previousMode === undefined) delete process.env.DEPLOYMENT_MODE;
+    else process.env.DEPLOYMENT_MODE = previousMode;
+    resetFeatureResolver();
+  }
+});
 
 test("API discovery reports the release and reaches the mounted configuration route", async () => {
   const app = (new MoiraApiServer() as unknown as { app: Application }).app;

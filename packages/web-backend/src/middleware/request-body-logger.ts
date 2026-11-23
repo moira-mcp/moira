@@ -22,6 +22,7 @@ const LOGGABLE_METHODS = ["POST", "PUT", "PATCH"];
  * - /api/public/workflows - workflow tokens
  */
 const SENSITIVE_PATTERNS = [
+  /^\/api\/admin\/analytics\/publications(?:\/export)?\/*$/i,
   /^\/api\/auth\/.*/,
   /^\/api\/user\/change-password(?:-forced)?$/,
   /^\/api\/user\/set-password$/,

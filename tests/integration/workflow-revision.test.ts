@@ -15,28 +15,11 @@ import path from "path";
 import { WorkflowRepository } from "@mcp-moira/shared";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 import * as schema from "../../packages/shared/src/database/schema.js";
+import { migrationsBefore } from "../helpers/migrations-before.js";
 
 const MIGRATIONS = path.resolve(process.cwd(), "packages/web-backend/drizzle");
 const REVISION_TAG = "0026_workflow_revision";
 const OWNER = "revision-owner";
-
-/**
- * A copy of the migration folder whose journal stops just before `tag`, so migrating against it
- * produces the database as it stood before that migration regardless of what was added after it.
- */
-function migrationsBefore(directory: string, tag: string): string {
-  const target = path.join(directory, `before-${tag}`);
-  fs.cpSync(MIGRATIONS, target, { recursive: true });
-  const journalPath = path.join(target, "meta/_journal.json");
-  const journal = JSON.parse(fs.readFileSync(journalPath, "utf8")) as {
-    entries: Array<{ tag: string }>;
-  };
-  const index = journal.entries.findIndex((entry) => entry.tag === tag);
-  if (index < 1) throw new Error(`${tag} is absent from the migration journal`);
-  journal.entries = journal.entries.slice(0, index);
-  fs.writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
-  return target;
-}
 
 function graph(name: string, directive = "Do the work"): WorkflowGraph {
   return {

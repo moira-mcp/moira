@@ -6,6 +6,8 @@ import path from "node:path";
 import {
   AdminAnalyticsRepository,
   ExecutionAttemptRepository,
+  PublicationRepository,
+  PUBLICATION_VISIT_TTL_MS,
   UserRepository,
   parseAnalyticsQuery,
 } from "@mcp-moira/shared";
@@ -115,6 +117,99 @@ describe("Bounded administrative analytics on actual migrated SQLite", () => {
       limit,
       offset,
     });
+  test("publication reports separate consent events from registration cohorts and count people reaching each run stage", async () => {
+    let now = NOW - HOUR;
+    const publications = new PublicationRepository(db, () => now);
+    const first = await publications.create({
+      campaign: "spring",
+      source: "forum",
+      publication: "intro",
+      language: "en",
+    });
+    const second = await publications.create({
+      campaign: "spring",
+      source: "blog",
+      publication: "intro",
+      language: "ru",
+    });
+    const empty = await publications.create({
+      campaign: "spring",
+      source: "video",
+      publication: "demo",
+      language: "ru",
+    });
+    expect(await publications.accept("missing")).toBeNull();
+    const a = (await publications.accept(first.id))!;
+    const b = (await publications.accept(second.id))!;
+    const adminVisit = (await publications.accept(second.id))!;
+    const afterRegistration = (await publications.accept(first.id))!;
+    // "inactive" registered in this month, "old" outside it, and the administrator is excluded by default.
+    await publications.attribute(b, "inactive");
+    await publications.attribute(afterRegistration, "inactive");
+    await publications.attribute(b, "expired");
+    await publications.attribute(a, "old");
+    await publications.attribute(adminVisit, "admin");
+    run("one", { userId: "inactive", createdAt: NOW - 300 });
+    run("two", { userId: "inactive", createdAt: NOW - 200 });
+    run("three", { userId: "inactive", createdAt: NOW - 100 });
+    run("out-of-period", { userId: "old", createdAt: NOW + 100 });
+    run("organic", { userId: "blocked", createdAt: NOW - HOUR });
+    now = NOW;
+    const rows = publications.report(query()).rows;
+    expect(rows).toEqual([
+      { ...second, visits: 2, registered: 1, firstRun: 1, repeatRun: 1 },
+      { ...first, visits: 2, registered: 0, firstRun: 0, repeatRun: 0 },
+      { ...empty, visits: 0, registered: 0, firstRun: 0, repeatRun: 0 },
+      {
+        id: null,
+        campaign: "",
+        source: "",
+        publication: "",
+        language: null,
+        visits: 0,
+        registered: 0,
+        firstRun: 0,
+        repeatRun: 0,
+      },
+    ]);
+    const all = publications.report(query("all", ""));
+    expect(all.rows[0]).toMatchObject({ registered: 2, firstRun: 1, repeatRun: 1 });
+    expect(all.rows[1]).toMatchObject({ registered: 1, firstRun: 0 });
+    expect(all.rows[3]).toMatchObject({ registered: 3, firstRun: 1, repeatRun: 0 });
+    expect(publications.report(query("day", "inactive")).rows[0]).toMatchObject({
+      visits: 2,
+      registered: 0,
+    });
+    sqlite.prepare("DELETE FROM workflowExecution WHERE userId='inactive'").run();
+    sqlite.prepare("DELETE FROM user WHERE id='inactive'").run();
+    expect(publications.report(query()).rows[0]).toMatchObject({ visits: 2, registered: 0 });
+  });
+  test("expiry at seven days and one-time redemption preserve historical visits without storing reusable tokens", async () => {
+    let now = NOW - PUBLICATION_VISIT_TTL_MS;
+    const publications = new PublicationRepository(db, () => now);
+    const placement = await publications.create({
+      campaign: "winter",
+      source: "forum",
+      publication: "tutorial",
+      language: "en",
+    });
+    const expired = (await publications.accept(placement.id))!;
+    expect(sqlite.prepare("SELECT tokenDigest FROM publicationVisit").get()).toEqual({
+      tokenDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    now = NOW;
+    await publications.attribute(expired, "inactive");
+    const live = (await publications.accept(placement.id))!;
+    await publications.attribute(live, "old");
+    await publications.attribute(live, "inactive");
+    now++;
+    expect(publications.report(query("all")).rows[0]).toMatchObject({ visits: 2, registered: 1 });
+    expect(publications.report(query("day")).rows[0]).toMatchObject({ visits: 1, registered: 0 });
+    expect(sqlite.prepare("SELECT tokenDigest FROM publicationVisit").all()).toEqual([
+      { tokenDigest: null },
+      { tokenDigest: null },
+    ]);
+  });
   test("counts private ownership and gives two completed runs with one refusal exactly 50 percent success", () => {
     run("success", { state: "completed", errors: '[{"errorType":"degradation"}]' });
     run("failure", { state: "completed", errors: '[{"message":"legacy refusal"}]' });
