@@ -568,6 +568,66 @@ test("publication previews reveal no labels and only voluntary same-origin choic
   expect(unknownCookie.split(";")[0]).toMatch(/moira-publication=[A-Za-z0-9_-]{43}$/);
 });
 
+test("an integrated landing receives an uncounted placement and posts its cookie choice in place", async () => {
+  const link = await newPublication();
+  const env = jest.replaceProperty(process, "env", {
+    ...process.env,
+    APP_BASE_PATH: "/app",
+    MOIRA_LANDING_PUBLICATION_CONSENT: "true",
+  });
+  try {
+    const visits = () =>
+      getDatabase()
+        .select()
+        .from(publicationVisit)
+        .where(eq(publicationVisit.publicationId, link.id));
+    for (const [suffix, landing] of [
+      ["", "/"],
+      ["?lang=ru", "/ru/"],
+    ]) {
+      const redirect = await request(consent)
+        .get(link.path + suffix)
+        .expect(303)
+        .expect("Location", `${landing}#publication=${link.id}`);
+      expect(redirect.headers["set-cookie"]).toBeUndefined();
+    }
+    const submit = (choice: string) =>
+      request(consent)
+        .post(link.path)
+        .set("Origin", getBaseUrl())
+        .set("Accept", "application/json")
+        .type("form")
+        .send({ choice });
+    await submit("decline").expect(204);
+    expect(await visits()).toHaveLength(0);
+    const accepted = await submit("accept").expect(204);
+    expect(accepted.headers["set-cookie"][0]).toMatch(/Max-Age=604800;/);
+    expect(await visits()).toHaveLength(1);
+    const clear = "/api/public/publications/consent/clear";
+    const refused = await request(consent)
+      .post(clear)
+      .set("Origin", "https://other.example")
+      .expect(403);
+    expect(refused.headers["set-cookie"]).toBeUndefined();
+    const revoked = await request(consent).post(clear).set("Origin", getBaseUrl()).expect(204);
+    expect(revoked.headers["set-cookie"][0]).toMatch(
+      /moira-publication=;.*expires=Thu, 01 Jan 1970/i,
+    );
+    expect(await visits()).toHaveLength(1);
+    delete process.env.MOIRA_LANDING_PUBLICATION_CONSENT;
+    await request(consent)
+      .get(link.path)
+      .expect(200, /<form method="post">/);
+    process.env.MOIRA_LANDING_PUBLICATION_CONSENT = "true";
+    process.env.APP_BASE_PATH = "/";
+    await request(consent)
+      .get(link.path)
+      .expect(200, /<form method="post">/);
+  } finally {
+    env.restore();
+  }
+});
+
 test("email and social registration consume the accepted publication while later sign-in cannot reattribute", async () => {
   const before = await newPublication();
   const latest = await newPublication();
