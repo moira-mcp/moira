@@ -1261,14 +1261,18 @@ describe("software-development-flow", () => {
     ]) {
       expect(presentingNode(workflow, id).directive).toContain("standards/review.md");
     }
-    // Exactly one delegated review per plan unit: the per-unit gates judge locally, and only the
-    // completeness review obtains independence.
-    for (const id of ["review-test-adequacy", "review-architecture"]) {
-      const gate = presentingNode(workflow, id);
-      expect(gate.directive).toContain("later completeness review owns independent unit review");
-      expect(gate.completionCondition).not.toContain("Independent");
-      expect(`${gate.directive} ${gate.completionCondition}`).not.toContain("fallback");
-    }
+    const adequacy = presentingNode(workflow, "review-test-adequacy");
+    expect(adequacy.directive).toContain("later completeness review owns independent unit review");
+    expect(adequacy.completionCondition).not.toContain("Independent");
+    expect(`${adequacy.directive} ${adequacy.completionCondition}`).not.toContain("fallback");
+
+    const architecture = presentingNode(workflow, "review-architecture");
+    expect(architecture.directive).toContain("including each repeat after repair");
+    expect(architecture.directive).toContain("a separate context who did not implement or repair");
+    expect(architecture.directive).toContain("keep this step pending and request one");
+    expect(architecture.completionCondition).toContain(
+      "returned an architecture report and verdict for this round",
+    );
     expect(
       (
         workflow.nodes.find((node) => node.id === "review-unit-completeness") as {
