@@ -104,7 +104,7 @@
     "@types/supertest": "^7.2.1",
     "@typescript-eslint/eslint-plugin": "^8.72.2",
     "@typescript-eslint/parser": "^8.72.2",
-    "@uiw/react-json-view": "^2.0.0-alpha.44",
+    "@uiw/react-json-view": "^2.0.0-alpha.46",
     "@xyflow/react": "12.12.1",
     "astro-eslint-parser": "^1.4.0",
     "concurrently": "^8.2.2",
