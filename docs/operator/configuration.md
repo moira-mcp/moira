@@ -13,6 +13,15 @@ On first getter access the config singleton loads `.env.local` when `NODE_ENV=de
 
 `MOIRA_HOST` supplies the public application host; URL helpers derive protocol/base/MCP URLs. Set `STATIC_ARTIFACTS_DOMAIN` for per-artifact origins, DNS and wildcard TLS separately. `APP_BASE_PATH` selects the browser prefix; use generated links instead of hardcoding `/app`. `DB_PATH` defaults to `./data/moira.db`.
 
+Installations serving the web UI under `/app` can set `MOIRA_LANDING_PUBLICATION_CONSENT=true`
+when both localized landing pages implement publication consent. A publication link then opens
+`/` or `/ru/` with the placement ID in the `#publication=` fragment. Reading the landing page
+creates no visit. To record consent or decline, submit an ordinary form-encoded `choice=accept`
+or `choice=decline` to the original same-origin publication endpoint. Send `Accept: application/json`
+for a 204 response in place. Settings can clear pending attribution with a same-origin POST to
+`/api/public/publications/consent/clear`. Without the option, installations with publication
+analytics enabled keep the standalone form.
+
 The image's first-start bootstrap generates missing self-host `BETTER_AUTH_SECRET`, `TELEGRAM_ENCRYPTION_KEY` and `ADMIN_PASSWORD`, persisting them in `<dirname(DB_PATH)>/.secrets.env` with private permissions. The generated administrator password is surfaced once. Preserve that file with the database; restarts reuse it. Supplied real values take precedence, and bootstrap replaces only missing/empty/known build placeholders. SaaS requires operator-supplied secrets instead. See [secrets-bootstrap.ts](../../packages/shared/src/config/secrets-bootstrap.ts) and [init-database.sh](../../scripts/init-database.sh).
 
 Do not regenerate encryption keys as a troubleshooting step. Settings ciphertext and the independent workspace credential vault have separate key lifecycles; see [authentication](../reference/authentication.md#encrypted-settings).

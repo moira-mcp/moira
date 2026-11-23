@@ -1,9 +1,10 @@
 import { randomBytes } from "node:crypto";
-import express, { Router, type ErrorRequestHandler, type Request } from "express";
+import express, { Router, type ErrorRequestHandler, type Request, type Response } from "express";
 import {
   getAppPrefix,
   getDatabase,
   getFeatureResolver,
+  hasPublicationConsentLanding,
   PublicationRepository,
   PUBLICATION_VISIT_TTL_MS,
 } from "@mcp-moira/shared";
@@ -45,6 +46,14 @@ function sameOriginSubmission(req: Request): boolean {
   return req.get("sec-fetch-site") === "same-origin";
 }
 
+function cookieOptions() {
+  return { httpOnly: true, sameSite: "lax" as const, secure: isProduction(), path: "/" };
+}
+
+function clearAttribution(res: Response): void {
+  res.clearCookie(publicationCookieName(), cookieOptions());
+}
+
 export const publicationConsentRoutes = Router();
 publicationConsentRoutes.use((_req, res, next) => {
   res.set({
@@ -64,6 +73,10 @@ publicationConsentRoutes.get("/:id", (req, res) => {
     res.redirect(303, landing(req));
     return;
   }
+  if (hasPublicationConsentLanding()) {
+    res.redirect(303, `${landing(req)}#publication=${encodeURIComponent(req.params.id)}`);
+    return;
+  }
   const locale = lang(req);
   const message = copy[locale];
   res.type("html").send(`<!doctype html><html lang="${locale}"><head><meta charset="utf-8">
@@ -72,6 +85,15 @@ publicationConsentRoutes.get("/:id", (req, res) => {
 <body><main><h1>${message.title}</h1><p>${message.detail}</p><form method="post">
 <button name="choice" value="accept">${message.accept}</button><button name="choice" value="decline">${message.decline}</button>
 </form></main></body></html>`);
+});
+
+publicationConsentRoutes.post("/consent/clear", (req, res) => {
+  if (!sameOriginSubmission(req)) {
+    res.sendStatus(403);
+    return;
+  }
+  clearAttribution(res);
+  res.status(204).end();
 });
 
 publicationConsentRoutes.post(
@@ -87,16 +109,19 @@ publicationConsentRoutes.post(
       res.sendStatus(400);
       return;
     }
-    const cookie = { httpOnly: true, sameSite: "lax" as const, secure: isProduction(), path: "/" };
     if (choice === "decline") {
-      res.clearCookie(publicationCookieName(), cookie);
+      clearAttribution(res);
     } else if (getFeatureResolver().isEnabled("adminAnalytics")) {
       const token = await new PublicationRepository(getDatabase()).accept(req.params.id);
       // An unknown publication is indistinguishable from a valid one to a visitor.
       res.cookie(publicationCookieName(), token ?? randomBytes(32).toString("base64url"), {
-        ...cookie,
+        ...cookieOptions(),
         maxAge: PUBLICATION_VISIT_TTL_MS,
       });
+    }
+    if (req.accepts(["html", "json"]) === "json") {
+      res.status(204).end();
+      return;
     }
     res.redirect(303, landing(req));
   },

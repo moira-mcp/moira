@@ -452,6 +452,12 @@ class ConfigSingleton {
     return raw.replace(/\/+$/, "");
   }
 
+  hasPublicationConsentLanding(): boolean {
+    return (
+      this.getAppPrefix() === "/app" && process.env.MOIRA_LANDING_PUBLICATION_CONSENT === "true"
+    );
+  }
+
   isLogSqlEnabled(): boolean {
     this.ensureInitialized();
     return process.env.LOG_SQL === "true";
@@ -769,6 +775,9 @@ export function getLogLevelEnv(): string {
 }
 export function getAppPrefix(): string {
   return config.getAppPrefix();
+}
+export function hasPublicationConsentLanding(): boolean {
+  return config.hasPublicationConsentLanding();
 }
 export function isLogSqlEnabled(): boolean {
   return config.isLogSqlEnabled();

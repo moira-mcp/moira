@@ -64,6 +64,7 @@ export {
   // Logging
   getLogLevelEnv,
   getAppPrefix,
+  hasPublicationConsentLanding,
   isLogSqlEnabled,
   // Development/Testing
   getNodeEnv,
