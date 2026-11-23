@@ -498,6 +498,13 @@
       "when": 1795305600000,
       "tag": "0069_password_credential_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1795392000000,
+      "tag": "0070_publication_analytics",
+      "breakpoints": true
     }
   ]
 }

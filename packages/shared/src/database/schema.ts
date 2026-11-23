@@ -60,6 +60,44 @@ export const user = sqliteTable(
   }),
 );
 
+export const publicationLink = sqliteTable("publicationLink", {
+  id: text("id").primaryKey(),
+  campaign: text("campaign").notNull(),
+  source: text("source").notNull(),
+  publication: text("publication").notNull(),
+  language: text("language", { enum: ["en", "ru"] }).notNull(),
+});
+
+export const publicationVisit = sqliteTable(
+  "publicationVisit",
+  {
+    id: integer("id").primaryKey(),
+    publicationId: text("publicationId")
+      .notNull()
+      .references(() => publicationLink.id),
+    acceptedAt: integer("acceptedAt").notNull(),
+    tokenDigest: text("tokenDigest"),
+  },
+  (table) => ({
+    token: uniqueIndex("publication_visit_token_idx")
+      .on(table.tokenDigest)
+      .where(sql`${table.tokenDigest} IS NOT NULL`),
+    expiry: index("publication_visit_expiry_idx")
+      .on(table.acceptedAt)
+      .where(sql`${table.tokenDigest} IS NOT NULL`),
+    period: index("publication_visit_period_idx").on(table.publicationId, table.acceptedAt),
+  }),
+);
+
+export const publicationRegistration = sqliteTable("publicationRegistration", {
+  userId: text("userId")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  publicationId: text("publicationId")
+    .notNull()
+    .references(() => publicationLink.id),
+});
+
 export const session = sqliteTable(
   "session",
   {

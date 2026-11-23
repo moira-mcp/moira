@@ -1,5 +1,37 @@
 import { ValidationError } from "../errors/index.js";
-import type { AnalyticsQuery, AnalyticsRange } from "../types/admin-analytics.js";
+import { sql, type SQL } from "drizzle-orm";
+import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import type * as schema from "./schema.js";
+import type { AnalyticsQuery, AnalyticsRange, AnalyticsScope } from "../types/admin-analytics.js";
+
+export function includedAnalyticsUser(query: AnalyticsQuery): SQL {
+  return query.exclusions.mode === "default-admins"
+    ? sql`coalesce(u.isAdmin,0) = 0`
+    : query.exclusions.userIds.length
+      ? sql`u.id NOT IN (${sql.join(
+          query.exclusions.userIds.map((id) => sql`${id}`),
+          sql`,`,
+        )})`
+      : sql`1 = 1`;
+}
+export function analyticsScope(
+  db: BetterSQLite3Database<typeof schema>,
+  query: AnalyticsQuery,
+  now: number,
+): AnalyticsScope {
+  const effectiveCount = db.get<{ count: number }>(
+    sql`SELECT count(*) AS count FROM user u WHERE NOT (${includedAnalyticsUser(query)})`,
+  )!.count;
+  return {
+    timeRange: query.range,
+    ...analyticsBounds(query.range, now),
+    asOf: now,
+    exclusions:
+      query.exclusions.mode === "default-admins"
+        ? { mode: "default-admins", effectiveCount }
+        : { ...query.exclusions, effectiveCount },
+  };
+}
 
 const ranges: readonly AnalyticsRange[] = [
   "15m",

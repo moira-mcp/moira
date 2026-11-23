@@ -9,6 +9,7 @@
 
 import { Request, Response, NextFunction } from "express";
 import { updateContext, sanitizeInput } from "@mcp-moira/shared";
+import { isSensitiveRequestBodyPath } from "./request-body-logger.js";
 
 /**
  * HTTP methods that have request bodies
@@ -34,7 +35,7 @@ const METHODS_WITH_BODY = ["POST", "PUT", "PATCH"];
 export function inputContextMiddleware() {
   return (req: Request, _res: Response, next: NextFunction): void => {
     // Only process requests with bodies
-    if (!METHODS_WITH_BODY.includes(req.method)) {
+    if (!METHODS_WITH_BODY.includes(req.method) || isSensitiveRequestBodyPath(req.path)) {
       return next();
     }
 

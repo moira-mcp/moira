@@ -3,15 +3,33 @@
  * Validates that workflow execution loads per-user telegram settings from repository
  */
 
-import { describe, test, expect, beforeAll } from "@jest/globals";
+import { afterAll, describe, test, expect, beforeAll } from "@jest/globals";
+import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
+import { getDatabase, user } from "@mcp-moira/shared";
 import { DatabaseRepository } from "@mcp-moira/workflow-engine";
 
 describe("Telegram User Settings Integration", () => {
   let repository: DatabaseRepository;
-  const testUserId = "system-admin"; // Use existing admin user from seed
+  const testUserId = randomUUID();
 
-  beforeAll(() => {
+  beforeAll(async () => {
     repository = new DatabaseRepository();
+    const now = new Date().toISOString();
+    await getDatabase()
+      .insert(user)
+      .values({
+        id: testUserId,
+        email: `${testUserId}@example.test`,
+        handle: testUserId,
+        name: "Telegram settings fixture",
+        createdAt: now,
+        updatedAt: now,
+      });
+  });
+
+  afterAll(async () => {
+    await getDatabase().delete(user).where(eq(user.id, testUserId));
   });
 
   test("handler loads telegram settings from repository per-user", async () => {

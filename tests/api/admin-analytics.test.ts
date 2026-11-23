@@ -1113,6 +1113,85 @@ describe("Admin Analytics API", () => {
     });
   });
 
+  describe("publication analytics", () => {
+    const url = `${BASE_URL}/api/admin/analytics/publications`;
+    test("rechecks administrator access when exporting", async () => {
+      for (const [cookie, expected] of [
+        ["", 401],
+        [normalUserCookie, 403],
+      ] as const) {
+        const response = await fetch(url + "/export", {
+          method: "POST",
+          headers: { Cookie: cookie, "Content-Type": "application/json" },
+          body: JSON.stringify({ search: "", language: "en" }),
+        });
+        expect(response.status).toBe(expected);
+        expect(response.headers.get("content-type")).not.toContain("text/csv");
+      }
+    });
+    describeLocalFixtures("filtered CSV", () => {
+      test("exports stable IDs and spreadsheet-safe labels from a freshly authorized query", async () => {
+        const campaign = "Example-" + randomUUID();
+        const headers = { Cookie: adminCookie, "Content-Type": "application/json" };
+        const ids: string[] = [];
+        try {
+          for (const source of ["=1+1", "Newsletter"]) {
+            const response = await fetch(url, {
+              method: "POST",
+              headers,
+              body: JSON.stringify({
+                campaign,
+                source,
+                publication: 'Quote "one"',
+                language: "en",
+              }),
+            });
+            expect(response.status).toBe(201);
+            const created = (await response.json()) as { data: { id: string } };
+            expect(created.data.id).toMatch(/^[\da-f-]{36}$/);
+            ids.push(created.data.id);
+          }
+          const download = await fetch(url + "/export?range=week", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ search: campaign, language: "en" }),
+          });
+          expect(download.status).toBe(200);
+          expect(download.headers.get("cache-control")).toContain("no-store");
+          const csv = await download.text();
+          expect(csv.split("\r\n")).toHaveLength(4);
+          for (const id of ids) expect(csv).toContain(id);
+          expect(csv).toContain(`"'=1+1"`);
+          expect(csv).toContain('"Quote ""one"""');
+        } finally {
+          for (const id of ids) {
+            execSqliteInDocker(`DELETE FROM publicationLink WHERE id='${id}';`);
+          }
+        }
+      });
+    });
+    test.each(["GET", "POST"])("%s protects the publication catalog", async (method) => {
+      expect((await fetch(url, { method })).status).toBe(401);
+      expect((await fetch(url, { method, headers: { Cookie: normalUserCookie } })).status).toBe(
+        403,
+      );
+    });
+
+    test("rejects invalid settings before creating a link", async () => {
+      const result = await fetch(url, {
+        method: "POST",
+        headers: { Cookie: adminCookie, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: " ",
+          campaign: "demo",
+          publication: "example",
+          language: "fr",
+        }),
+      });
+      expect(result.status).toBe(400);
+    });
+  });
+
   describe("GET /api/admin/analytics/conversion-funnel", () => {
     test("returns conversion funnel data for admin", async () => {
       const response = await fetch(`${BASE_URL}/api/admin/analytics/conversion-funnel`, {

@@ -50,6 +50,8 @@ import type {
   CodespaceReadinessView,
   CodespaceProviderBillingView,
   AnalyticsQuery,
+  PublicationInput,
+  PublicationReport,
   AnalyticsOverview,
   AnalyticsUsers,
   AnalyticsRegistrations,
@@ -2802,7 +2804,7 @@ export class MoiraApiClient {
 
   // ==================== Analytics API ====================
 
-  private async readAdminAnalytics<T>(endpoint: string, query: AnalyticsQuery): Promise<T> {
+  private adminAnalyticsUrl(endpoint: string, query: AnalyticsQuery): string {
     const params = new URLSearchParams({
       range: query.range,
       limit: String(query.limit),
@@ -2811,9 +2813,11 @@ export class MoiraApiClient {
     if (query.exclusions.mode === "custom") {
       params.set("excludeUserIds", [...new Set(query.exclusions.userIds)].sort().join(","));
     }
-    const response = await this.client.get<ApiResponse<T>>(
-      `/admin/analytics/${endpoint}?${params}`,
-    );
+    return `/admin/analytics/${endpoint}?${params}`;
+  }
+
+  private async readAdminAnalytics<T>(endpoint: string, query: AnalyticsQuery): Promise<T> {
+    const response = await this.client.get<ApiResponse<T>>(this.adminAnalyticsUrl(endpoint, query));
     return response.data.data!;
   }
 
@@ -2827,6 +2831,41 @@ export class MoiraApiClient {
 
   getAdminAnalyticsRegistrations(query: AnalyticsQuery): Promise<AnalyticsRegistrations> {
     return this.readAdminAnalytics("registrations", query);
+  }
+
+  getAdminPublications(query: AnalyticsQuery): Promise<PublicationReport> {
+    return this.readAdminAnalytics("publications", query);
+  }
+
+  async exportAdminPublications(
+    query: AnalyticsQuery,
+    search: string,
+    language: "en" | "ru",
+  ): Promise<Blob> {
+    const response = await this.client.post<string>(
+      this.adminAnalyticsUrl("publications/export", query),
+      { search, language },
+    );
+    if (
+      typeof response.data !== "string" ||
+      !/^text\/csv(?:;|$)/i.test(String(response.headers["content-type"]))
+    ) {
+      throw new Error("Unexpected publication export format");
+    }
+    // XHR can strip the response's UTF-8 BOM when decoding text.
+    return new Blob(["\uFEFF", response.data.replace(/^\uFEFF/, "")], {
+      type: "text/csv;charset=utf-8",
+    });
+  }
+
+  async createAdminPublication(
+    input: PublicationInput,
+  ): Promise<PublicationInput & { id: string }> {
+    const response = await this.client.post<ApiResponse<PublicationInput & { id: string }>>(
+      "/admin/analytics/publications",
+      input,
+    );
+    return response.data.data!;
   }
 
   getAdminAnalyticsAttention(query: AnalyticsQuery): Promise<AnalyticsAttention> {
