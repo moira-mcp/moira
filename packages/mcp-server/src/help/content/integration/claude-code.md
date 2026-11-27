@@ -25,6 +25,12 @@ List available Moira workflows
 
 You should see your workflows listed.
 
+Open `/mcp` and select Moira to inspect its tools. The catalog includes `workflow`
+for finding workflows and `execution` for running them. If either is missing
+after a server update, reconnect the existing Moira connection to refresh the catalog.
+If you connect through an HTTP proxy, configure it to forward Claude Code's
+`User-Agent` header so Moira can return the compatible input schemas.
+
 ## Using Moira in Claude Code
 
 ### Starting a Workflow

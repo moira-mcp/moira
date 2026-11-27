@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { z, type ZodTypeAny } from "zod";
 import type { McpPromptContext } from "@mcp-moira/shared";
 import { WORKSPACE_TOOL_DEFINITIONS } from "./workspace-tool-contract.js";
@@ -597,13 +598,50 @@ export function getToolJsonSchema(definition: Pick<ToolDefinition, "schema" | "_
       }
     }
   }
-  return "type" in schema ? schema : { ...schema, type: "object" };
+  return "type" in schema ? schema : { ...schema, type: "object" as const };
 }
 
 export type ToolContractSource = Pick<
   ToolDefinition,
   "name" | "descriptions" | "schema" | "responsePolicy" | "examples" | "documentation" | "_meta"
 >;
+
+/** Claude Code accepts grouped tools only when their input has a plain object root. */
+export function getClaudeCodeToolSchema(schema: z.core.JSONSchema.JSONSchema) {
+  const { anyOf, oneOf, ...root } = schema;
+  const branches = anyOf ?? oneOf;
+  if (!branches) return schema;
+
+  const variants = new Map<string, z.core.JSONSchema._JSONSchema[]>();
+  for (const branch of branches) {
+    for (const [field, value] of Object.entries(branch.properties ?? {})) {
+      // The canonical publisher already lifted native files to root.properties.
+      if (root.properties && Object.hasOwn(root.properties, field)) continue;
+      const candidates = variants.get(field) ?? [];
+      if (!candidates.some((candidate) => isDeepStrictEqual(candidate, value))) {
+        candidates.push(value);
+      }
+      variants.set(field, candidates);
+    }
+  }
+  const properties = {
+    ...root.properties,
+    ...Object.fromEntries(
+      Array.from(variants, ([field, values]) => [
+        field,
+        field === "action"
+          ? { type: "string", enum: schemaOperations(schema) }
+          : values.length === 1
+            ? values[0]
+            : { anyOf: values },
+      ]),
+    ),
+  };
+  const required = (branches[0]?.required ?? []).filter((field) =>
+    branches.every((branch) => branch.required?.includes(field)),
+  );
+  return { ...root, type: "object", properties, required, additionalProperties: false };
+}
 
 export interface ToolReferenceEntry {
   name: string;
@@ -618,15 +656,20 @@ export interface ToolReferenceEntry {
 export function getToolContractProjection(
   definitions: readonly ToolContractSource[] = TOOL_DEFINITIONS,
 ): unknown {
-  return definitions.map((definition) => ({
-    name: definition.name,
-    descriptions: definition.descriptions,
-    schema: getToolJsonSchema(definition),
-    responsePolicy: definition.responsePolicy,
-    ...(definition._meta ? { _meta: definition._meta } : {}),
-    examples: definition.examples,
-    documentation: definition.documentation,
-  }));
+  return definitions.map((definition) => {
+    const schema = getToolJsonSchema(definition);
+    const claudeCodeSchema = getClaudeCodeToolSchema(schema);
+    return {
+      name: definition.name,
+      descriptions: definition.descriptions,
+      schema,
+      ...(claudeCodeSchema !== schema ? { claudeCodeSchema } : {}),
+      responsePolicy: definition.responsePolicy,
+      ...(definition._meta ? { _meta: definition._meta } : {}),
+      examples: definition.examples,
+      documentation: definition.documentation,
+    };
+  });
 }
 
 export function computeContractRevision(projection: unknown): string {
@@ -641,8 +684,8 @@ export function computeToolContractRevision(): string {
 
 export const MCP_TOOLS_REVISION = computeToolContractRevision();
 
-export function getToolOperations(definition: AnyToolDefinition): readonly string[] {
-  const schema = getToolJsonSchema(definition) as {
+function schemaOperations(jsonSchema: z.core.JSONSchema.JSONSchema): readonly string[] {
+  const schema = jsonSchema as {
     properties?: { action?: { enum?: string[] } };
     anyOf?: Array<{ properties?: { action?: { const?: string; enum?: string[] } } }>;
     oneOf?: Array<{ properties?: { action?: { const?: string; enum?: string[] } } }>;
@@ -657,6 +700,10 @@ export function getToolOperations(definition: AnyToolDefinition): readonly strin
       }),
     ),
   ];
+}
+
+export function getToolOperations(definition: AnyToolDefinition): readonly string[] {
+  return schemaOperations(getToolJsonSchema(definition));
 }
 
 export function getToolReferenceModel(

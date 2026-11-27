@@ -9,7 +9,12 @@ import { createLogger, isOperationalError, normalizeError } from "@mcp-moira/sha
 import { PUBLIC_TOOL_INPUT_SCHEMAS } from "./public-tool-contract.js";
 import type { McpPromptContext } from "@mcp-moira/shared";
 import { invokeToolDefinition } from "./tool-bindings.js";
-import { TOOL_DEFINITIONS, getToolJsonSchema, resolveToolDescription } from "./tool-definitions.js";
+import {
+  TOOL_DEFINITIONS,
+  getClaudeCodeToolSchema,
+  getToolJsonSchema,
+  resolveToolDescription,
+} from "./tool-definitions.js";
 
 const logger = createLogger({ component: "MCPTools" });
 
@@ -63,15 +68,19 @@ export function registerTools(
     );
   }
 
-  // Publish the same typed registry directly so tools/list, contract revisions, and generated
-  // references use one serialized schema. The SDK validates this public shape on tools/call;
-  // handlers may additionally enforce narrower action-specific invariants.
-  mcpServer.server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: TOOL_DEFINITIONS.map((definition) => ({
-      name: definition.name,
-      description: resolveToolDescription(definition, context),
-      inputSchema: getToolJsonSchema(definition),
-      ...(definition._meta ? { _meta: definition._meta } : {}),
-    })),
-  }));
+  mcpServer.server.setRequestHandler(ListToolsRequestSchema, async (_request, extra) => {
+    const userAgent = extra.requestInfo?.headers["user-agent"];
+    const claudeCode = typeof userAgent === "string" && /^claude-code\//i.test(userAgent);
+    return {
+      tools: TOOL_DEFINITIONS.map((definition) => {
+        const schema = getToolJsonSchema(definition);
+        return {
+          name: definition.name,
+          description: resolveToolDescription(definition, context),
+          inputSchema: claudeCode ? getClaudeCodeToolSchema(schema) : schema,
+          ...(definition._meta ? { _meta: definition._meta } : {}),
+        };
+      }),
+    };
+  });
 }
